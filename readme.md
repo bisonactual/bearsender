@@ -6,6 +6,8 @@ Based on the original flexisender from [Expatria](https://github.com/Expatria-Te
 
 [FlexiSender](https://bisonactual.github.io/Flexisender2/flexisender.html)
 
+[FlexiSender with Flight Recorder](https://bisonactual.github.io/Flexisender2/Flexisender-Flightrecorder.html) (test build with the FLIGHT RECORDER tab)
+
 ![FlexiSender screenshot](screenshot.png)
 
 ---
