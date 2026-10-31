@@ -7,6 +7,7 @@ import { log } from './console';
 import { sendCmd } from './connection';
 import { buildToolpathMesh, fitView } from './viewport';
 import { WCS_ENTRIES } from './offsets';
+import { frFileLoaded } from './flight-recorder';
 
 declare const THREE: any;
 
@@ -29,8 +30,8 @@ export function parseGcodeToToolpath(lines: string[]): { segments: any[]; cutCou
     return off || { x: 0, y: 0, z: 0 };
   }
 
-  for (const raw of lines) {
-    let line = raw.replace(/;.*/, '').replace(/\(.*?\)/g, '').trim().toUpperCase();
+  for (let index = 0; index < lines.length; index++) {
+    let line = lines[index].replace(/;.*/, '').replace(/\(.*?\)/g, '').trim().toUpperCase();
     if (!line) continue;
 
     const words: Record<string, number> = {};
@@ -68,12 +69,23 @@ export function parseGcodeToToolpath(lines: string[]): { segments: any[]; cutCou
     if (from.distanceTo(to) < 0.0001) { x = mx; y = my; z = mz; continue; }
 
     const isRapid = (modal.motion === 0);
-    segments.push({ from: from.clone(), to: to.clone(), isRapid });
+    segments.push({ from: from.clone(), to: to.clone(), isRapid, line: index + 1 });
     if (isRapid) rapidCount++; else cutCount++;
 
     x = mx; y = my; z = mz;
   }
   return { segments, cutCount, rapidCount };
+}
+
+/** How many toolpath segments come from lines up to and including `line` (1-based, as in gcodeLines). */
+export function segmentsUpToLine(line: number): number {
+  const segments = state.toolpathSegments;
+  let low = 0, high = segments.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (segments[mid].line <= line) low = mid + 1; else high = mid;
+  }
+  return low;
 }
 
 export function processGcode(text: string, name: string): void {
@@ -84,6 +96,7 @@ export function processGcode(text: string, name: string): void {
 
   refreshLoadedProgramPreview();
   log('info', 'Loaded: ' + name + ' (' + state.gcodeLines.length + ' lines, ' + state.totalMoves + ' cuts, ' + state.totalRapids + ' rapids)');
+  frFileLoaded(name);
 }
 
 export function refreshLoadedProgramPreview(): void {

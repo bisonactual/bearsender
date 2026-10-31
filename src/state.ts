@@ -42,6 +42,8 @@ export const state = {
   running: false,
   paused: false,
   segmentIndex: 0,
+  sendLines: [] as { text: string; line: number }[],  // the job as sent: text, and its line in gcodeLines (1-based)
+  jobNumbered: false,                                 // lines carry N<line>, so Ln in status reports is a line of the file
 
   // Receive buffer
   _rxBuf: '',
@@ -270,6 +272,7 @@ export const OPT_HIDEABLE_TABS = [
   { id: 'offsets',    label: 'OFFSETS' },
   { id: 'probing',    label: 'PROBING' },
   { id: 'exclusions', label: 'EXCLUSION ZONES' },
+  { id: 'flight',     label: 'FLIGHT RECORDER' },
   { id: 'modules',    label: 'MODULES' },
 ];
 

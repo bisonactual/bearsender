@@ -33,6 +33,7 @@ import { initDock, dockModule, undockModule, isDockingEnabled, setDockingEnabled
 import { optSetConnMode, optSaveConnSettings, optLoadConnSettings, optLoadColors, optLoadTabLocks, optBuildTabLockList, initToolbarOptions, saveTbOpt, optApplyColor, optHexChange, optResetColor, optResetAllColors, optSaveJogSteps, optLoadJogSteps, optApplyJogSteps, optApplyJogShowUnits, optLoadJogShowUnits, optSaveBearColors, optLoadBearColors, optBuildTabVisList, optLoadTabVis } from './options';
 import { bearRefresh, bearCheckPlugin, bearIntercept, bearParseStatus, bearShowAddForm, bearEditZone, bearSaveZone, bearDeleteZone, bearCancelEdit } from './bear';
 import { initExclusionZonesTab, ezRefresh, renderEzTab, renderEzModule, rebuildZoneMeshes } from './exclusion-zones';
+import { initFlightRecorderTab, renderFlightTab } from './flight-recorder';
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 export function switchTab(tab: string): void {
@@ -48,6 +49,7 @@ export function switchTab(tab: string): void {
   if (tab === 'tooltable') loadToolTable();
   if (tab === 'offsets') loadOffsets();
   if (tab === 'exclusions') renderEzTab();
+  if (tab === 'flight') renderFlightTab();
 }
 
 // ── Expose to window for HTML onclick handlers ────────────────────────────────
@@ -456,6 +458,7 @@ window.addEventListener('load', () => {
   optBuildTabVisList();
   optLoadTabVis();
   initExclusionZonesTab();
+  initFlightRecorderTab();
   // Restore auto-load settings toggle
   try { const al = document.getElementById('optAutoLoadSettings') as HTMLInputElement; if (al) al.checked = lsGet('fs-opt-autoload-settings', false); } catch (_) {}
   // Sync projection toggle

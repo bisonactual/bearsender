@@ -9,6 +9,7 @@ import { parseResponse } from './parser';
 import { updateRunButtons } from './streaming';
 import { renderProgLimits } from './gcode';
 import { ezResetPluginState, renderEzTab, renderEzModule } from './exclusion-zones';
+import { frEnabled, frConnectHandshake, frDisconnected } from './flight-recorder';
 
 // ── Poll rate ─────────────────────────────────────────────────────────────────
 export function setPollRate(ms: number): void {
@@ -138,16 +139,29 @@ function onOpen(): void {
   log('info', state.connMode === 'serial' ? 'Serial connected' : 'WebSocket connected');
   document.getElementById('connectBtn')!.textContent = 'DISCONNECT';
   setPollRate(POLL_NORM);
-  rtSend('\x18');
-  setTimeout(() => { state.sentQueue.length = 0; state.rxInFlight = 0; cmdSend('$I+'); }, 600);
-  setTimeout(() => {
-    try { if (lsGet('fs-opt-autoload-settings', false)) import('./settings').then(s => s.loadSettings()); } catch (_) {}
-  }, 1500);
-  setTimeout(() => {
-    try { import('./offsets').then(o => o.loadOffsets()); } catch (_) {}
-  }, 1800);
+  if (frEnabled()) {
+    // No reset with the flight recorder on. If the last job lost its sender the controller may
+    // still be retracting, and a reset would stop it half way. The handshake waits for it.
+    frConnectHandshake(() => {
+      setTimeout(loadSettingsIfWanted, 300);
+      setTimeout(loadOffsetsOnConnect, 600);
+    });
+  } else {
+    rtSend('\x18');
+    setTimeout(() => { state.sentQueue.length = 0; state.rxInFlight = 0; cmdSend('$I+'); }, 600);
+    setTimeout(loadSettingsIfWanted, 1500);
+    setTimeout(loadOffsetsOnConnect, 1800);
+  }
   const fb = document.getElementById('limitsFrameBtn') as HTMLButtonElement | null;
   if (fb && state.progLimits) fb.disabled = false;
+}
+
+function loadSettingsIfWanted(): void {
+  try { if (lsGet('fs-opt-autoload-settings', false)) import('./settings').then(s => s.loadSettings()); } catch (_) {}
+}
+
+function loadOffsetsOnConnect(): void {
+  try { import('./offsets').then(o => o.loadOffsets()); } catch (_) {}
 }
 
 function onClose(): void {
@@ -170,6 +184,7 @@ function onClose(): void {
   ezResetPluginState();
   renderEzTab();
   renderEzModule();
+  frDisconnected();
 }
 
 // ── Send helpers ──────────────────────────────────────────────────────────────

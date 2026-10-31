@@ -65,5 +65,11 @@ Floating module card system: drag (mouse + touch), size presets, enable/disable,
 ## src/options.ts
 Options page: connection mode (WS/Serial + baud config), colour theme (CSS var overrides), tab access locks, toolbar button visibility toggles. All persisted to localStorage.
 
+## src/flight-recorder.ts
+Flight Recorder plugin support. On/off (`fs-fr-enabled`), plugin detection, the connect handshake (no reset; retries `$I+` until a real `[VER:]` reply), job stamping and line numbering (`frJobLines`), the FLIGHT RECORDER tab (record, $790–$793, undercut switch, event log) and the resume dialog. `frIntercept` gets each ok/error with the command it answers.
+
+## src/flight-recorder-resume.ts
+Pure helpers: CRC-32 job id, `numberedLine`, and the resume plan (`modalScan`, `resumePreamble`, `resumeStart`), the same rules as Flight-Recorder's `tools/stream.py`.
+
 ## src/main.ts
 Entry point. Imports all modules, exposes functions on `window` for HTML onclick handlers, runs init sequence on load.

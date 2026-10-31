@@ -148,6 +148,13 @@ Dedicated probing tab with four sub-tabs: Tool Length, Edge Finder, Center Finde
 ### EXCLUSION ZONES
 Full-page exclusion zone manager. Shows all zones with their X/Y/Z bounds and permission flags (enabled, allow G-code, allow jog, allow tool change). Add, edit, and delete zones with an inline form. Zones are visualized in the 3D viewport. Requires the EZ — Exclusion Zones Plugin (also compatible with the Sienci ATCI Plugin).
 
+### FLIGHT RECORDER
+For controllers with the [Flight Recorder plugin](https://github.com/bisonactual/Flight-Recorder) (the Flexi-HAL A7 `_FR` firmware). Switch it on here or in OPTIONS. With it on, every job is stamped with `$FLIGHT=<job id>` and every line goes out as `N<line>`, so the controller keeps a record of the line it's executing. If the connection drops mid-job, the controller lifts the tool to the retract height and stops the spindle.
+
+When you reconnect, FlexiSender waits for the controller to finish that, reads the record and offers to resume: open the same file if it isn't loaded, unlock or home, confirm the tool, and RESUME goes back up to the retract height, over the start of the line, starts the spindle, comes straight down and carries on. The same happens after a power cut or a controller restart. Programs it can't rebuild a position for (incremental moves, inverse time feed, canned cycles, probing, G10/G92, axes other than XYZ) are refused before anything moves.
+
+The tab also has the last job record, the controller's settings ($790 retract when the sender is lost, $791 how long before it counts as lost, $792 retract height, and $793 watchdog on builds that have one), an "uses undercut tools" switch for the next job, and the controller's event log (resets and why, alarms, errors, inputs, limits, connection changes, Modbus trouble). While the flight recorder is on, FlexiSender doesn't reset the controller when it connects.
+
 ### MODULES
 Module configuration page. Enable/disable modules individually or by group. Set module card sizes. Modules are organized into groups: Basic Functions, Debug, Tool and Coordinate Control, Probing, Exclusion Zones, and Tools.
 
@@ -155,6 +162,7 @@ Module configuration page. Enable/disable modules individually or by group. Set 
 Application-wide settings, all persisted to localStorage:
 - **Connection Type** — switch between WebSocket and USB/Serial, configure serial parameters (baud, data bits, stop bits, parity)
 - **Auto-load Settings** — automatically fetch GrblHAL settings on connect (enables console autocomplete)
+- **Flight Recorder** — stamp and number jobs for the Flight Recorder plugin and offer to resume after a lost connection (see the FLIGHT RECORDER tab)
 - **3D Viewport Extents** — set machine-coordinate workspace bounds for the grid, plus perspective/orthographic projection toggle
 - **Colour Theme** — customise UI colours (text, background, surface, accent, tab bar) and viewport toolpath colours (cut, rapid, executed, tool marker). Ruler coordinate mode (machine vs work)
 - **Toolbar Button Visibility** — show/hide individual toolbar buttons per row

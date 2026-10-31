@@ -79,6 +79,7 @@
   <button class="tab-btn" id="tab-offsets" data-tab="offsets">OFFSETS</button>
   <button class="tab-btn" id="tab-probing" data-tab="probing">PROBING</button>
   <button class="tab-btn" id="tab-exclusions" data-tab="exclusions">EXCLUSION ZONES</button>
+  <button class="tab-btn" id="tab-flight" data-tab="flight">FLIGHT RECORDER</button>
   <button class="tab-btn" id="tab-modules" data-tab="modules">MODULES</button>
   <button class="tab-btn" id="tab-options" data-tab="options">⚙ OPTIONS</button>
   <button class="mod-lock-btn" id="modLockBtn" title="Lock / unlock module positions">
@@ -915,6 +916,20 @@
         </div>
       </div>
 
+      <!-- ── FLIGHT RECORDER ── -->
+      <div class="options-card">
+        <div class="options-card-icon">✈</div>
+        <div class="options-card-body">
+          <div class="options-card-title">Flight Recorder</div>
+          <div class="options-card-desc">For controllers with the Flight Recorder plugin. Every job is stamped and its lines numbered, so the controller remembers where it got to. If the connection drops it lifts the tool and stops the spindle, and when you reconnect FlexiSender offers to carry on from that line. Settings and the event log are in the FLIGHT RECORDER tab. While this is on FlexiSender doesn't reset the controller when it connects.</div>
+          <div style="margin-top:10px;">
+            <label class="fr-toggle" style="padding:8px 14px;">
+              <input type="checkbox" id="optFlightRecorder"> Enable
+            </label>
+          </div>
+        </div>
+      </div>
+
       <!-- ── 3D VIEWPORT EXTENTS ── -->
       <div class="options-card">
         <div class="options-card-icon">🗺️</div>
@@ -1266,6 +1281,50 @@
     <div style="margin-top:12px;">
       <button class="tb-btn success" id="ezTabAddBtn" style="font-size:11px;padding:8px 16px">+ ADD ZONE</button>
     </div>
+  </div>
+</div>
+
+<!-- TAB: FLIGHT RECORDER -->
+<div class="tab-panel" id="tabpanel-flight" style="flex-direction:column;overflow:hidden;background:var(--bg);">
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;">
+    <span style="font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);">FLIGHT RECORDER</span>
+    <span class="ez-status-badge" id="frTabStatusBadge" style="font-size:10px">—</span>
+    <div style="flex:1"></div>
+    <button class="tb-btn" id="frTabToggleBtn" title="Switch the flight recorder on or off">OFF</button>
+    <button class="tb-btn primary" id="frTabRefreshBtn">↻ REFRESH</button>
+  </div>
+  <div id="frPluginNotice" class="fr-notice">Needs the Flight Recorder plugin for grblHAL on the controller (the Flexi-HAL A7 _FR firmware, with FRAM at U27).</div>
+  <div class="fr-grid">
+    <div class="fr-card">
+      <div class="fr-card-title">Last job</div>
+      <div id="frRecord"></div>
+    </div>
+    <div class="fr-card">
+      <div class="fr-card-title">This job</div>
+      <label class="fr-toggle fr-check"><input type="checkbox" id="frUndercut"> Uses undercut tools</label>
+      <div class="fr-setting-help">T-slot, dovetail, lollipop and the like can't come straight up out of the cut. Tick this and the controller won't lift the tool if the connection drops. The machine stops where it is and the spindle keeps running until you stop it, so stay with the machine.</div>
+    </div>
+    <div class="fr-card">
+      <div class="fr-card-title">Controller settings</div>
+      <div id="frSettings"></div>
+    </div>
+    <div class="fr-card fr-card-wide">
+      <div class="fr-card-title" style="display:flex;align-items:center;gap:8px">Event log
+        <div style="flex:1"></div>
+        <button class="tb-btn" id="frEventsRefreshBtn" style="font-size:10px;padding:2px 8px">↻</button>
+        <button class="tb-btn danger" id="frEventsClearBtn" style="font-size:10px;padding:2px 8px">CLEAR</button>
+      </div>
+      <div class="fr-setting-help">Resets and why, alarms, errors, inputs and limit switches tripping, the connection coming and going, Modbus trouble. Kept on the controller across restarts: the place to look when the machine does something odd.</div>
+      <div id="frEvents"></div>
+    </div>
+  </div>
+</div>
+
+<!-- FLIGHT RECORDER: resume dialog -->
+<div class="fr-modal-backdrop" id="frModal" style="display:none">
+  <div class="fr-modal">
+    <div class="fr-modal-head">✈ RESUME THE INTERRUPTED JOB<div style="flex:1"></div><button class="tb-btn" id="frModalClose">✕</button></div>
+    <div class="fr-modal-body" id="frModalBody"></div>
   </div>
 </div>
 

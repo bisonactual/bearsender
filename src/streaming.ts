@@ -7,6 +7,9 @@ import { byteLen } from './ui';
 import { log } from './console';
 import { cmdSend, rtSend } from './connection';
 import { updateProgress } from './gcode';
+import { frActive, frEnabled, frJobLines } from './flight-recorder';
+
+export interface SendLine { text: string; line: number; }
 
 export function startJob(): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
@@ -19,16 +22,34 @@ export function startJob(): void {
     updateRunButtons();
     return;
   }
+  const recorded = frActive();
+  if (frEnabled() && !recorded) log('info', '✈ The flight recorder is on, but this controller has no Flight Recorder plugin. Running without a record.');
+  log('info', 'Starting job: ' + state.gcodeLines.length + ' lines  (RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes)' +
+      (recorded ? '  flight recorder on' : ''));
+  streamLines(recorded ? frJobLines() : plainLines(), recorded);
+}
+
+/** Start streaming prepared lines, either a whole job or a resume (the moves back in, then the rest of the file). */
+export function streamLines(lines: SendLine[], numbered: boolean): void {
   state.running = true; state.paused = false;
+  state.sendLines = lines; state.jobNumbered = numbered;
   state.lineHead = 0; state.rxInFlight = 0; state.sentQueue.length = 0; state.segmentIndex = 0;
   state.esPhase = 'idle';
   updateRunButtons();
-  log('info', 'Starting job: ' + state.gcodeLines.length + ' lines  (RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes)');
   pumpQueue();
 }
 
 function stripComment(line: string): string {
   return line.replace(/\(.*?\)/g, '').replace(/;.*/, '').trim();
+}
+
+function plainLines(): SendLine[] {
+  const lines: SendLine[] = [];
+  state.gcodeLines.forEach((raw, i) => {
+    const text = stripComment(raw).trim().toUpperCase();
+    if (text) lines.push({ text, line: i + 1 });
+  });
+  return lines;
 }
 
 export function pumpQueue(): void {
@@ -39,23 +60,19 @@ export function pumpQueue(): void {
 function _pumpQueue(): void {
   const hwm = state.RX_BUFFER_SIZE - 1;
 
-  while (state.lineHead < state.gcodeLines.length) {
-    const raw = state.gcodeLines[state.lineHead];
-    const stripped = stripComment(raw).trim().toUpperCase();
-
-    if (!stripped) { state.lineHead++; continue; }
-
-    const wouldCost = byteLen(stripped + '\n');
+  while (state.lineHead < state.sendLines.length) {
+    const { text, line } = state.sendLines[state.lineHead];
+    const wouldCost = byteLen(text + '\n');
 
     if (state.rxInFlight + wouldCost > hwm) break;
 
-    cmdSend(stripped);
-    log('tx', stripped);
+    cmdSend(text);
+    log('tx', text);
     state.lineHead++;
-    updateProgress(state.lineHead, state.gcodeLines.length);
+    updateProgress(line, state.gcodeLines.length);
   }
 
-  if (state.lineHead >= state.gcodeLines.length && state.sentQueue.length === 0 && state.running) {
+  if (state.lineHead >= state.sendLines.length && state.sentQueue.length === 0 && state.running) {
     state.running = false;
     log('info', '✓ Job complete');
     updateRunButtons();

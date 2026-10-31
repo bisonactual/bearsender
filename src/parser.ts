@@ -13,6 +13,8 @@ import { bearCheckPlugin, bearIntercept, bearParseStatus } from './bear';
 import { ezCheckPlugin, ezIntercept, ezParseStatus } from './exclusion-zones';
 import { emit, type StatusReport } from './bus';
 import { offsetsIntercept, offsetsInterceptOk } from './offsets';
+import { frCheckPlugin, frIntercept } from './flight-recorder';
+import { segmentsUpToLine } from './gcode';
 
 export function parseResponse(raw: string): void {
   if (raw.startsWith('<') && raw.endsWith('>')) { parseStatus(raw.slice(1, -1)); return; }
@@ -30,6 +32,8 @@ export function parseResponse(raw: string): void {
   if (state.esPhase !== 'idle' && settingsIntercept(raw)) return;
 
   if (state.ttPhase === 'loading' && toolTableIntercept(raw)) return;
+
+  if (frIntercept(raw, _dequeuedSent)) return;
 
   if (bearIntercept(raw)) return;
 
@@ -87,6 +91,7 @@ export function parseResponse(raw: string): void {
   if (raw.startsWith('[') || raw.startsWith('Grbl') || raw.startsWith('GrblHAL') || raw.startsWith('>')) {
     bearCheckPlugin(raw);
     ezCheckPlugin(raw);
+    frCheckPlugin(raw);
     log('info', raw); return;
   }
   log('rx', raw);
@@ -131,7 +136,8 @@ function parseStatus(s: string): void {
       const ln = parseInt(vals[0]);
       report.ln = ln;
       tags.add('ln');
-      state.segmentIndex = ln;
+      // A numbered job's Ln is a line of the file, otherwise it's taken as a segment count.
+      state.segmentIndex = state.jobNumbered ? segmentsUpToLine(ln) : ln;
       updateExecutedPath(state.segmentIndex);
     }
     if (key === 'Bf') {
