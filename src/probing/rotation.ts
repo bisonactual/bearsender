@@ -4,15 +4,20 @@
 
 import { state } from '../state';
 import { log } from '../console';
-import { probeAxis, rapidToMPos, isProbingRunning } from './probe-program';
+import { probeAxis, rapidToMPos, isProbingRunning, runProbing } from './probe-program';
 
 function startPos() {
   return { x: (state as any).machineX, y: (state as any).machineY, z: (state as any).machineZ };
 }
 
-export async function runRotation(cfg: any): Promise<{ angleDeg: number; p1: { x: number; y: number }; p2: { x: number; y: number } } | null> {
-  if (!state.connected) { log('err', 'Not connected'); return null; }
+type Rotation = { angleDeg: number; p1: { x: number; y: number }; p2: { x: number; y: number } };
+
+export async function runRotation(cfg: any): Promise<Rotation | null> {
   if (isProbingRunning()) { log('err', 'Probe already running'); return null; }
+  return runProbing(() => rotation(cfg));
+}
+
+async function rotation(cfg: any): Promise<Rotation | null> {
   const sp = startPos();
   const clr = cfg.xyClr + cfg.probeDiameter / 2;
   const probeX = cfg.edge === 'AB' || cfg.edge === 'CD';

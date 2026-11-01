@@ -1,15 +1,20 @@
 // ═══════════════════════════════════════════════
 // Connection layer — WebSocket & USB/Serial
 // ═══════════════════════════════════════════════
+//
+// The transports only. Every line and every real-time byte goes through the command layer
+// (command.ts), which matches the replies.
 
 import { state, POLL_NORM } from './state';
-import { byteLen, lsGet } from './ui';
+import { lsGet } from './ui';
 import { log } from './console';
-import { parseResponse } from './parser';
+import * as command from './command';
 import { updateRunButtons } from './streaming';
-import { renderProgLimits } from './gcode';
-import { ezResetPluginState, renderEzTab, renderEzModule } from './exclusion-zones';
-import { frEnabled, frConnectHandshake, frDisconnected } from './flight-recorder';
+import { ezResetPluginState, renderEzTab, renderEzModule, ezCheckPlugin, ezConnected } from './exclusion-zones';
+import { frEnabled, frCheckPlugin, frConnected, frDisconnected } from './flight-recorder';
+import { loadSettings } from './settings';
+import { loadOffsets, renderOffsetsTable } from './offsets';
+import { readSetupState } from './app/asks';
 import { batch } from '@preact/signals';
 import * as connection from './stores/connection';
 import * as machine from './stores/machine';
@@ -69,7 +74,7 @@ function feedBuffer(chunk: string): void {
     while ((nl = state._rxBuf.indexOf('\n')) !== -1) {
       const line = state._rxBuf.slice(0, nl).replace(/\r$/, '').trim();
       state._rxBuf = state._rxBuf.slice(nl + 1);
-      if (line) parseResponse(line);
+      if (line) command.receive(line);
     }
   });
 }
@@ -143,41 +148,68 @@ async function disconnectSerial(): Promise<void> {
 // ── Shared open / close handlers ─────────────────────────────────────────────
 function onOpen(): void {
   state.connected = true;
-  state.rxInFlight = 0;
-  state.sentQueue.length = 0;
   state._rxBuf = '';
   setStatus('connected');
   log('info', state.connMode === 'serial' ? 'Serial connected' : 'WebSocket connected');
   messages.push('link', 'Connected to ' + connection.address.value + '.');
   setPollRate(POLL_NORM);
-  if (frEnabled()) {
-    // No reset with the flight recorder on. If the last job lost its sender the controller may
-    // still be retracting, and a reset would stop it half way. The handshake waits for it.
-    frConnectHandshake(() => {
-      setTimeout(loadSettingsIfWanted, 300);
-      setTimeout(loadOffsetsOnConnect, 600);
-    });
-  } else {
-    rtSend('\x18');
-    setTimeout(() => { state.sentQueue.length = 0; state.rxInFlight = 0; cmdSend('$I+'); }, 600);
-    setTimeout(loadSettingsIfWanted, 1500);
-    setTimeout(loadOffsetsOnConnect, 1800);
-  }
+  // No reset with the flight recorder on. If the last job lost its sender the controller may
+  // still be retracting, and a reset would stop it half way. Either way the command layer gets
+  // the line in step first, waiting as long as the controller takes to answer.
+  command.connected(write, { reset: !frEnabled() });
+  afterConnect();
   const fb = document.getElementById('limitsFrameBtn') as HTMLButtonElement | null;
   if (fb && state.progLimits) fb.disabled = false;
 }
 
-function loadSettingsIfWanted(): void {
-  try { if (lsGet('fs-opt-autoload-settings', false)) import('./settings').then(s => s.loadSettings()); } catch (_) {}
+/** What is read from the controller on connecting, one command after another. */
+async function afterConnect(): Promise<void> {
+  const steps: (() => Promise<unknown>)[] = [
+    async () => readBuildInfo((await command.send('$I+', { log: true })).lines),
+    frConnected,
+    ezConnected,
+    async () => { if (lsGet('fs-opt-autoload-settings', false)) await loadSettings(); },
+    loadOffsets,
+    readSetupState,
+  ];
+  for (const step of steps) {
+    try { await step(); }
+    catch (e) {
+      if (!(e instanceof command.CommandFailed)) throw e;
+      if (!command.isConnected()) return;
+    }
+  }
 }
 
-function loadOffsetsOnConnect(): void {
-  try { import('./offsets').then(o => o.loadOffsets()); } catch (_) {}
+/** The $I+ reply: firmware, RX buffer, axes and plugins. */
+function readBuildInfo(lines: string[]): void {
+  for (const line of lines) {
+    if (line.startsWith('[VER:')) connection.firmware.value = line.slice(5, -1).split(':')[0];
+    const opt = line.match(/^\[OPT:[^,]*,(\d+),(\d+)/);
+    if (opt && parseInt(opt[2]) > 0) {
+      state.RX_BUFFER_SIZE = parseInt(opt[2]);
+      command.setRxBufferSize(state.RX_BUFFER_SIZE);
+      log('info', 'RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes  planner blocks: ' + opt[1]);
+    }
+    const axes = line.match(/^\[AXS:\d+:([A-Z]+)\]/);
+    if (axes) { state.controllerAxes = axes[1].split(''); log('info', 'Axes: ' + state.controllerAxes.join(',')); }
+    ezCheckPlugin(line);
+    frCheckPlugin(line);
+  }
 }
+
+command.onSync(s => {
+  if (s.syncing && s.retries === 1) log('info', frEnabled()
+    ? '✈ Waiting for the controller to answer. It may be finishing a retract after the lost connection.'
+    : 'Waiting for the controller to answer.');
+  if (s.gaveUp) log('err', 'The controller has not answered for 90 s. Reset it to carry on.');
+});
+command.onReply(() => updateBufDisplay());
 
 function onClose(): void {
   const wasRunning = state.running;
   state.connected = false;
+  command.disconnected();
   setStatus('disconnected');
   log('info', 'Disconnected');
   messages.push('link', 'Disconnected.');
@@ -201,7 +233,6 @@ function onClose(): void {
     machine.spindle.value = 0;
     connection.firmware.value = '';
   });
-  state.rxInFlight = 0; state.sentQueue.length = 0;
   updateRunButtons();
   const fb = document.getElementById('limitsFrameBtn') as HTMLButtonElement | null;
   if (fb) fb.disabled = true;
@@ -209,8 +240,7 @@ function onClose(): void {
   state.wcsOffsets = {};
   state.tloOffset = 0;
   state.tloActive = false;
-  state.wcsPhase = 'idle';
-  try { import('./offsets').then(o => o.renderOffsetsTable()); } catch (_) {}
+  renderOffsetsTable();
   ezResetPluginState();
   renderEzTab();
   renderEzModule();
@@ -219,32 +249,25 @@ function onClose(): void {
 
 // ── Send helpers ──────────────────────────────────────────────────────────────
 
-export function rtSend(char: string): void {
+/** Writes to the open link. Only the command layer calls it. */
+function write(data: string): boolean {
   if (state.connMode === 'serial') {
-    if (state.serialWriter) state.serialWriter.write(new TextEncoder().encode(char)).catch(() => {});
-  } else {
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(char);
+    if (!state.serialWriter) return false;
+    state.serialWriter.write(new TextEncoder().encode(data)).catch(() => {});
+    return true;
   }
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return false;
+  state.ws.send(data);
+  return true;
 }
 
-export function cmdSend(line: string): void {
-  const frame = line + '\n';
-  const bytes = byteLen(frame);
-  if (state.connMode === 'serial') {
-    if (!state.serialWriter) return;
-    state.serialWriter.write(new TextEncoder().encode(frame)).catch(() => {});
-  } else {
-    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-    state.ws.send(frame);
-  }
-  state.rxInFlight += bytes;
-  state.sentQueue.push({ line, bytes });
-}
+/** A real-time byte: ?, !, ~, 0x18, 0x85, 0x87, the overrides. */
+export function rtSend(char: string): void { command.realtime(char); }
 
+/** Sends a line (or several, one per line) that nobody waits for. command.send() gives the reply. */
 export function sendCmd(cmd: string): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
-  cmdSend(cmd);
-  log('tx', cmd);
+  command.post(cmd);
 }
 
 // ── Status display ────────────────────────────────────────────────────────────
@@ -254,7 +277,7 @@ export function setStatus(s: 'disconnected' | 'connecting' | 'connected'): void 
 
 export function updateBufDisplay(): void {
   const el = document.getElementById('bufVal');
-  if (el) el.textContent = 'RX: ' + state.rxInFlight + '/' + state.RX_BUFFER_SIZE + 'B';
+  if (el) el.textContent = 'RX: ' + command.stats().bytes + '/' + state.RX_BUFFER_SIZE + 'B';
 }
 
 /** Homed after a homing cycle. Otherwise the store follows the controller's own H: field. */

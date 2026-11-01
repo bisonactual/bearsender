@@ -330,7 +330,6 @@ function wireTlEvents(container: HTMLElement): void {
       const resEl = document.getElementById('probTlResult');
       if (resEl) resEl.textContent = `Z=${result.z.toFixed(4)}  TLO=${tlo.toFixed(4)} mm`;
       setStatus(statusId, '✓ Complete — TLO applied', 'ok');
-      setTimeout(() => import('../offsets').then(o => o.loadOffsets()), 300);
     }
   };
 

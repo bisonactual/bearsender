@@ -35,10 +35,8 @@ export const state = {
   machineY: 0,
   machineZ: 0,
 
-  // RX buffer tracking
+  // RX buffer size from $I (the command layer counts the bytes in flight)
   RX_BUFFER_SIZE: 128,
-  rxInFlight: 0,
-  sentQueue: [] as { line: string; bytes: number; fileLine?: number }[],  // fileLine: the job line it carries
 
   // Job
   gcodeLines: [] as string[],
@@ -59,9 +57,6 @@ export const state = {
   settingsDirty: {} as Record<number, string>,
   activeGroupId: null as number | null,
   settingsLoaded: false,
-  esPhase: 'idle' as string,
-  esPendingOks: 0,
-  pendingSettingWrite: null as { id: number; btn: HTMLElement | null } | null,
   controllerAxes: ['X', 'Y', 'Z'] as string[],
 
   // Toolpath
@@ -75,10 +70,7 @@ export const state = {
   tloActive: false as boolean,
   activeWcs: 'G54' as string,
   rulerCoords: 'machine' as string,
-  wcsPhase: 'idle' as string,
   currentToolNumber: 0,
-  ttPhase: 'idle' as string,
-  _ttLines: [] as string[],
   ttEntries: [] as ToolEntry[],
 
   // Program limits

@@ -4,7 +4,8 @@
 
 import { state } from './state';
 import { log } from './console';
-import { sendCmd, cmdSend } from './connection';
+import { sendCmd } from './connection';
+import * as command from './command';
 import { lsGet, lsSet, confirmTap } from './ui';
 import { refreshWcsMarkers } from './viewport';
 import * as machine from './stores/machine';
@@ -28,60 +29,43 @@ export const WCS_ENTRIES = [
 
 // ── Load / parse ──────────────────────────────────────────────────────────────
 
-export function loadOffsets(): void {
+const OFFSET_KEYS = new Set(['G54','G55','G56','G57','G58','G59',
+  'G59.1','G59.2','G59.3','G28','G28.1','G30','G30.1','G92']);
+
+/** Reads the work offsets ($#). The [TLO:] line in its reply is a push message (see below). */
+export async function loadOffsets(): Promise<void> {
   if (!state.connected) { log('err', 'Not connected'); return; }
-  state.wcsPhase = 'loading';
-  cmdSend('$#');
-}
-
-export function offsetsIntercept(raw: string): boolean {
-  // Match [G54:x,y,z] [G55:...] [G28:...] [TLO:z] etc.
-  const m = raw.match(/^\[([A-Z0-9.]+):([^\]]+)\]$/);
-  if (!m) return false;
-
-  const key = m[1];
-  const vals = m[2].split(',').map(Number);
-
-  const knownKeys = new Set(['G54','G55','G56','G57','G58','G59',
-    'G59.1','G59.2','G59.3','G28','G28.1','G30','G30.1','G92','TLO','PRB']);
-
-  if (!knownKeys.has(key)) return false;
-
-  if (key === 'TLO') {
-    // TLO can be single value (Z only) or X,Y,Z
-    state.tloOffset = vals.length === 1 ? vals[0] : (vals[2] ?? vals[0]);
-    state.tloActive = state.tloOffset !== 0;
-    machine.tlo.value = state.tloOffset;
-    renderOffsetsTable();
-    return true;
+  let reply: command.Reply;
+  try { reply = await command.send('$#'); }
+  catch (e) { if (e instanceof command.CommandFailed) return; throw e; }
+  for (const raw of reply.lines) {
+    // [G54:x,y,z] [G55:...] [G28:...]; [PRB:] is the last probe's, not an offset
+    const m = raw.match(/^\[([A-Z0-9.]+):([^\]]+)\]$/);
+    if (!m || !OFFSET_KEYS.has(m[1])) continue;
+    const vals = m[2].split(',').map(Number);
+    // Store normalised: x, y, z (pad with 0 if fewer axes reported)
+    state.wcsOffsets[m[1]] = { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
   }
-
-  if (key === 'PRB') return false; // leave for parser
-
-  // Store normalised: x, y, z (pad with 0 if fewer axes reported)
-  state.wcsOffsets[key] = {
-    x: vals[0] ?? 0,
-    y: vals[1] ?? 0,
-    z: vals[2] ?? 0,
-  };
-
+  if (reply.result !== 'ok') return;
+  machine.offsetsRead.value = true;
+  if (!machine.offsetsAtConnect.value) machine.offsetsAtConnect.value = { ...state.wcsOffsets };
   renderOffsetsTable();
-  return true;
+  refreshLoadedProgramPreviewIfNeeded();
 }
+
+// [TLO:z] or [TLO:x,y,z], in the $# reply and pushed after a status report when it changes.
+command.on('tlo', raw => {
+  log('info', raw);
+  const vals = raw.slice(5, -1).split(',').map(Number);
+  state.tloOffset = vals.length === 1 ? vals[0] : (vals[2] ?? vals[0]);
+  state.tloActive = state.tloOffset !== 0;
+  machine.tlo.value = state.tloOffset;
+  renderOffsetsTable();
+});
 
 function refreshLoadedProgramPreviewIfNeeded(): void {
   if (!state.gcodeLines.length) return;
   import('./gcode').then(g => g.refreshLoadedProgramPreview());
-}
-
-export function offsetsInterceptOk(): void {
-  if (state.wcsPhase === 'loading') {
-    state.wcsPhase = 'idle';
-    machine.offsetsRead.value = true;
-    if (!machine.offsetsAtConnect.value) machine.offsetsAtConnect.value = { ...state.wcsOffsets };
-    renderOffsetsTable();
-    refreshLoadedProgramPreviewIfNeeded();
-  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -251,9 +235,7 @@ function writeOffset(code: string): void {
   const row = document.querySelector<HTMLElement>(`tr[data-code="${code}"]`);
   if (row) row.classList.remove('wcs-dirty');
   log('info', `Offset written: ${code} X${vals.x.toFixed(3)} Y${vals.y.toFixed(3)} Z${vals.z.toFixed(3)}`);
-
-  // Refresh from controller after a short delay to confirm
-  setTimeout(() => loadOffsets(), 300);
+  // $# is read again once the controller has answered (parser.ts, noteOffsetWrite).
 }
 
 function zeroOffset(code: string): void {
@@ -271,7 +253,6 @@ function zeroOffset(code: string): void {
   renderOffsetsTable();
   refreshLoadedProgramPreviewIfNeeded();
   log('info', `Offset zeroed: ${code}`);
-  setTimeout(() => loadOffsets(), 300);
 }
 
 function setToCurrentPos(code: string): void {
@@ -291,5 +272,4 @@ function setToCurrentPos(code: string): void {
   renderOffsetsTable();
   refreshLoadedProgramPreviewIfNeeded();
   log('info', `Offset set to machine pos: ${code} X${x.toFixed(3)} Y${y.toFixed(3)} Z${z.toFixed(3)}`);
-  setTimeout(() => loadOffsets(), 300);
 }

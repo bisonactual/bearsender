@@ -135,9 +135,6 @@ async function doProbe(): Promise<void> {
   log('info', `Tool length offset applied: G43.1 Z${tlo.toFixed(4)}`);
   if (_resultDisplay) _resultDisplay.textContent = `Z=${result.z.toFixed(4)}  TLO=${tlo.toFixed(4)} mm`;
   setStatus('✓ Complete — TLO applied', 'ok');
-  setTimeout(() => {
-    import('../offsets').then((o) => o.loadOffsets());
-  }, 300);
 }
 
 export function mount(parent: HTMLElement): void {

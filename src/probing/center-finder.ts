@@ -4,15 +4,18 @@
 
 import { state } from '../state';
 import { log } from '../console';
-import { probeAxis, rapidToMPos, applyXYResult, isProbingRunning } from './probe-program';
+import { probeAxis, rapidToMPos, applyXYResult, isProbingRunning, runProbing } from './probe-program';
 
 function startPos() {
   return { x: (state as any).machineX, y: (state as any).machineY, z: (state as any).machineZ };
 }
 
 export async function runCenterFinder(cfg: any): Promise<boolean> {
-  if (!state.connected) { log('err', 'Not connected'); return false; }
   if (isProbingRunning()) { log('err', 'Probe already running'); return false; }
+  return (await runProbing(() => centerFinder(cfg))) ?? false;
+}
+
+async function centerFinder(cfg: any): Promise<boolean> {
   const sp = startPos();
   let centerX = sp.x;
   let centerY = sp.y;

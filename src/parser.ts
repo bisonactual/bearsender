@@ -1,118 +1,55 @@
 // ═══════════════════════════════════════════════
-// Response parser & status reports
+// Push messages & status reports
 // ═══════════════════════════════════════════════
+//
+// What the controller sends unasked, from the command layer's subscriptions, and what any
+// matched reply tells the stores. Replies to a command are read by whoever sent it.
 
 import { state } from './state';
 import { log } from './console';
-import { updateBufDisplay, _updateHomeBtnHomed, rtSend } from './connection';
-import { pumpQueue, updateRunButtons } from './streaming';
+import { _updateHomeBtnHomed, rtSend } from './connection';
+import { updateRunButtons } from './streaming';
 import { updateExecutedPath, toolGroup } from './viewport';
-import { settingsIntercept, tryInterceptValue, onSettingWriteOk, onSettingWriteErr, tryParseSettingLine } from './settings';
-import { toolTableIntercept, renderToolTable, renderModTT } from './tooltable';
-import { ezCheckPlugin, ezIntercept, ezParseStatus } from './exclusion-zones';
+import { renderToolTable, renderModTT } from './tooltable';
+import { ezParseStatus } from './exclusion-zones';
 import { emit, type StatusReport } from './bus';
-import { offsetsIntercept, offsetsInterceptOk, loadOffsets } from './offsets';
-import { frCheckPlugin, frIntercept } from './flight-recorder';
+import { loadOffsets } from './offsets';
 import { segmentsUpToLine } from './gcode';
+import * as command from './command';
 import { batch } from '@preact/signals';
 import * as machine from './stores/machine';
 import * as job from './stores/job';
 import * as messages from './stores/messages';
-import * as connection from './stores/connection';
 
-export function parseResponse(raw: string): void {
-  if (raw.startsWith('<') && raw.endsWith('>')) { parseStatus(raw.slice(1, -1)); return; }
-
-  // Always dequeue sentQueue on ok/error — before intercepts, so RX tracking stays in sync
-  let _dequeuedSent: { line: string; bytes: number; fileLine?: number } | undefined;
-  if (raw === 'ok' || raw.startsWith('error:')) {
-    _dequeuedSent = state.sentQueue.shift();
-    if (_dequeuedSent) {
-      state.rxInFlight = Math.max(0, state.rxInFlight - _dequeuedSent.bytes);
-      if (_dequeuedSent.fileLine) job.ackedLine.value = _dequeuedSent.fileLine;
-    }
-    updateBufDisplay();
-  }
-
-  if (state.esPhase !== 'idle' && settingsIntercept(raw)) return;
-
-  if (state.ttPhase === 'loading' && toolTableIntercept(raw)) return;
-
-  if (frIntercept(raw, _dequeuedSent)) return;
-
-  if (ezIntercept(raw)) return;
-
-  // Offset intercept — handles $# responses and live [G54:] etc. updates
-  // Always active (not phase-gated) so live updates work mid-session
-  if (offsetsIntercept(raw)) { log('rx', raw); return; }
-
-  if (raw === 'ok' || raw.startsWith('error:')) {
-    offsetsInterceptOk();
-    if (raw.startsWith('error:')) {
-      log('err', raw + (_dequeuedSent ? '  ← "' + _dequeuedSent.line + '"' : ''));
-      messages.push('error', raw + (_dequeuedSent ? ' on "' + _dequeuedSent.line + '"' : ''));
-      onSettingWriteErr(raw);
-      if (state.running) { state.running = false; updateRunButtons(); log('alarm', 'Stream halted on error. Fix G-code and restart.'); job.finished('error'); }
-    } else {
-      if (state.pendingSettingWrite) { onSettingWriteOk(); }
-      noteOffsetWrite(_dequeuedSent?.line);
-    }
-    pumpQueue();
-    return;
-  }
-
-  if (tryInterceptValue(raw)) { log('rx', raw); return; }
-
-  if (raw.startsWith('[AXS:')) {
-    const m = raw.match(/\[AXS:\d+:([A-Z]+)\]/);
-    if (m) { state.controllerAxes = m[1].split(''); log('info', 'Axes: ' + state.controllerAxes.join(',')); }
-    log('info', raw); return;
-  }
-
-  if (raw.startsWith('ALARM:')) {
-    log('alarm', raw);
-    const code = parseInt(raw.slice(6));
-    batch(() => {
-      machine.alarm.value = isNaN(code) ? null : code;
-      machine.state.value = 'Alarm';
-    });
-    messages.push('alarm', alarmText(raw.slice(6)));
-    setMachineState('ALARM');
-    emit<StatusReport>('status', new Set(['state']), { machineState: 'ALARM' });
-    const wasRunning = state.running;
-    state.running = false; updateRunButtons();
-    if (wasRunning) job.finished('alarm');
-    return;
-  }
-
-  if (raw.startsWith('[OPT:')) {
-    const m = raw.match(/\[OPT:[^,]*,(\d+),(\d+)/);
-    if (m) {
-      const reportedRx = parseInt(m[2]);
-      if (reportedRx > 0) {
-        state.RX_BUFFER_SIZE = reportedRx;
-        log('info', 'RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes  planner blocks: ' + m[1]);
-      }
-    }
-    log('info', raw); return;
-  }
-
-  if (raw.startsWith('[SETTING:')) { tryParseSettingLine(raw); return; }
-
-  if (raw.match(/^\$\d+=/)) { tryParseSettingLine(raw); log('rx', raw); return; }
-
-  if (raw.startsWith('[') || raw.startsWith('Grbl') || raw.startsWith('GrblHAL') || raw.startsWith('>')) {
-    if (raw.startsWith('[MSG:') && raw.length > 6) messages.push('msg', raw.slice(5, -1));
-    if (raw.startsWith('[VER:')) connection.firmware.value = raw.slice(5, -1).split(':')[0];
-    ezCheckPlugin(raw);
-    frCheckPlugin(raw);
-    log('info', raw); return;
-  }
-  log('rx', raw);
+export function initParser(): void {
+  command.on('status', line => batch(() => parseStatusReport(line.slice(1, -1))));
+  command.on('alarm', onAlarm);
+  command.on('msg', line => {
+    log('info', line);
+    if (line.length > 6) messages.push('msg', line.slice(5, -1));
+  });
+  command.on('banner', line => log('info', line));
+  command.on('startup', line => log('info', line));
+  command.on('gc', line => log('info', line));
+  command.onReply((reply, { job, quiet }) => {
+    if (reply.result === 'error') { if (!quiet) messages.push('error', `error:${reply.code} on "${reply.command}"`); }
+    else if (!job) noteOffsetWrite(reply.command);
+  });
 }
 
-function parseStatus(s: string): void {
-  batch(() => parseStatusReport(s));
+function onAlarm(raw: string): void {
+  log('alarm', raw);
+  const code = parseInt(raw.slice(6));
+  batch(() => {
+    machine.alarm.value = isNaN(code) ? null : code;
+    machine.state.value = 'Alarm';
+  });
+  messages.push('alarm', alarmText(raw.slice(6)));
+  setMachineState('ALARM');
+  emit<StatusReport>('status', new Set(['state']), { machineState: 'ALARM' });
+  const wasRunning = state.running;
+  state.running = false; updateRunButtons();
+  if (wasRunning) job.finished('alarm');
 }
 
 function parseStatusReport(s: string): void {
@@ -123,7 +60,7 @@ function parseStatusReport(s: string): void {
   setMachineState(parts[0]);
   // A full report (0x87) on each change of state: it carries the alarm code, H (homed), T (tool) and WCO,
   // which the plain report leaves out.
-  if (parts[0].split(':')[0].toLowerCase() !== machine.stateName.value) setTimeout(() => rtSend('\x87'), 0);
+  if (parts[0].split(':')[0].toLowerCase() !== machine.stateName.value) rtSend('\x87');
   machine.state.value = parts[0];
   if (!parts[0].startsWith('Alarm')) machine.alarm.value = null;
   else if (parts[0].includes(':')) machine.alarm.value = parseInt(parts[0].split(':')[1]) || machine.alarm.value;
@@ -226,9 +163,12 @@ function parseStatusReport(s: string): void {
   emit('status', tags, report);
 
   const stats = document.getElementById('vpStats');
-  if (stats) stats.innerHTML =
-    `X: ${state.machineX.toFixed(3)}&nbsp;&nbsp;Y: ${state.machineY.toFixed(3)}&nbsp;&nbsp;Z: ${state.machineZ.toFixed(3)}<br>` +
-    `RX: ${state.rxInFlight}/${state.RX_BUFFER_SIZE}B&nbsp;&nbsp;QUEUE: ${state.sentQueue.length}`;
+  if (stats) {
+    const q = command.stats();
+    stats.innerHTML =
+      `X: ${state.machineX.toFixed(3)}&nbsp;&nbsp;Y: ${state.machineY.toFixed(3)}&nbsp;&nbsp;Z: ${state.machineZ.toFixed(3)}<br>` +
+      `RX: ${q.bytes}/${state.RX_BUFFER_SIZE}B&nbsp;&nbsp;QUEUE: ${q.waiting.length}`;
+  }
 }
 
 export function setMachineState(s: string): void {
@@ -241,12 +181,12 @@ export function setMachineState(s: string): void {
 const WCS_BY_P: Record<number, string> = { 1: 'G54', 2: 'G55', 3: 'G56', 4: 'G57', 5: 'G58', 6: 'G59', 7: 'G59.1', 8: 'G59.2', 9: 'G59.3' };
 
 /** After a command that writes a work offset or the tool length: read $# again, and ask for WCO. */
-function noteOffsetWrite(command: string | undefined): void {
-  if (!command || state.running) return;
+function noteOffsetWrite(command: string): void {
+  if (state.running) return;
   const c = command.toUpperCase().replace(/\s+/g, '');
   const g10 = c.match(/G0*10L0*(20|2)(?!\d)(?:P0*(\d+))?/);
   const g92 = /G92(?![.\d])/.test(c);
-  if (!g10 && !g92 && !/G43\.1|G49(?!\d)/.test(c)) {
+  if (!g10 && !g92 && !/G43\.1|G49(?!\d)|G28\.1|G30\.1/.test(c)) {
     // A new active work offset: the full report carries WCS.
     if (/G5[4-9](?:\.[1-3])?(?!\d)/.test(c)) rtSend('\x87');
     return;

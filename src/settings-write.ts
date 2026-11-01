@@ -4,7 +4,7 @@
 
 import { state } from './state';
 import { log } from './console';
-import { cmdSend } from './connection';
+import * as command from './command';
 import * as machine from './stores/machine';
 
 export function markDirty(id: number, val: string): void {
@@ -14,60 +14,46 @@ export function markDirty(id: number, val: string): void {
   (document.getElementById('btnWriteAll') as HTMLButtonElement).disabled = false;
 }
 
-export function writeSetting(id: number): void {
+export async function writeSetting(id: number): Promise<void> {
   if (!state.connected) { log('err', 'Not connected'); return; }
   const val = state.settingsDirty[id] !== undefined ? state.settingsDirty[id] : state.settingsValues[id];
   if (val === undefined) return;
   const btn = document.getElementById('wbtn-' + id);
-  if (btn) { btn.className = 'setting-write pending'; btn.textContent = 'WRITING\u2026'; }
-  state.pendingSettingWrite = { id, btn };
-  cmdSend('$' + id + '=' + val);
-  log('tx', '$' + id + '=' + val);
-}
-
-export function onSettingWriteOk(): void {
-  if (!state.pendingSettingWrite) return;
-  const { id, btn } = state.pendingSettingWrite;
+  if (btn) { btn.className = 'setting-write pending'; btn.textContent = 'WRITING…'; }
+  let reply: command.Reply;
+  try { reply = await command.send('$' + id + '=' + val, { log: true }); }
+  catch (e) {
+    if (!(e instanceof command.CommandFailed)) throw e;
+    if (btn) { btn.className = 'setting-write'; btn.textContent = 'WRITE $' + id; }
+    return;
+  }
+  if (reply.result === 'error') {
+    if (btn) { btn.className = 'setting-write err'; btn.textContent = 'ERR: ' + reply.code; setTimeout(() => { if (btn) { btn.className = 'setting-write'; btn.textContent = 'WRITE $' + id; } }, 3000); }
+    return;
+  }
   if (state.settingsDirty[id] !== undefined) { state.settingsValues[id] = state.settingsDirty[id]; delete state.settingsDirty[id]; machine.settings.value = { ...state.settingsValues }; }
   const row = document.getElementById('srow-' + id); if (row) row.classList.remove('dirty');
-  if (btn) { btn.className = 'setting-write ok'; btn.textContent = 'SAVED \u2713'; setTimeout(() => { if (btn) { btn.className = 'setting-write'; btn.textContent = 'WRITE $' + id; } }, 2000); }
-  state.pendingSettingWrite = null;
-}
-
-export function onSettingWriteErr(raw: string): void {
-  if (!state.pendingSettingWrite) return;
-  const { id, btn } = state.pendingSettingWrite;
-  if (btn) { btn.className = 'setting-write err'; btn.textContent = 'ERR: ' + raw.replace('error:', ''); setTimeout(() => { if (btn) { btn.className = 'setting-write'; btn.textContent = 'WRITE $' + id; } }, 3000); }
-  state.pendingSettingWrite = null;
+  if (btn) { btn.className = 'setting-write ok'; btn.textContent = 'SAVED ✓'; setTimeout(() => { if (btn) { btn.className = 'setting-write'; btn.textContent = 'WRITE $' + id; } }, 2000); }
 }
 
 export function writeAllDirty(): void {
   Object.keys(state.settingsDirty).forEach(id => writeSetting(parseInt(id)));
 }
 
-export function tryInterceptValue(raw: string): boolean {
-  if (raw.match(/^\$\d+=/) && state.esPhase !== 'values') {
-    const eq = raw.indexOf('=');
-    state.settingsValues[parseInt(raw.slice(1, eq))] = raw.slice(eq + 1);
-    machine.settings.value = { ...state.settingsValues };
-    return true;
-  }
-  return false;
+/** Reads one setting ($n) into the store. Resolves with its value, or undefined if it has none. */
+export async function readSetting(id: number): Promise<string | undefined> {
+  await command.send('$' + id);
+  return state.settingsValues[id];
 }
 
-export function tryParseSettingLine(raw: string): void {
-  // [SETTING:...] or $N=value lines arriving outside load phase
-  if (raw.startsWith('[SETTING:')) {
-    const p = raw.slice(9, -1).split('|');
-    if (p.length >= 2) {
-      const id = parseInt(p[0]), groupId = parseInt(p[1]);
-      if (state.settingsDefs[id]) {
-        state.settingsDefs[id].groupId = groupId;
-      }
-    }
-  } else if (raw.match(/^\$\d+=/)) {
+// Any reply with $n=value lines in it (a read, $$, one typed in the console) updates the stored values.
+command.onReply(reply => {
+  let changed = false;
+  for (const raw of reply.lines) {
+    if (!/^\$\d+=/.test(raw)) continue;
     const eq = raw.indexOf('=');
     state.settingsValues[parseInt(raw.slice(1, eq))] = raw.slice(eq + 1);
-    machine.settings.value = { ...state.settingsValues };
+    changed = true;
   }
-}
+  if (changed) machine.settings.value = { ...state.settingsValues };
+});

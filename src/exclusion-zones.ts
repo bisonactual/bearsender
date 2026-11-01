@@ -4,7 +4,7 @@
 
 import { state } from './state';
 import { log } from './console';
-import { sendCmd } from './connection';
+import * as command from './command';
 import { scene } from './viewport';
 import { optGetBearColor, optGetBearScale } from './options';
 import { lsGet, lsSet } from './ui';
@@ -25,8 +25,6 @@ let _atciDetected = false;
 let _ezPluginDetected = false;
 let _ezGlobalEnabled = false;
 let _insideZone = false;       // firmware says planned pos is in zone
-let _ezLoading = false;
-let _ezLoadLines: string[] = [];
 let _ezZones: EzZone[] = [];
 let _tabInited = false;
 let _zoneMeshes: any[] = [];
@@ -98,51 +96,35 @@ function isInsideBlockingZone(): boolean {
 
 // ── Plugin detection ──────────────────────────────────────────────────────────
 
+/** A line of the $I+ reply. The zones and the ATCi travel are read after it (ezConnected). */
 export function ezCheckPlugin(line: string): void {
   if (line.includes('[PLUGIN:Exclusion Zones')) {
     _ezPluginDetected = true;
     log('info', '🔒 Exclusion Zones plugin detected');
     const notice = document.getElementById('ezPluginNotice');
     if (notice) notice.style.display = 'none';
-    setTimeout(() => ezRefresh(), 300);
   }
   if (line.includes('[PLUGIN:ATCi') || line.includes('[PLUGIN:ATCI') || line.includes('[PLUGIN:Sienci ATCi')) {
     _atciDetected = true;
     log('info', '🔧 ATCi plugin detected');
     const notice = document.getElementById('ezPluginNotice');
     if (notice) notice.style.display = 'none';
-    setTimeout(() => {
-      sendCmd('$130'); sendCmd('$131'); sendCmd('$132');
-      // Re-render after responses arrive so the ATCI row appears with fresh values
-      setTimeout(() => { renderEzTab(); renderEzModule(); }, 600);
-    }, 500);
   }
 }
 
-// ── Intercept ─────────────────────────────────────────────────────────────────
-
-export function ezIntercept(line: string): boolean {
-  if (!_ezPluginDetected) return false;
-  if (!_ezLoading && !line.startsWith('[EZ:')) return false;
-  if (line.startsWith('[EZ:')) {
-    _ezLoading = true; _ezLoadLines = [];
-    const m = line.match(/\[EZ:(enabled|disabled),(\d+)/);
-    if (m) _ezGlobalEnabled = m[1] === 'enabled';
-    _ezLoadLines.push(line); return true;
-  }
-  if (line.startsWith('[ZONE:') && _ezLoading) { _ezLoadLines.push(line); return true; }
-  if (line === 'ok' && _ezLoading) {
-    _ezLoading = false;
-    parseEzZoneList(_ezLoadLines);
-    renderEzTab(); renderEzModule(); rebuildZoneMeshes();
-    return false;
-  }
-  return false;
+/** On connecting, once $I+ has named the plugins. */
+export async function ezConnected(): Promise<void> {
+  if (_ezPluginDetected || _atciDetected) await ezRefresh();
 }
 
+// ── The $ZONE reply ───────────────────────────────────────────────────────────
+
+// [EZ:enabled,n] then a [ZONE:slot|xmin,ymin,zmin,xmax,ymax,zmax|flags] line for each zone
 function parseEzZoneList(lines: string[]): void {
   _ezZones = [];
   for (const line of lines) {
+    const ez = line.match(/\[EZ:(enabled|disabled),(\d+)/);
+    if (ez) _ezGlobalEnabled = ez[1] === 'enabled';
     const m = line.match(/\[ZONE:(\d+)\|([^|]+)\|(\d+)\]/);
     if (!m) continue;
     const slot = parseInt(m[1]), coords = m[2].split(',').map(Number), flags = parseInt(m[3]);
@@ -177,21 +159,26 @@ export function ezParseStatus(field: string): void {
 
 // ── Refresh / Toggle ──────────────────────────────────────────────────────────
 
-export function ezRefresh(): void {
+/** Reads the zones ($ZONE) and, with the ATCi, the travel it guards ($130-$132), then redraws. */
+export async function ezRefresh(): Promise<void> {
   if (!state.connected) { log('err', 'Not connected'); return; }
-  if (_ezPluginDetected) { _ezLoading = true; _ezLoadLines = []; sendCmd('$ZONE'); }
-  if (_atciDetected) {
-    sendCmd('$130'); sendCmd('$131'); sendCmd('$132');
-    // Re-render after ATCI setting responses arrive so coordinates update
-    setTimeout(() => { renderEzTab(); renderEzModule(); rebuildZoneMeshes(); }, 600);
-  }
-  renderEzTab(); renderEzModule();
+  try {
+    const zones = _ezPluginDetected ? command.send('$ZONE') : null;
+    const travel = _atciDetected ? [130, 131, 132].map(id => command.send('$' + id)) : [];
+    await Promise.all(travel);
+    if (zones) parseEzZoneList((await zones).lines);
+  } catch (e) { if (!(e instanceof command.CommandFailed)) throw e; }
+  renderEzTab(); renderEzModule(); rebuildZoneMeshes();
+}
+
+/** Sends a plugin command, then reads the zones again once it has been answered. */
+function ezCommand(line: string): void {
+  command.send(line, { log: true }).then(() => ezRefresh(), e => { if (!(e instanceof command.CommandFailed)) throw e; });
 }
 
 export function ezToggle(): void {
   if (!state.connected || !_ezPluginDetected) return;
-  sendCmd(_ezGlobalEnabled ? '$EXCLUSION=0' : '$EXCLUSION=1');
-  setTimeout(() => ezRefresh(), 200);
+  ezCommand(_ezGlobalEnabled ? '$EXCLUSION=0' : '$EXCLUSION=1');
 }
 
 // ── Show labels toggle ────────────────────────────────────────────────────────
@@ -348,15 +335,14 @@ function ezModSaveZone(): void {
   if (g('ezModFlagEn').checked) flags |= FLAG_ENABLED; if (g('ezModFlagGcode').checked) flags |= FLAG_GCODE;
   if (g('ezModFlagJog').checked) flags |= FLAG_JOG; if (g('ezModFlagTool').checked) flags |= FLAG_TOOLCHG;
   if (isNaN(slot) || slot < 0 || slot > 15) { log('err', 'Slot must be 0-15'); return; }
-  sendCmd(`$ZONE=${slot},${xmin},${ymin},${zmin},${xmax},${ymax},${zmax},${flags}`);
-  setTimeout(() => ezRefresh(), 200);
+  ezCommand(`$ZONE=${slot},${xmin},${ymin},${zmin},${xmax},${ymax},${zmax},${flags}`);
 }
 function ezModCancelEdit(): void { const f = document.getElementById('ezModEditForm'); if (f) f.style.display = 'none'; }
 
 // ── Tab form helpers ──────────────────────────────────────────────────────────
 
 function ezTabEditZone(slot: number): void { const z = _ezZones.find(z => z.slot === slot); if (z) populateTabForm(z); }
-function ezDeleteZone(slot: number): void { sendCmd('$ZONE-' + slot); setTimeout(() => ezRefresh(), 200); }
+function ezDeleteZone(slot: number): void { ezCommand('$ZONE-' + slot); }
 
 function populateTabForm(zone?: EzZone): void {
   const form = document.getElementById('ezTabEditForm'); if (!form) return; form.style.display = '';
@@ -396,8 +382,7 @@ export function ezSaveZone(): void {
   if (g('ezTabFlagEn').checked) flags |= FLAG_ENABLED; if (g('ezTabFlagGcode').checked) flags |= FLAG_GCODE;
   if (g('ezTabFlagJog').checked) flags |= FLAG_JOG; if (g('ezTabFlagTool').checked) flags |= FLAG_TOOLCHG;
   if (isNaN(slot) || slot < 0 || slot > 15) { log('err', 'Slot must be 0-15'); return; }
-  sendCmd(`$ZONE=${slot},${xmin},${ymin},${zmin},${xmax},${ymax},${zmax},${flags}`);
-  setTimeout(() => ezRefresh(), 200);
+  ezCommand(`$ZONE=${slot},${xmin},${ymin},${zmin},${xmax},${ymax},${zmax},${flags}`);
 }
 export function ezCancelEdit(): void { const f = document.getElementById('ezTabEditForm'); if (f) f.style.display = 'none'; }
 

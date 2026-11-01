@@ -1,16 +1,62 @@
 // ═══════════════════════════════════════════════
 // JOB CONTROL — character-counting pump
 // ═══════════════════════════════════════════════
+//
+// The job is a source for the command layer, which pulls its lines while they fit in the
+// controller's RX buffer, through the same queue as every other command.
 
 import { state } from './state';
 import { byteLen } from './ui';
 import { log } from './console';
-import { cmdSend, rtSend } from './connection';
+import { rtSend } from './connection';
+import * as command from './command';
 import { updateProgress } from './gcode';
 import { frActive, frEnabled, frJobLines } from './flight-recorder';
 import * as job from './stores/job';
 
 export interface SendLine { text: string; line: number; }
+
+let inFlight = 0;   // job lines sent and not yet answered
+
+const source: command.JobSource = {
+  next(room) {
+    if (!state.running || state.paused || state.lineHead >= state.sendLines.length) return null;
+    const next = state.sendLines[state.lineHead];
+    if (byteLen(next.text + '\n') > room) return null;
+    state.lineHead++;
+    inFlight++;
+    if (next.line > 0) job.sentLine.value = next.line;
+    updateProgress(next.line, state.gcodeLines.length);
+    return next;
+  },
+  replied(line, reply) {
+    inFlight = Math.max(0, inFlight - 1);
+    if (!state.running) return;
+    if (line.line > 0) job.ackedLine.value = line.line;
+    if (reply.result === 'error') {
+      state.running = false;
+      command.endStream(source);
+      updateRunButtons();
+      log('alarm', 'Stream halted on error. Fix G-code and restart.');
+      job.finished('error');
+      return;
+    }
+    if (state.lineHead >= state.sendLines.length && inFlight === 0) {
+      state.running = false;
+      command.endStream(source);
+      log('info', '✓ Job complete');
+      updateRunButtons();
+      job.finished('completed');
+    }
+  },
+  dropped(why) {
+    inFlight = 0;
+    if (!state.running) return;
+    state.running = false; state.paused = false;
+    updateRunButtons();
+    job.finished(why === 'alarm' ? 'alarm' : why === 'disconnected' ? 'link lost' : 'stopped');
+  },
+};
 
 export function startJob(): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
@@ -21,6 +67,7 @@ export function startJob(): void {
     rtSend('~');
     log('info', 'Resumed');
     updateRunButtons();
+    command.pump();
     return;
   }
   const recorded = frActive();
@@ -35,10 +82,17 @@ export function startJob(): void {
 export function streamLines(lines: SendLine[], numbered: boolean): void {
   state.running = true; state.paused = false;
   state.sendLines = lines; state.jobNumbered = numbered;
-  state.lineHead = 0; state.rxInFlight = 0; state.sentQueue.length = 0; state.segmentIndex = 0;
-  state.esPhase = 'idle';
+  state.lineHead = 0; state.segmentIndex = 0;
+  inFlight = 0;
   updateRunButtons();
-  pumpQueue();
+  if (!lines.length) {
+    state.running = false;
+    log('info', '✓ Job complete');
+    updateRunButtons();
+    job.finished('completed');
+    return;
+  }
+  command.stream(source);
 }
 
 function stripComment(line: string): string {
@@ -54,51 +108,23 @@ function plainLines(): SendLine[] {
   return lines;
 }
 
-export function pumpQueue(): void {
-  if (!state.running || state.paused) return;
-  try { _pumpQueue(); } catch (e: any) { log('err', 'pumpQueue: ' + e.message); state.running = false; updateRunButtons(); }
-}
-
-function _pumpQueue(): void {
-  const hwm = state.RX_BUFFER_SIZE - 1;
-
-  while (state.lineHead < state.sendLines.length) {
-    const { text, line } = state.sendLines[state.lineHead];
-    const wouldCost = byteLen(text + '\n');
-
-    if (state.rxInFlight + wouldCost > hwm) break;
-
-    cmdSend(text);
-    const sent = state.sentQueue[state.sentQueue.length - 1];
-    if (sent && sent.line === text && line > 0) sent.fileLine = line;
-    log('tx', text);
-    state.lineHead++;
-    if (line > 0) job.sentLine.value = line;
-    updateProgress(line, state.gcodeLines.length);
-  }
-
-  if (state.lineHead >= state.sendLines.length && state.sentQueue.length === 0 && state.running) {
-    state.running = false;
-    log('info', '✓ Job complete');
-    updateRunButtons();
-    job.finished('completed');
-  }
-}
-
 export function pauseJob(): void {
   if (!state.running) return;
   state.paused = !state.paused;
   rtSend(state.paused ? '!' : '~');
   log('info', state.paused ? 'Feed hold sent' : 'Cycle resume sent');
   updateRunButtons();
+  if (!state.paused) command.pump();
 }
 
 export function stopJob(): void {
   if (!state.running && !state.paused) return;
   state.running = false; state.paused = false;
+  command.endStream(source);
   rtSend('!');
+  // The hold first, so the machine decelerates and keeps its position; then the reset.
   setTimeout(() => rtSend('\x18'), 150);
-  state.rxInFlight = 0; state.sentQueue.length = 0; state.lineHead = 0;
+  state.lineHead = 0;
   log('info', 'Job stopped — soft reset sent');
   updateRunButtons();
   job.finished('stopped');
@@ -112,9 +138,10 @@ export function updateRunButtons(): void {
 export function sendReset(): void {
   if (!state.connected) return;
   if (state.running) job.finished('stopped');
-  rtSend('\x18');
   state.running = false; state.paused = false;
-  state.rxInFlight = 0; state.sentQueue.length = 0; state.lineHead = 0;
+  command.endStream(source);
+  rtSend('\x18');
+  state.lineHead = 0;
   log('info', 'Soft reset');
   updateRunButtons();
 }

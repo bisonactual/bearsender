@@ -5,15 +5,18 @@
 import { state } from '../state';
 import { log } from '../console';
 import { probeAxis, rapidToMPos, applyXYResult, applyZResult } from './probe-program';
-import { isProbingRunning } from './probe-program';
+import { isProbingRunning, runProbing } from './probe-program';
 
 function startPos() {
   return { x: (state as any).machineX, y: (state as any).machineY, z: (state as any).machineZ };
 }
 
 export async function runEdgeFinder(cfg: any): Promise<boolean> {
-  if (!state.connected) { log('err', 'Not connected'); return false; }
   if (isProbingRunning()) { log('err', 'Probe already running'); return false; }
+  return (await runProbing(() => edgeFinder(cfg))) ?? false;
+}
+
+async function edgeFinder(cfg: any): Promise<boolean> {
   const sp = startPos();
   const clr = cfg.xyClr + cfg.probeDiameter / 2;
   let ok = false;

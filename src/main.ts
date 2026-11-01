@@ -7,6 +7,8 @@ import { state } from './state';
 import { lsGet, lsSet, confirmTap } from './ui';
 import { log, clearConsole, sendManual, handleConInput, conAutoUpdate } from './console';
 import { sendCmd } from './connection';
+import * as command from './command';
+import { initParser } from './parser';
 import { initViewport, setView, fitView, toggleToolhead, vpApply, setProjection, toggleWcsMarkers } from './viewport';
 import { loadFile, uploadAndOpenFile, frameProgram } from './gcode';
 import { updateRunButtons } from './streaming';
@@ -220,8 +222,7 @@ function copyDebugStats(): void {
     machineState: state._prevMachineStateSl,
     homed: state.machineHomed,
     pos: { x: state.machineX, y: state.machineY, z: state.machineZ },
-    rx: { inFlight: state.rxInFlight, bufSize: state.RX_BUFFER_SIZE },
-    sentQueue: { length: state.sentQueue.length, cmds: state.sentQueue.map(s => s.line) },
+    commands: command.stats(),
     job: { running: state.running, paused: state.paused, lineHead: state.lineHead, totalLines: state.gcodeLines.length },
     jog: { isJogging: state._isJogging, holdMode: state.jogHoldMode, stepXY: state.jogStepXY, stepZ: state.jogStepZ },
     overrides: state.ovrCurrent,
@@ -233,8 +234,13 @@ function copyDebugStats(): void {
   });
 }
 
+// The command layer, and its last 3000 events (lines sent and received, syncs), for debugging from the console.
+w.command = command;
+w.commandTrace = () => command.traceLog().map(e => new Date(e.t).toISOString().slice(11, 23) + ' ' + e.dir + ' ' + e.text).join('\n');
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 // The carried-over panels are built into #legacy first; the shell then moves each into its screen.
+initParser();
 initChunk1Events();
 initChunk2Events();
 initChunk3Events();

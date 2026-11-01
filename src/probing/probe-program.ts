@@ -2,10 +2,16 @@
 // Core probing engine — WCS mapping, probe/idle
 // waiting, tool length sequences
 // ═══════════════════════════════════════════════
+//
+// Each step waits for its own reply through the command layer. A probing move (G38.3) is answered
+// once the probe cycle has ended, with the [PRB:] line before its ok when $10 asks for it; without
+// that, $# gives the same line. A move is answered once it is planned, so G4 P0 goes after it: its
+// ok comes when the planner is empty, that is, when the machine has stopped there.
 
 import { state } from '../state';
 import { log } from '../console';
 import { sendCmd } from '../connection';
+import * as command from '../command';
 
 export const WCS_P: Record<string, number> = {
   G54: 1,
@@ -21,10 +27,7 @@ export const WCS_P: Record<string, number> = {
 
 let _running = false;
 let _cancelled = false;
-let _probeResult: ProbeResult | null = null;
-let _probeResolve: ((r: ProbeResult | null) => void) | null = null;
-let _idleResolve: (() => void) | null = null;
-let _idleTimeout: ReturnType<typeof setTimeout> | null = null;
+let _cancel: (() => void) | null = null;   // ends the wait of the step in progress
 
 interface ProbeResult {
   x: number;
@@ -70,87 +73,64 @@ export function isProbingRunning(): boolean {
   return _running;
 }
 
-export function probingIntercept(raw: string): boolean {
-  const m = raw.match(/^\[PRB:([^,]+),([^,]+),([^:]+):(\d)\]$/);
-  if (!m) return false;
-  const result: ProbeResult = {
-    x: parseFloat(m[1]),
-    y: parseFloat(m[2]),
-    z: parseFloat(m[3]),
-    success: m[4] === '1',
-  };
-  _probeResult = result;
-  if (_probeResolve) {
-    _probeResolve(result);
-    _probeResolve = null;
-  }
-  return false;
-}
-
-export function probingIdleNotify(machineState: string): void {
-  const sl = machineState.toLowerCase().split(':')[0];
-  if ((sl === 'idle' || sl === 'alarm') && _idleResolve) {
-    if (_idleTimeout) clearTimeout(_idleTimeout);
-    _idleResolve();
-    _idleResolve = null;
+/** Runs a probing sequence: one at a time, and Cancel ends it. */
+export async function runProbing<T>(sequence: () => Promise<T>): Promise<T | null> {
+  if (!state.connected) { log('err', 'Not connected'); return null; }
+  if (_running) { log('err', 'Probing already in progress'); return null; }
+  _running = true;
+  _cancelled = false;
+  try {
+    return await sequence();
+  } finally {
+    _running = false;
+    _cancel = null;
   }
 }
 
-function waitIdle(timeoutMs = 30000): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (!_running || _cancelled) { resolve(false); return; }
-    _idleResolve = () => resolve(true);
-    _idleTimeout = setTimeout(() => {
-      _idleResolve = null;
-      resolve(false);
-    }, timeoutMs);
+/** The promise's value, or null if it fails or Cancel is pressed first. */
+function orCancel<T>(p: Promise<T>): Promise<T | null> {
+  return new Promise(resolve => {
+    if (_cancelled) { resolve(null); return; }
+    _cancel = () => resolve(null);
+    p.then(v => { _cancel = null; resolve(v); }, () => { _cancel = null; resolve(null); });
   });
 }
 
-function waitProbe(timeoutMs = 15000): Promise<ProbeResult | null> {
-  return new Promise((resolve) => {
-    if (!_running || _cancelled) { resolve(null); return; }
-    _probeResult = null;
-    _probeResolve = resolve;
-    setTimeout(() => {
-      if (_probeResolve) {
-        _probeResolve = null;
-        resolve(null);
-      }
-    }, timeoutMs);
-  });
+function parseProbe(lines: string[]): ProbeResult | null {
+  for (const raw of lines) {
+    const m = raw.match(/^\[PRB:([^,]+),([^,]+),([^:]+):(\d)\]$/);
+    if (m) return { x: parseFloat(m[1]), y: parseFloat(m[2]), z: parseFloat(m[3]), success: m[4] === '1' };
+  }
+  return null;
 }
 
-async function sendAndWait(cmd: string, timeoutMs = 30000): Promise<boolean> {
+/** A probing move, and where it touched. */
+async function probeMove(cmd: string): Promise<ProbeResult | null> {
+  if (_cancelled) return null;
+  const reply = await orCancel(command.send(cmd, { log: true }));
+  if (!reply || reply.result !== 'ok') return null;
+  const result = parseProbe(reply.lines);
+  if (result) return result;
+  const params = await orCancel(command.send('$#'));
+  return params ? parseProbe(params.lines) : null;
+}
+
+/** A move, waiting until the machine has stopped at its end. */
+async function sendAndWait(cmd: string): Promise<boolean> {
   if (_cancelled) return false;
-  sendCmd(cmd);
-  return waitIdle(timeoutMs);
+  const replies = await orCancel(Promise.all([command.send(cmd, { log: true }), command.send('G4P0')]));
+  return !!replies && replies.every(r => r.result === 'ok');
 }
 
 export function cancelProbing(): void {
   _cancelled = true;
   _running = false;
-  if (_idleResolve) { _idleResolve(); _idleResolve = null; }
-  if (_probeResolve) { _probeResolve(null); _probeResolve = null; }
-  if (_idleTimeout) { clearTimeout(_idleTimeout); _idleTimeout = null; }
+  if (_cancel) { _cancel(); _cancel = null; }
 }
 
 export async function runToolLengthProbe(seq: any): Promise<ProbeResult | null> {
-  if (!state.connected) { log('err', 'Not connected'); return null; }
-  if (_running) { log('err', 'Probing already in progress'); return null; }
   (window as any).clearPreview3D?.();
-  _running = true;
-  _cancelled = false;
-  _probeResult = null;
-  try {
-    if (seq.mode === 'toolsetter') {
-      return await runToolsetterSequence(seq);
-    } else {
-      return await runTouchplateSequence(seq);
-    }
-  } finally {
-    _running = false;
-  }
+  return runProbing(() => seq.mode === 'toolsetter' ? runToolsetterSequence(seq) : runTouchplateSequence(seq));
 }
 
 export async function probeAxis(
@@ -163,13 +143,11 @@ export async function probeAxis(
   const dist = probeDistance.toFixed(4);
   const latch = latchDistance.toFixed(4);
   const latch2 = (latchDistance * 2).toFixed(4);
-  sendCmd(`G38.3G91F${probeFeedRate}${axis}${sign}${dist}`);
-  const fast = await waitProbe();
+  const fast = await probeMove(`G38.3G91F${probeFeedRate}${axis}${sign}${dist}`);
   if (!fast || !fast.success) return null;
   const retractSign = direction < 0 ? '' : '-';
   if (!await sendAndWait(`G91G0${axis}${retractSign}${latch}`)) return null;
-  sendCmd(`G38.3G91F${latchFeedRate}${axis}${sign}${latch2}`);
-  const slow = await waitProbe();
+  const slow = await probeMove(`G38.3G91F${latchFeedRate}${axis}${sign}${latch2}`);
   if (!slow || !slow.success) return null;
   if (!await sendAndWait(`G91G0${axis}${retractSign}${latch}`)) return null;
   return slow;
@@ -186,9 +164,7 @@ export async function rapidToMPos(x: number | null, y: number | null, z: number 
 
 async function runTouchplateSequence(seq: any): Promise<ProbeResult | null> {
   log('info', '⊕ Touch plate probe starting…');
-  const fastCmd = `G38.3G91F${seq.probeFeedRate}Z-${seq.probeDistance.toFixed(4)}`;
-  sendCmd(fastCmd);
-  const fastResult = await waitProbe();
+  const fastResult = await probeMove(`G38.3G91F${seq.probeFeedRate}Z-${seq.probeDistance.toFixed(4)}`);
   if (!fastResult || !fastResult.success) {
     log('err', '✗ Probe: no contact on fast probe — check probe wiring and position');
     await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`);
@@ -198,9 +174,7 @@ async function runTouchplateSequence(seq: any): Promise<ProbeResult | null> {
     log('err', '✗ Probe: failed to retract after fast probe');
     return null;
   }
-  const slowCmd = `G38.3G91F${seq.latchFeedRate}Z-${(seq.latchDistance * 2).toFixed(4)}`;
-  sendCmd(slowCmd);
-  const slowResult = await waitProbe();
+  const slowResult = await probeMove(`G38.3G91F${seq.latchFeedRate}Z-${(seq.latchDistance * 2).toFixed(4)}`);
   if (!slowResult || !slowResult.success) {
     log('err', '✗ Probe: no contact on slow probe');
     await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`);
@@ -229,9 +203,7 @@ async function runToolsetterSequence(seq: any): Promise<ProbeResult | null> {
   if (!await sendAndWait(`G53G0Z${approachZ.toFixed(4)}`)) {
     log('err', '✗ Toolsetter: could not approach toolsetter Z'); return null;
   }
-  const fastCmd = `G38.3G91F${seq.probeFeedRate}Z-${(depth + 5).toFixed(4)}`;
-  sendCmd(fastCmd);
-  const fastResult = await waitProbe();
+  const fastResult = await probeMove(`G38.3G91F${seq.probeFeedRate}Z-${(depth + 5).toFixed(4)}`);
   if (!fastResult || !fastResult.success) {
     log('err', '✗ Toolsetter: no contact on fast probe');
     await sendAndWait(`G53G0Z0`);
@@ -241,9 +213,7 @@ async function runToolsetterSequence(seq: any): Promise<ProbeResult | null> {
   if (!await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`)) {
     log('err', '✗ Toolsetter: failed to retract'); return null;
   }
-  const slowCmd = `G38.3G91F${seq.latchFeedRate}Z-${(seq.latchDistance * 2).toFixed(4)}`;
-  sendCmd(slowCmd);
-  const slowResult = await waitProbe();
+  const slowResult = await probeMove(`G38.3G91F${seq.latchFeedRate}Z-${(seq.latchDistance * 2).toFixed(4)}`);
   if (!slowResult || !slowResult.success) {
     log('err', '✗ Toolsetter: no contact on slow probe');
     await sendAndWait(`G53G0Z0`);

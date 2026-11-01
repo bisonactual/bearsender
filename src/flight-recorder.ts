@@ -6,14 +6,15 @@
 // With it switched on (Options, or the FLIGHT RECORDER tab) FlexiSender:
 //   - stamps each job with $FLIGHT=<job id> and numbers every line N<line>, so the
 //     controller keeps a record of the line it is executing
-//   - doesn't reset the controller when it connects, and waits for it to answer, since
-//     after a lost connection it may still be retracting the tool
+//   - doesn't reset the controller when it connects; the command layer waits for it to
+//     answer, since after a lost connection it may still be retracting the tool
 //   - offers to resume when it finds a job that was cut short by a lost connection or
 //     a controller restart, once the same file is loaded
 
 import { state } from './state';
 import { log } from './console';
-import { cmdSend, sendCmd } from './connection';
+import { sendCmd } from './connection';
+import * as command from './command';
 import { lsGet, lsSet, esc } from './ui';
 import { streamLines, type SendLine } from './streaming';
 import { on as onBus } from './bus';
@@ -56,20 +57,9 @@ let _record: FlightRecord | null = null;
 let _events: string[] = [];
 let _eventsLoading = false;
 let _watchdogSupported: boolean | null = null;
-let _helpLoading = false;
-let _watchdogListed = false;
 let _undercut = false;
 let _promptedFor = '';
 let _toolChecked = false;
-
-let _handshakeTimer: ReturnType<typeof setTimeout> | null = null;
-let _handshakeThen: (() => void) | null = null;
-let _handshakeStarted = 0;
-let _handshakeWaitLogged = false;
-let _handshakeAnswered = false;     // the [VER:] line of a $I+ reply has arrived
-
-const HANDSHAKE_RETRY = 2500;   // ms between attempts while the controller doesn't answer
-const HANDSHAKE_LIMIT = 90000;  // ms before we give up waiting
 
 /** Copies what this module knows into the flight recorder store, for the job screen. */
 function publish(): void {
@@ -94,60 +84,22 @@ export function frActive(): boolean { return frEnabled() && _pluginDetected && !
 export function frSetEnabled(enabled: boolean): void {
   lsSet('fs-fr-enabled', enabled);
   log('info', enabled ? '✈ Flight recorder on' : '✈ Flight recorder off');
-  if (enabled && state.connected && _pluginDetected) queryController();
+  if (enabled && state.connected && _pluginDetected) queryController().catch(ignoreFailed);
   renderFlightTab();
 }
 
+function ignoreFailed(e: unknown): void { if (!(e instanceof command.CommandFailed)) throw e; }
+
 // ── Connecting ────────────────────────────────────────────────────────────────
 
-// While the controller is settling a lost job it reads no input at all, so a $I+ sent then
-// gets no answer. Keep sending it (starting the byte count afresh each time) until one is
-// answered, then carry on with the usual start-up. It has to be a real answer, with the
-// [VER:] line: the controller empties its input while it settles, and a $I+ cut in half
-// there can leave just its newline, which comes back as an ok of its own.
-export function frConnectHandshake(then: () => void): void {
-  frCancelHandshake();
-  _handshakeThen = then;
-  _handshakeStarted = Date.now();
-  _handshakeWaitLogged = false;
-  _handshakeAnswered = false;
-
-  const ask = () => {
-    if (!state.connected || !_handshakeThen) return;
-    if (Date.now() - _handshakeStarted > HANDSHAKE_LIMIT) {
-      log('err', 'Flight recorder: the controller never answered. Carrying on anyway.');
-      finishHandshake();
-      return;
-    }
-    if (Date.now() - _handshakeStarted > HANDSHAKE_RETRY && !_handshakeWaitLogged) {
-      _handshakeWaitLogged = true;
-      log('info', '✈ Waiting for the controller to answer. It may be finishing a retract after the lost connection.');
-    }
-    state.sentQueue.length = 0;
-    state.rxInFlight = 0;
-    cmdSend('$I+');
-    _handshakeTimer = setTimeout(ask, HANDSHAKE_RETRY);
-  };
-
-  _handshakeTimer = setTimeout(ask, 600);
+/** After $I+ on connecting: the record and the settings, when the plugin is there and on. */
+export async function frConnected(): Promise<void> {
+  if (frActive()) await queryController();
 }
 
-function frCancelHandshake(): void {
-  if (_handshakeTimer) clearTimeout(_handshakeTimer);
-  _handshakeTimer = null;
-  _handshakeThen = null;
-}
-
-function finishHandshake(): void {
-  const then = _handshakeThen;
-  frCancelHandshake();
-  if (then) then();
-  if (frActive()) queryController();
-}
-
-/** Reads the record again ($FLIGHT), unless the controller can't answer now. */
+/** Reads the record again ($FLIGHT), unless a job is running. */
 export function frReadRecord(): void {
-  if (state.connected && _pluginDetected && !_noStorage && !state.running && !_helpLoading && !_handshakeThen) cmdSend('$FLIGHT');
+  if (state.connected && _pluginDetected && !_noStorage && !state.running) command.send('$FLIGHT').catch(ignoreFailed);
 }
 
 /** Clears the event log on the controller ($EVENTSCLEAR). */
@@ -156,26 +108,28 @@ export function frClearEvents(): void {
 }
 
 export function frDisconnected(): void {
-  frCancelHandshake();
   flight.eventsReadAt.value = null;
   _pluginDetected = false;
   _noStorage = false;
   _watchdogSupported = null;
-  _helpLoading = false;
   _eventsLoading = false;
   renderFlightTab();
 }
 
-function queryController(): void {
-  cmdSend('$FLIGHT');
-  for (const id of [790, 791, 792]) cmdSend('$' + id);
-  // Asking for $793 on a build without the watchdog is an error, and the plugin's event
-  // log records every error. So look for its test command in the command list first.
-  if (_watchdogSupported === null) {
-    _helpLoading = true;
-    _watchdogListed = false;
-    cmdSend('$HELP COMMANDS');
-  } else if (_watchdogSupported) cmdSend('$793');
+/** The record, the retract settings and, where the firmware has it, the watchdog. */
+async function queryController(): Promise<void> {
+  // All in flight at once; each reply comes back to its own command. Asking for $793 on a build
+  // without the watchdog is an error, and the plugin's event log records every error. So look for
+  // its test command in the command list first.
+  const replies = await Promise.all([
+    command.send('$FLIGHT'),
+    ...[790, 791, 792].map(id => command.send('$' + id)),
+    _watchdogSupported === null ? command.send('$HELP COMMANDS') : Promise.resolve(null),
+  ]);
+  const listing = replies[replies.length - 1];
+  if (listing) _watchdogSupported = listing.lines.some(line => line.startsWith('$WATCHDOGTEST'));
+  if (_watchdogSupported) await command.send('$793');
+  renderSettings();
 }
 
 // ── Responses ─────────────────────────────────────────────────────────────────
@@ -192,45 +146,23 @@ export function frCheckPlugin(line: string): void {
   renderFlightTab();
 }
 
-/** Returns true if the line was used up here and shouldn't go any further. */
-export function frIntercept(raw: string, sent?: { line: string }): boolean {
-  if (raw === 'ok' || raw.startsWith('error:')) {
-    const command = sent ? sent.line : '';
-    if (command === '$I+' && _handshakeThen && _handshakeAnswered) finishHandshake();
-    if (command.startsWith('$EVENTS') && _eventsLoading) { _eventsLoading = false; renderEvents(); }
-    if (command === '$HELP COMMANDS' && _helpLoading) {
-      _helpLoading = false;
-      _watchdogSupported = _watchdogListed;
-      if (_watchdogSupported) cmdSend('$793');
-      setTimeout(renderSettings, 0);
-    }
-    if (/^\$79[0-3]$/.test(command)) setTimeout(renderSettings, 0);
-    return false;
-  }
+// The record comes back in the reply to every $FLIGHT command: the read, the job stamp
+// ($FLIGHT=<job id>, a line of the job) and $FLIGHTCLEAR.
+command.onReply(reply => {
+  if (!reply.command.toUpperCase().startsWith('$FLIGHT')) return;
+  const line = reply.lines.find(l => l.startsWith('[FLIGHT:'));
+  if (!line) return;
+  _record = parseRecord(line);
+  renderRecord();
+  if (_record) maybeOfferResume();
+});
 
-  // The command list, only read to see whether the watchdog is there. It is asked for together with
-  // $FLIGHT and $790-$792, so their replies (sent first) arrive while it loads and must get through.
-  if (_helpLoading && !raw.startsWith('ALARM') && !raw.startsWith('[MSG') && !raw.startsWith('[FLIGHT:') && !/^\$\d+=/.test(raw)) {
-    if (raw.startsWith('$WATCHDOGTEST')) _watchdogListed = true;
-    return true;
-  }
-
-  if (raw.startsWith('[VER:') && _handshakeThen) _handshakeAnswered = true;
-
-  if (raw.startsWith('[FLIGHT:')) {
-    _record = parseRecord(raw);
-    renderRecord();
-    if (_record) maybeOfferResume();
-    return false;
-  }
-
-  if (raw.startsWith('[EVENT:') && _eventsLoading) { _events.push(raw); return true; }
-
-  // A retract after the sender went quiet: ask for the record so the resume can be offered.
-  if ((raw === 'ALARM:80' || raw === 'ALARM:81') && _pluginDetected) setTimeout(() => cmdSend('$FLIGHT'), 300);
-
-  return false;
-}
+// A retract after the sender went quiet: ask for the record so the resume can be offered. The
+// plugin emptied the controller's input when it started the retract, so the command layer gets
+// the line in step again first, and this goes after that.
+command.on('alarm', raw => {
+  if ((raw === 'ALARM:80' || raw === 'ALARM:81') && _pluginDetected) command.send('$FLIGHT').catch(ignoreFailed);
+});
 
 function parseRecord(line: string): FlightRecord | null {
   const fields = line.slice('[FLIGHT:'.length, -1).split('|');
@@ -515,7 +447,10 @@ function renderSettings(): void {
   }).join('') + (_watchdogSupported === false
     ? '<div class="fr-dim" style="margin-top:6px">This firmware has no watchdog. The _FR_WD builds have it.</div>' : '');
 
-  const write = (id: number, value: string) => { sendCmd('$' + id + '=' + value); cmdSend('$' + id); };
+  const write = (id: number, value: string) => {
+    sendCmd('$' + id + '=' + value);
+    command.send('$' + id).then(renderSettings, ignoreFailed);
+  };
   el.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-fr-setting]').forEach(box =>
     box.addEventListener('change', () => write(parseInt(box.dataset.frSetting!), box.checked ? '1' : '0')));
   el.querySelectorAll<HTMLButtonElement>('[data-fr-write]').forEach(btn => btn.addEventListener('click', () => {
@@ -548,19 +483,24 @@ function renderEvents(): void {
   el.innerHTML = `<table class="fr-table fr-events"><tr><th>Boot</th><th>Time (s)</th><th>Event</th><th></th><th></th></tr>${rows}</table>`;
 }
 
-/** Reads the last 100 events from the controller, unless it can't answer now. */
-export function frLoadEvents(): void {
+/** Reads the last 100 events from the controller, unless a job is running. */
+export async function frLoadEvents(): Promise<void> {
   if (!state.connected || !_pluginDetected || _noStorage || _eventsLoading || state.running) return;
   _events = [];
   _eventsLoading = true;
   renderEvents();
-  sendCmd('$EVENTS=100');
+  try {
+    const reply = await command.send('$EVENTS=100');
+    _events = reply.lines.filter(line => line.startsWith('[EVENT:'));
+  } catch (e) { ignoreFailed(e); }
+  _eventsLoading = false;
+  renderEvents();
 }
 
 export function initFlightRecorderTab(): void {
   const on = (id: string, fn: () => void) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   on('frTabToggleBtn', () => frSetEnabled(!frEnabled()));
-  on('frTabRefreshBtn', () => { if (state.connected && _pluginDetected) queryController(); });
+  on('frTabRefreshBtn', () => { if (state.connected && _pluginDetected) queryController().catch(ignoreFailed); });
   on('frEventsRefreshBtn', () => frLoadEvents());
   on('frEventsClearBtn', () => { if (state.connected && _pluginDetected) { sendCmd('$EVENTSCLEAR'); _events = []; renderEvents(); } });
   on('frModalClose', () => closeModal());

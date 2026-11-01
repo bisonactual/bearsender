@@ -5,7 +5,7 @@
 import { state } from './state';
 import { fmtOffset } from './ui';
 import { log } from './console';
-import { sendCmd } from './connection';
+import * as command from './command';
 import * as machine from './stores/machine';
 
 function parseToolTableLine(line: string): any {
@@ -113,7 +113,10 @@ function ttSetStatus(msg: string | null): void {
   if (mel) { if (msg) { mel.textContent = msg; mel.style.display = ''; } else { mel.style.display = 'none'; } }
 }
 
-export function loadToolTable(): void {
+let loading = false;
+
+/** Reads the tool table ($TTLIST). */
+export async function loadToolTable(): Promise<void> {
   const tabBtn = document.getElementById('btnTTRefresh') as HTMLButtonElement | null;
   const modBtn = document.getElementById('modTTRefresh') as HTMLButtonElement | null;
 
@@ -131,62 +134,34 @@ export function loadToolTable(): void {
   }
 
   // Already loading — don't re-fire
-  if (state.ttPhase === 'loading') return;
-
-  // If other commands are still in flight (e.g. $I+, settings, offsets),
-  // defer until the queue drains so responses don't get interleaved.
-  if (state.sentQueue.length > 0 || state.esPhase !== 'idle') {
-    ttSetStatus('Waiting for pending commands…');
-    if (tabBtn) tabBtn.disabled = true;
-    if (modBtn) modBtn.disabled = true;
-    setTimeout(() => {
-      if (tabBtn) tabBtn.disabled = false;
-      if (modBtn) modBtn.disabled = false;
-      loadToolTable();
-    }, 400);
-    return;
-  }
+  if (loading) return;
 
   ttSetStatus('Loading tool table…');
   state.ttEntries = [];
-  state._ttLines = [];
-  state.ttPhase = 'loading';
+  loading = true;
   if (tabBtn) tabBtn.disabled = true;
   if (modBtn) modBtn.disabled = true;
-  sendCmd('$TTLIST');
-}
-
-export function toolTableIntercept(raw: string): boolean {
-  if (raw === 'ok' || raw === 'OK') {
-    state.ttPhase = 'idle';
-    state.ttEntries = state._ttLines.map(parseToolTableLine).filter(e => e.tool > 0);
-    state._ttLines = [];
-    machine.toolTable.value = [...state.ttEntries];
-    machine.toolTableError.value = null;
-    renderToolTable();
+  try {
+    const reply = await command.send('$TTLIST', { log: true, quiet: true });
+    if (reply.result === 'ok') {
+      state.ttEntries = reply.lines.map(parseToolTableLine).filter(e => e.tool > 0);
+      machine.toolTable.value = [...state.ttEntries];
+      machine.toolTableError.value = null;
+      renderToolTable();
+      ttSetStatus('');
+      log('info', 'Tool table: ' + state.ttEntries.length + ' entr' + (state.ttEntries.length === 1 ? 'y' : 'ies'));
+    } else {
+      const raw = 'error:' + reply.code;
+      machine.toolTableError.value = raw;
+      ttSetStatus('⚠ ' + raw);
+      log('err', '$TTLIST: ' + raw);
+    }
+  } catch (e) {
+    if (!(e instanceof command.CommandFailed)) throw e;
     ttSetStatus('');
-    const tabBtn = document.getElementById('btnTTRefresh') as HTMLButtonElement | null;
-    const modBtn = document.getElementById('modTTRefresh') as HTMLButtonElement | null;
+  } finally {
+    loading = false;
     if (tabBtn) tabBtn.disabled = false;
     if (modBtn) modBtn.disabled = false;
-    log('info', 'Tool table: ' + state.ttEntries.length + ' entr' + (state.ttEntries.length === 1 ? 'y' : 'ies'));
-    return true;
   }
-  if (raw.startsWith('error:')) {
-    state.ttPhase = 'idle';
-    state._ttLines = [];
-    machine.toolTableError.value = raw;
-    ttSetStatus('⚠ ' + raw);
-    const tabBtn = document.getElementById('btnTTRefresh') as HTMLButtonElement | null;
-    const modBtn = document.getElementById('modTTRefresh') as HTMLButtonElement | null;
-    if (tabBtn) tabBtn.disabled = false;
-    if (modBtn) modBtn.disabled = false;
-    log('err', '$TTLIST: ' + raw);
-    return true;
-  }
-  if (raw.length > 0) {
-    state._ttLines.push(raw);
-    return true;
-  }
-  return false;
 }
