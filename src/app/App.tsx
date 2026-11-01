@@ -4,7 +4,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { signal, type Signal } from '@preact/signals';
+import type { Signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
@@ -91,22 +91,6 @@ function stateView(): StateView {
   }
 }
 
-// SET asks for a second tap: the first turns the button into "CONFIRM X0?" for 3 s. A guard against
-// accidents, not a gate.
-const armedAxis = signal<string | null>(null);
-let armTimer: ReturnType<typeof setTimeout> | undefined;
-
-function tapSet(axis: string): void {
-  clearTimeout(armTimer);
-  if (armedAxis.value === axis) {
-    armedAxis.value = null;
-    sendCmd(`G10 L20 P${machine.activeP.value} ${axis}0`);
-    return;
-  }
-  armedAxis.value = axis;
-  armTimer = setTimeout(() => { armedAxis.value = null; }, 3000);
-}
-
 // Input pins (Pn:) shown on the position line: pin letters, short label, name. E-stop lights on E (grblHAL) or R,
 // and the toolsetter on T, as the old Signals panel had it.
 const SIGNALS: [string, string, string][] = [
@@ -143,11 +127,8 @@ function PositionLine() {
         {(['x', 'y', 'z'] as const).map(a => (
           <div class="fs-axis">
             <span class="fs-axis-name">{a.toUpperCase()}</span><span class="fs-axis-value">{pos[a].toFixed(3)}</span>
-            {canSet && (armedAxis.value === a.toUpperCase()
-              ? <button type="button" class="fs-set is-arming" title={`Tap again to zero ${a.toUpperCase()} in ${wcs}`}
-                  onClick={() => tapSet(a.toUpperCase())}>CONFIRM {a.toUpperCase()}0?</button>
-              : <button type="button" class="fs-set" title={`Zero ${a.toUpperCase()} in ${wcs} here (G10 L20); tap twice`}
-                  onClick={() => tapSet(a.toUpperCase())}>SET {wcs}</button>)}
+            {canSet && <button type="button" class="fs-set" title={`Zero ${a.toUpperCase()} in ${wcs} here (G10 L20)`}
+              onClick={() => sendCmd(`G10 L20 P${machine.activeP.value} ${a.toUpperCase()}0`)}>SET {wcs}</button>}
           </div>
         ))}
         {ui.signalsShown.value && <Signals />}
