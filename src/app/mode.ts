@@ -7,6 +7,7 @@ import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
 import * as messages from '../stores/messages';
+import * as flight from '../stores/flight';
 import * as ui from './ui';
 import { scanTools, sectionAt } from './toolscan';
 
@@ -28,12 +29,23 @@ export const stoppedShort = computed(() => {
   return r !== null && r !== 'completed';
 });
 
-/** AUTO: Setup before a start and at a tool change, Program while running, Recorder after a stop. */
+// The reasons a job stops on its own, which the resume is offered for (as in flight-recorder.ts).
+const UNEXPECTED = new Set(['timeout', 'usb', 'network', 'reboot']);
+
+/** The flight record holds a job that stopped on its own part way through: one to resume. */
+export const recordToResume = computed(() => {
+  const r = flight.record.value;
+  return !!r && flight.enabled.value && (r.state === 'Stopped' || r.state === 'Retracted') && r.ln > 0 && UNEXPECTED.has(r.why);
+});
+
+/** AUTO: Setup before a start and at a tool change, Program while running, Recorder after a stop.
+ *  An alarm opens the Recorder only after a stop or a lost link this session, or with a job to resume;
+ *  a power-up alarm such as 11 (homing required) opens Setup. */
 export const autoPanel = computed<ui.Panel>(() => {
   const m = mode.value;
   if (m === 'running' || m === 'hold') return 'program';
   if (m === 'change') return 'setup';
-  if (m === 'alarm' || stoppedShort.value) return 'recorder';
+  if (stoppedShort.value || (m === 'alarm' && recordToResume.value)) return 'recorder';
   return 'setup';
 });
 
