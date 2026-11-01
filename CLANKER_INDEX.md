@@ -27,7 +27,9 @@ syncs: `\n$\n` until an [HLP:] with its ok comes back (plus a `$I+` confirm if m
 everything before. `commandTrace()` on window prints its last 3000 events.
 
 ## src/app/
-The shell (Preact). `App.tsx`: top bar, position line, message line, the five screens, bottom bar. `JobScreen.tsx`:
+The shell (Preact), exactly the window's size: nothing scrolls but a panel's own contents. `App.tsx`: top bar, position
+line, message line, the five screens, bottom bar; `fitLine` tightens the readout only as far as the signals and buttons
+need (data-fit levels in style.css), and breaks the line in two when even the tightest doesn't fit. `JobScreen.tsx`:
 Current Job strip and two switchable panels, each with AUTO: on the left Jobs and Program; on the right Setup checks,
 Recorder, Preview, Camera, Console and Macros (the last three carried over, and kept mounted).
 `Popup.tsx`: the popups (jog, offsets, probe, measure, frame, tool table, recorder settings), which borrow

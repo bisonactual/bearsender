@@ -45,7 +45,7 @@
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 13px; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 13px; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
 
   .tb-opt-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--surface3); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 6px 12px; font-family: var(--cond); font-weight: 700; font-size: 11px; letter-spacing: 0.5px; color: var(--text2); cursor: pointer; transition: all 0.12s; user-select: none; }
   .tb-opt-toggle:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
@@ -1224,57 +1224,61 @@
   .fs-btn-light { margin-top: 8px; height: 40px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--text); color: var(--bg); font-family: var(--cond) !important; font-size: 15px; font-weight: 700; letter-spacing: 0.06em; }
 
   /* Top bar */
-  .fs-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .fs-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; padding: clamp(2px, 0.6vh, 6px) 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .fs-logo { display: flex; align-items: center; gap: 8px; font-family: var(--cond); font-size: 24px; font-weight: 500; letter-spacing: 0.14em; }
   .fs-mark { width: 28px; height: 28px; flex: none; }
   .fs-logo .fs-bear { color: var(--accent); font-weight: 600; }
-  .fs-nav { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 2px; }
-  .fs-nav-btn { height: 44px; padding: 0 14px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text2); font-family: var(--cond) !important; font-size: 16px; font-weight: 600; letter-spacing: 0.12em; }
+  .fs-nav { flex: none; display: flex; flex-wrap: wrap; gap: 2px; }
+  .fs-nav-btn { height: clamp(36px, 4.6vh, 44px); padding: 0 14px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text2); font-family: var(--cond) !important; font-size: 16px; font-weight: 600; letter-spacing: 0.12em; }
   .fs-nav-btn.is-on { border-bottom-color: var(--tab-active); color: var(--text); font-weight: 700; }
-  .fs-link { font-family: var(--mono); font-size: 13px; color: var(--text2); }
+  .fs-link { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; font-family: var(--mono); font-size: 13px; color: var(--text2); }
   .fs-top-actions { display: flex; gap: 8px; }
   .fs-home.is-homed { border-color: var(--green); background: rgba(34, 197, 94, 0.15); color: var(--go-text); }
   .fs-home { height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 8px; border: 2px solid var(--accent2); background: #2a1a0e; color: var(--accent); font-family: var(--cond) !important; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; }
 
-  /* Position line */
-  .fs-posline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 28px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  .fs-state { display: flex; align-items: center; gap: 10px; min-width: 190px; color: var(--text); }
+  /* Position line: the state, the readout, then the signals and the buttons on the right. The readout takes the free
+     space and keeps its full spacing while it fits; App.tsx tightens it only as far as it must (data-fit 1-6: its
+     gaps, then the size of its numbers), and breaks the line in two (data-wrap) if even the tightest doesn't fit.
+     The numbers also get smaller on short screens. */
+  .fs-posline { --axis-font: clamp(24px, 3.9vh, 36px); display: flex; flex-wrap: nowrap; align-items: center; gap: 10px 28px; padding: clamp(6px, 1.2vh, 12px) 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .fs-state { flex: none; display: flex; align-items: center; gap: 10px; min-width: 190px; color: var(--text); }
   .fs-state.is-go { color: var(--green); }
   .fs-state.is-go .fs-state-label { color: var(--go-text); }
   .fs-state.is-stop { color: var(--stop-text); }
   .fs-state-label { font-family: var(--cond); font-size: 22px; font-weight: 700; letter-spacing: 0.12em; }
   .fs-state-sub { font-size: 13px; color: var(--text2); }
-  .fs-axes { flex: 1 1 560px; display: flex; flex-wrap: wrap; gap: 6px 36px; }
-  .fs-axis { display: flex; align-items: baseline; gap: 8px; min-width: 160px; }
+  .fs-axes { flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; gap: 36px; }
+  .fs-axis { flex: none; display: flex; align-items: baseline; gap: 8px; min-width: 160px; }
   .fs-axis-name { font-family: var(--cond); font-size: 18px; font-weight: 700; color: var(--text2); }
-  .fs-axis-value { font-family: var(--mono); font-size: 36px; line-height: 1.1; }
-  .fs-posref { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .fs-axis-value { font-family: var(--mono); font-size: var(--axis-font); line-height: 1.1; white-space: nowrap; }
+  .fs-posline[data-fit]:not([data-fit="0"]) .fs-axis { min-width: 0; }
+  .fs-posline[data-fit="1"] .fs-axes { gap: 24px; }
+  .fs-posline:is([data-fit="2"], [data-fit="3"], [data-fit="4"], [data-fit="5"]) .fs-axes { gap: 16px; }
+  .fs-posline:is([data-fit="2"], [data-fit="3"], [data-fit="4"], [data-fit="5"], [data-fit="6"]) { column-gap: 16px; }
+  .fs-posline[data-fit="3"] .fs-axis-value { font-size: min(var(--axis-font), 32px); }
+  .fs-posline[data-fit="4"] .fs-axis-value { font-size: min(var(--axis-font), 28px); }
+  .fs-posline[data-fit="5"] .fs-axis-value { font-size: min(var(--axis-font), 24px); }
+  .fs-posline[data-fit="6"] .fs-axes { gap: 12px; }
+  .fs-posline[data-fit="6"] .fs-axis { gap: 4px; }
+  .fs-posline[data-fit="6"] .fs-axis-value { font-size: min(var(--axis-font), 20px); }
+  .fs-posline[data-wrap] { flex-wrap: wrap; justify-content: flex-end; }
+  .fs-posline[data-wrap] .fs-axes { flex: 1 1 calc(100% - 300px); }
+  .fs-posref { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; }
   .fs-wcs { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--accent); color: #1a1208; font-family: var(--mono) !important; font-size: 16px; font-weight: 700; }
   .fs-set { align-self: center; height: 26px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--accent2); background: none; color: var(--accent); font-family: var(--cond) !important; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; white-space: nowrap; }
   .fs-set:hover { background: #2a1a0e; }
   .fs-btn.is-on { border-color: var(--text); }
   .fs-btn-tall { height: 44px; }
-  /* Signals sit inline after Z: one row of chips the size of the work offset chip. Below 1760 px wide the line
-     tightens while they show, so they still fit on it; below 1280 px the chips shrink too, and more below 1200 px. */
-  .fs-sigs { align-self: center; display: flex; gap: 6px; }
+  /* Signals: one row of chips the size of the work offset chip, anchored to the SIGNALS button and filling leftwards. */
+  .fs-sigs { display: flex; gap: 6px; }
   .fs-sig { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 32px; min-width: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--border2); color: var(--text2); font-family: var(--cond); font-size: 15px; font-weight: 700; letter-spacing: 0.06em; white-space: nowrap; }
   .fs-sig.is-on { border-color: var(--warn-text); background: var(--warn-text); color: #1a1208; }
-  @media (max-width: 1759px) {
-    .fs-posline.has-sigs { gap: 10px 12px; }
-    .fs-posline.has-sigs .fs-state { min-width: 0; }
-    .fs-posline.has-sigs .fs-axes { gap: 6px 18px; }
-    .fs-posline.has-sigs .fs-axis { min-width: 0; gap: 6px; }
-    .fs-posline.has-sigs .fs-axis-value { font-size: 28px; }
-    .fs-posline.has-sigs .fs-posref .fs-btn-sm { padding: 0 8px; }
-    .fs-posline.has-sigs .fs-seg button { padding: 0 10px; }
-    .fs-sig { padding: 0 8px; font-size: 14px; }
-  }
   .fs-seg { display: flex; border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
   .fs-seg button { height: 44px; padding: 0 14px; border: 0; background: var(--surface); color: var(--text-mid); font-family: var(--cond) !important; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; }
   .fs-seg button.is-on { background: var(--text); color: var(--bg); }
 
   /* Message line */
-  .fs-msgline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 52px; padding: 6px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .fs-msgline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: clamp(40px, 5.4vh, 52px); padding: clamp(3px, 0.6vh, 6px) 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .fs-msg-text { flex: 1 1 360px; color: var(--text-mid); }
   .fs-msg-text strong { color: var(--text); }
   .fs-msg-tag { display: flex; align-items: center; gap: 8px; font-family: var(--cond); font-size: 17px; font-weight: 700; letter-spacing: 0.12em; }
@@ -1289,7 +1293,7 @@
 
   /* Screens */
   .fs-screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .fs-job { gap: 16px; padding: 16px; overflow-y: auto; }
+  .fs-job { gap: clamp(8px, 1.6vh, 16px); padding: clamp(8px, 1.6vh, 16px) 16px; overflow: hidden; }
   .fs-subtabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .fs-subtabs button, .fs-tabs button { height: 40px; padding: 0 12px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text2); font-family: var(--cond) !important; font-size: 14px; font-weight: 700; letter-spacing: 0.08em; }
   .fs-subtabs button.is-on, .fs-tabs button.is-on { border-bottom-color: var(--tab-active); color: var(--text); }
@@ -1301,7 +1305,7 @@
   .fs-console #mod-console .module-body { padding: 0; }
   .fs-console #mod-console .console-out { min-height: 0; }
   /* Carried-over panels in the job screen's right panel */
-  .fs-panel-box { height: 420px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .fs-panel-box { flex: 1 1 auto; min-height: 160px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .fs-macros #mod-macros { width: auto; border: 0; background: none; }
   .fs-macros #mod-macros .module-drag-handle { display: none; }
   .fs-macros #mod-macros .module-body { padding: 0; }
@@ -1321,19 +1325,19 @@
   .fs-cam .cam-offset-label, .fs-cam .cam-pos-lbl { font-size: 11px; color: var(--text2); }
   .fs-cam .cam-pos-row { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; }
   .fs-cam .cam-divider { border-top: 1px solid var(--border); }
-  .fs-cam .camera-main { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
+  .fs-cam .camera-main { flex: 1; min-width: 0; container-type: size; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
   .fs-cam .camera-off-msg { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text2); font-size: 14px; }
   .fs-cam .camera-video-wrap { max-width: 100%; max-height: 100%; }
-  .fs-cam #camVideo { display: block; max-width: 100%; max-height: 418px; }
+  .fs-cam #camVideo { display: block; max-width: 100cqw; max-height: 100cqh; }
   .fs-cam #camCanvas, .fs-cam .cam-drag-layer { position: absolute; inset: 0; }
 
   /* Cards on the job screen */
   .fs-card { box-sizing: border-box; background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
   .fs-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
   .fs-head-end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .fs-current { padding: 14px 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 32px; flex-shrink: 0; }
+  .fs-current { padding: clamp(6px, 1.4vh, 14px) 22px; display: flex; flex-wrap: wrap; align-items: center; gap: clamp(4px, 1.2vh, 12px) 32px; flex-shrink: 0; }
   .fs-current-name { flex: 1 1 240px; min-width: 0; }
-  .fs-file { font-family: var(--cond); font-size: 26px; font-weight: 600; overflow-wrap: anywhere; }
+  .fs-file { font-family: var(--cond); font-size: clamp(18px, 2.7vh, 26px); font-weight: 600; overflow-wrap: anywhere; }
   .fs-now { font-size: 14px; color: var(--text-mid); }
   .fs-current-bar { flex: 2 1 340px; min-width: 0; }
   .fs-bar { position: relative; height: 26px; border-radius: 6px; overflow: hidden; background: var(--surface3); }
@@ -1342,12 +1346,15 @@
   .fs-bar-sections > div:last-child { border-right: 0; }
   .fs-bar-done { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(241, 245, 249, 0.14); border-right: 2px solid var(--text); }
   .fs-times { display: flex; flex-wrap: wrap; gap: 10px 28px; }
-  .fs-time { font-family: var(--mono); font-size: 26px; }
+  .fs-time { font-family: var(--mono); font-size: clamp(18px, 2.7vh, 26px); }
   .fs-time.is-dim { color: var(--text-mid); }
-  .fs-job-row { display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px; }
+  .fs-job-row { flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch; gap: 16px; }
+  .fs-card-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+  .fs-fill { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .fs-self-start { align-self: flex-start; }
 
   /* Jobs list */
-  .fs-jobs { flex: 1 1 360px; min-width: 0; padding: 14px 18px 10px; }
+  .fs-jobs { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 18px 10px; }
   .fs-jobs-scroll { overflow-x: auto; margin-top: 6px; }
   .fs-jobs-table { min-width: 420px; font-size: 14px; }
   .fs-jobs-row { display: flex; align-items: center; gap: 8px; height: 30px; color: var(--text-mid); }
@@ -1372,7 +1379,7 @@
   .fs-empty { padding: 10px 0 4px 26px; color: var(--text2); }
 
   /* The switchable panel */
-  .fs-panel { flex: 1.6 1 380px; min-width: 0; padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 12px; }
+  .fs-panel { flex: 1.6 1 0; min-width: 0; min-height: 0; padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 12px; }
   .fs-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
   .fs-tabs button { height: 36px; padding: 0 8px; }
   .fs-auto { height: 32px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border2); background: none; color: var(--text2); font-family: var(--cond) !important; font-size: 13px; font-weight: 700; letter-spacing: 0.1em; }
@@ -1410,7 +1417,7 @@
   .fs-event-empty { font-size: 14px; color: var(--text2); padding: 6px 0; border-top: 1px solid var(--surface3); }
 
   /* Preview: the carried-over 3D view, and full screen */
-  .fs-view-wrap { position: relative; height: 420px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--bg); display: flex; }
+  .fs-view-wrap { position: relative; flex: 1 1 auto; min-height: 160px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--bg); display: flex; }
   .fs-view-wrap .fs-view { flex: 1; min-width: 0; display: flex; font-size: 13px; line-height: normal; }
   .fs-view-wrap.is-full { position: fixed; inset: 0; height: auto; z-index: 900; border-radius: 0; border: 0; }
   .fs-view-close { position: absolute; top: 8px; right: 12px; z-index: 5; }
@@ -1424,38 +1431,68 @@
   .fs-popup-tall { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 13px; line-height: normal; }
   .fs-popup-list { width: min(760px, 90vw); box-sizing: border-box; padding: 8px 16px 14px; overflow-y: auto; }
 
-  /* Narrow screens: tighter position line, so the signals still fit on it */
+  /* Narrower screens: smaller buttons on the position line and in the panels' heads */
   @media (max-width: 1280px) {
-    .fs-posline { gap: 8px 16px; padding: 8px 12px; }
-    .fs-state { min-width: 150px; }
-    .fs-axes { flex-basis: 420px; gap: 4px 18px; }
-    .fs-axis { min-width: 0; gap: 6px; }
-    .fs-axis-value { font-size: 28px; }
-    .fs-posline.has-sigs .fs-axis-value { font-size: 24px; }
-    .fs-sigs { gap: 4px; }
-    .fs-sig { height: 26px; min-width: 26px; padding: 0 5px; border-radius: 6px; font-size: 12px; letter-spacing: 0.04em; }
     .fs-seg button { padding: 0 10px; font-size: 13px; }
     .fs-posref .fs-btn-sm { padding: 0 8px; }
-  }
-  @media (max-width: 1200px) {
-    .fs-posline.has-sigs { gap: 8px; }
-    .fs-posline.has-sigs .fs-axes { gap: 4px 12px; }
-    .fs-posline.has-sigs .fs-axis-value { font-size: 22px; }
-    .fs-posline.has-sigs .fs-set { padding: 0 4px; }
-    .fs-sigs { gap: 3px; }
-    .fs-sig { height: 24px; min-width: 24px; padding: 0 4px; font-size: 11px; }
+    .fs-nav-btn { padding: 0 10px; }
+    .fs-tabs button { padding: 0 6px; font-size: 13px; }
+    /* The Jobs list fits its panel: narrower columns, and the tool-change sound column (a later step) hidden */
+    .fs-jobs-table { min-width: 0; }
+    .fs-c-bell { display: none; }
+    .fs-c-status { width: 76px; }
+    .fs-c-at, .fs-c-run { width: 56px; }
   }
 
   /* Bottom bar */
-  .fs-bottom { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .fs-bottom { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px 28px; padding: clamp(6px, 1.2vh, 12px) 16px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .fs-bottom > * { flex: none; }
+  .fs-bottom > .fs-grow { flex: 1 1 0; }
   .fs-ovr { display: flex; align-items: center; gap: 8px; }
   .fs-ovr-read { min-width: 118px; }
   .fs-ovr-value { font-family: var(--mono); font-size: 20px; }
   .fs-ovr-pct { width: 56px; text-align: center; font-family: var(--mono); font-size: 18px; }
-  .fs-step { width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); font-size: 20px !important; }
-  .fs-rapid { height: 44px; padding: 0 12px; font-family: var(--mono) !important; font-size: 18px; font-weight: 400; letter-spacing: 0; }
+  .fs-step { width: 44px; height: clamp(36px, 4.6vh, 44px); border-radius: 8px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); font-size: 20px !important; }
+  .fs-rapid { height: clamp(36px, 4.6vh, 44px); padding: 0 12px; font-family: var(--mono) !important; font-size: 18px; font-weight: 400; letter-spacing: 0; }
   .fs-run { display: flex; gap: 10px; }
-  .fs-run-btn { width: 128px; height: 64px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 0; font-family: var(--cond) !important; font-size: 19px; font-weight: 700; letter-spacing: 0.08em; }
+  .fs-run-btn { width: 128px; height: clamp(48px, 6.6vh, 64px); display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 0; font-family: var(--cond) !important; font-size: 19px; font-weight: 700; letter-spacing: 0.08em; }
   .fs-run-btn.is-start { background: var(--green); color: #052e12; }
   .fs-run-btn.is-hold { background: var(--orange); color: #1a1208; }
   .fs-run-btn.is-stop { background: var(--red); color: #1a0505; }
+  @media (max-width: 1440px) {
+    .fs-bottom { column-gap: 20px; }
+  }
+  @media (max-width: 1280px) {
+    .fs-bottom { column-gap: 12px; }
+    .fs-ovr-read { min-width: 90px; }
+    .fs-step { width: 40px; }
+    .fs-run-btn { width: 104px; }
+    .fs-queue-btn { display: none; }
+  }
+  @media (max-width: 1100px) {
+    .fs-bottom { column-gap: 10px; padding-left: 10px; padding-right: 10px; }
+    .fs-bottom .fs-btn-tall { padding: 0 10px; }
+    .fs-ovr { gap: 6px; }
+    .fs-ovr-read { min-width: 0; }
+    .fs-ovr-value { font-size: 18px; }
+    .fs-bottom .fs-unit { display: none; }
+    .fs-step { width: 36px; }
+    .fs-ovr-pct { width: 44px; font-size: 16px; }
+    .fs-run-btn { width: 84px; gap: 6px; font-size: 16px; letter-spacing: 0.04em; }
+  }
+  /* Narrow (portrait): each override's reading sits over its buttons. */
+  @media (max-width: 900px) {
+    .fs-bottom { column-gap: 8px; }
+    .fs-bottom .fs-btn-tall { padding: 0 8px; }
+    .fs-run { gap: 6px; }
+    .fs-bottom .fs-ovr { flex-wrap: wrap; justify-content: center; max-width: 136px; row-gap: 2px; }
+    .fs-bottom .fs-ovr-read { flex: 0 0 100%; display: flex; align-items: baseline; gap: 6px; }
+    .fs-bottom .fs-ovr > .fs-cap { flex: 0 0 100%; }
+  }
+
+  /* Portrait (an iPad upright): the two panels stack, the Jobs list over the larger right panel. */
+  @media (orientation: portrait) and (max-width: 1100px) {
+    .fs-job-row { flex-direction: column; }
+    .fs-jobs { flex: 2 1 0; }
+    .fs-panel { flex: 3 1 0; }
+  }

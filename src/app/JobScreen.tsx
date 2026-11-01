@@ -201,7 +201,7 @@ function JobsButtons() {
     <>
       <button type="button" class="fs-btn fs-btn-sm" disabled={m === 'running' || m === 'hold' || m === 'change'}
         onClick={() => document.getElementById('fileInput')?.click()}>LOAD JOB</button>
-      <button type="button" class="fs-btn fs-btn-sm" disabled title="The queue comes in a later step">ADD TO QUEUE</button>
+      <button type="button" class="fs-btn fs-btn-sm fs-queue-btn" disabled title="The queue comes in a later step">ADD TO QUEUE</button>
     </>
   );
 }
@@ -536,17 +536,17 @@ function RecorderPanel() {
 
 // ── Right panel: Preview, Camera, Console, Macros ─────────────────────────────
 //
-// The carried-over panels stay mounted, hidden while another tab shows.
+// The carried-over panels stay mounted, hidden while another tab shows. Each fills the panel's height (fs-fill).
 
 function PreviewPanel({ hidden }: { hidden: boolean }) {
   const full = ui.fullView.value;
   return (
-    <div hidden={hidden && !full}>
+    <div class="fs-fill" hidden={hidden && !full}>
       <div class={'fs-view-wrap' + (full ? ' is-full' : '')}>
         <Legacy class="fs-view" ids={['vpPanel']} />
         {full && <button type="button" class="fs-btn fs-view-close" onClick={() => { ui.fullView.value = false; }}>CLOSE FULL VIEW</button>}
       </div>
-      <button type="button" class="fs-btn fs-btn-sm fs-mt8" onClick={() => { ui.fullView.value = true; }}>OPEN FULL 3D VIEW</button>
+      <button type="button" class="fs-btn fs-btn-sm fs-mt8 fs-self-start" onClick={() => { ui.fullView.value = true; }}>OPEN FULL 3D VIEW</button>
       <div class="fs-note-sm">The 3D view from before the rework. Arcs still draw as straight lines until the G-code interpreter lands.</div>
     </div>
   );
@@ -554,7 +554,7 @@ function PreviewPanel({ hidden }: { hidden: boolean }) {
 
 function CameraPanel({ hidden }: { hidden: boolean }) {
   return (
-    <div hidden={hidden}>
+    <div class="fs-fill" hidden={hidden}>
       <Legacy class="fs-legacy fs-panel-box fs-cam" ids={['tabpanel-camera']} />
       <div class="fs-note-sm">
         {camera.device.value === null
@@ -567,7 +567,7 @@ function CameraPanel({ hidden }: { hidden: boolean }) {
 
 function ConsolePanel({ hidden }: { hidden: boolean }) {
   return (
-    <div hidden={hidden}>
+    <div class="fs-fill" hidden={hidden}>
       <Legacy class="fs-legacy fs-panel-box fs-console" ids={['mod-console', 'touchKbdOverlay']} />
     </div>
   );
@@ -615,7 +615,7 @@ function LeftPanel() {
         autoTitle="Follow the job: the Program while running, the Jobs list otherwise">
         {current === 'jobs' && <JobsButtons />}
       </PanelHead>
-      {current === 'jobs' ? <JobsList /> : <ProgramPanel />}
+      <div class="fs-card-body">{current === 'jobs' ? <JobsList /> : <ProgramPanel />}</div>
     </section>
   );
 }
@@ -628,12 +628,14 @@ function JobPanel() {
     <section aria-label="Job panel" class="fs-card fs-panel">
       <PanelHead label="Panel" tabs={TABS} current={current} pick={ui.pickPanel} auto={ui.auto} picked={ui.pickedPanel}
         autoTitle="Follow the job: Setup before the start and at tool changes; while running the Camera if one is set up, otherwise the Recorder; the Recorder after a stop" />
-      {current === 'setup' && <SetupPanel />}
-      {current === 'recorder' && <RecorderPanel />}
-      <PreviewPanel hidden={current !== 'preview'} />
-      <CameraPanel hidden={current !== 'camera'} />
-      <ConsolePanel hidden={current !== 'console'} />
-      <MacrosPanel hidden={current !== 'macros'} />
+      <div class="fs-card-body">
+        {current === 'setup' && <SetupPanel />}
+        {current === 'recorder' && <RecorderPanel />}
+        <PreviewPanel hidden={current !== 'preview'} />
+        <CameraPanel hidden={current !== 'camera'} />
+        <ConsolePanel hidden={current !== 'console'} />
+        <MacrosPanel hidden={current !== 'macros'} />
+      </div>
     </section>
   );
 }

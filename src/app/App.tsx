@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
 import type { Signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
@@ -111,6 +111,24 @@ function Signals() {
   );
 }
 
+// The readout takes the free space on the line and keeps its full spacing while it fits. When the signals or the
+// buttons need the room, it tightens only as far as it must: its gaps first, then the size of its numbers (data-fit
+// 1 to FIT_LEVELS, as in style.css). If even the tightest doesn't fit, the line breaks in two (data-wrap): the state
+// and the readout, then the signals and the buttons on the right.
+const FIT_LEVELS = 6;
+
+function fitLine(line: HTMLElement): void {
+  const axes = line.querySelector<HTMLElement>('.fs-axes');
+  if (!axes) return;
+  for (const wrap of [false, true]) {
+    if (wrap) line.dataset.wrap = ''; else delete line.dataset.wrap;
+    for (let level = 0; level <= FIT_LEVELS; level++) {
+      line.dataset.fit = String(level);
+      if (axes.scrollWidth <= axes.clientWidth + 1) return;
+    }
+  }
+}
+
 function PositionLine() {
   const view = stateView();
   const ref = ui.posRef.value;
@@ -118,8 +136,20 @@ function PositionLine() {
   const wcs = machine.wcs.value;
   // Set zeroes an axis in the active work offset. Only offered when the machine is idle.
   const canSet = connection.connected.value && machine.stateName.value === 'idle' && !job.running.value;
+  const line = useRef<HTMLDivElement>(null);
+  // Fit again when something that changes the line's widths does, and when the window changes size.
+  const widths = [ui.signalsShown.value, canSet, wcs, view.label, view.sub, pos.x.toFixed(3).length, pos.y.toFixed(3).length, pos.z.toFixed(3).length].join('|');
+  useLayoutEffect(() => { if (line.current) fitLine(line.current); }, [widths]);
+  useEffect(() => {
+    const refit = () => { if (line.current) fitLine(line.current); };
+    // The shell is the window's size, so this sees every resize without seeing the line's own changes.
+    const observer = new ResizeObserver(refit);
+    observer.observe(line.current!.parentElement!);
+    document.fonts?.ready.then(refit);
+    return () => observer.disconnect();
+  }, []);
   return (
-    <div class={'fs-posline' + (ui.signalsShown.value ? ' has-sigs' : '')}>
+    <div ref={line} class="fs-posline">
       <div class={'fs-state' + (view.tone ? ' is-' + view.tone : '')}>
         {view.icon}
         <div><div class="fs-state-label">{view.label}</div><div class="fs-state-sub">{view.sub}</div></div>
@@ -132,9 +162,10 @@ function PositionLine() {
               onClick={() => sendCmd(`G10 L20 P${machine.activeP.value} ${a.toUpperCase()}0`)}>SET {wcs}</button>}
           </div>
         ))}
-        {ui.signalsShown.value && <Signals />}
       </div>
       <div class="fs-posref">
+        {/* The signals grow leftwards from their button. */}
+        {ui.signalsShown.value && <Signals />}
         <button type="button" class={'fs-btn fs-btn-sm' + (ui.signalsShown.value ? ' is-on' : '')} aria-pressed={ui.signalsShown.value ? 'true' : 'false'}
           onClick={() => { ui.signalsShown.value = !ui.signalsShown.value; }}>SIGNALS</button>
         <button type="button" class="fs-wcs" title="Work offsets" onClick={() => { ui.popup.value = 'offsets'; }}>{wcs}</button>
