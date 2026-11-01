@@ -1,6 +1,10 @@
 // ═══════════════════════════════════════════════
-// Shared mutable state — single source of truth
+// Shared mutable state, for the carried-over screens
 // ═══════════════════════════════════════════════
+//
+// New code reads the signal stores in src/stores instead.
+
+import type { ToolEntry } from './stores/machine';
 
 export const state = {
   // Connection
@@ -34,7 +38,7 @@ export const state = {
   // RX buffer tracking
   RX_BUFFER_SIZE: 128,
   rxInFlight: 0,
-  sentQueue: [] as { line: string; bytes: number }[],
+  sentQueue: [] as { line: string; bytes: number; fileLine?: number }[],  // fileLine: the job line it carries
 
   // Job
   gcodeLines: [] as string[],
@@ -75,6 +79,7 @@ export const state = {
   currentToolNumber: 0,
   ttPhase: 'idle' as string,
   _ttLines: [] as string[],
+  ttEntries: [] as ToolEntry[],
 
   // Program limits
   progLimits: null as any,
@@ -117,13 +122,6 @@ export const state = {
 
   // Touch keyboard
   kbdBuffer: '',
-
-  // Module lock
-  modLocked: false,
-  _modDrag: null as any,
-
-  // Tab locks
-  _lockedTabs: new Set<string>(),
 
   // Viewport extents
   vpXMin: -300,
@@ -177,59 +175,6 @@ export const SIG_PIN_MAP: Record<string, string> = {
   'R': 'sig-estop',
 };
 
-export const MOD_SIZES: Record<string, number> = {
-  normal: 282,
-  large: 360,
-  xl: 460,
-  xxl: 580,
-};
-
-export const MOD_DEFAULTS: Record<string, { x: number; y: number; enabled: boolean; size: string }> = {
-  position:  { x: 10,  y: 10,  enabled: false, size: 'normal' },
-  jogging:   { x: 10,  y: 380, enabled: false, size: 'normal' },
-  overrides: { x: 302, y: 10,  enabled: false, size: 'normal' },
-  spindle:   { x: 302, y: 185, enabled: false, size: 'normal' },
-  macros:    { x: 302, y: 390, enabled: false, size: 'normal' },
-  console:   { x: 594, y: 10,  enabled: false, size: 'normal' },
-  tooltable: { x: 10,  y: 10,  enabled: false, size: 'xl' },
-  limits:    { x: 302, y: 10,  enabled: false, size: 'normal' },
-  signals:   { x: 594, y: 10,  enabled: false, size: 'normal' },
-  bear:      { x: 594, y: 10,  enabled: false, size: 'normal' },
-  exclusionzones: { x: 594, y: 10, enabled: false, size: 'normal' },
-  surfacing: { x: 10,  y: 10,  enabled: false, size: 'normal' },
-  toollength:   { x: 886, y: 10,  enabled: false, size: 'normal' },
-  edgefinder:   { x: 10,  y: 10,  enabled: false, size: 'normal' },
-  centerfinder: { x: 302, y: 10,  enabled: false, size: 'normal' },
-  rotation:     { x: 594, y: 10,  enabled: false, size: 'normal' },
-};
-
-export const MODULE_DEFS = [
-  { id: 'position',  icon: '📍', name: 'Machine Position' },
-  { id: 'jogging',   icon: '🕹', name: 'Jogging' },
-  { id: 'overrides', icon: '⚡', name: 'Overrides' },
-  { id: 'spindle',   icon: '🔄', name: 'Spindle/Coolant' },
-  { id: 'macros',    icon: '🔧', name: 'Macros' },
-  { id: 'console',   icon: '💻', name: 'Console' },
-  { id: 'tooltable', icon: '🔩', name: 'Tool Table' },
-  { id: 'limits',    icon: '📐', name: 'Program Limits' },
-  { id: 'signals',   icon: '🔴', name: 'Signals' },
-  { id: 'exclusionzones', icon: '🔒', name: 'Exclusion Zones' },
-  { id: 'surfacing',    icon: '🪚', name: 'Surfacing' },
-  { id: 'toollength',   icon: '⊕', name: 'Tool Length' },
-  { id: 'edgefinder',   icon: '◈', name: 'Edge Finder' },
-  { id: 'centerfinder', icon: '⊙', name: 'Center Finder' },
-  { id: 'rotation',     icon: '⟳', name: 'Rotation' },
-];
-
-export const MODULE_GROUPS = [
-  { id: 'basic',     name: 'Basic Functions',               modules: ['position', 'jogging', 'overrides', 'spindle', 'limits', 'macros'] },
-  { id: 'debug',     name: 'Debug',                         modules: ['console', 'signals'] },
-  { id: 'toolcoord', name: 'Tool and Coordinate Control',   modules: ['tooltable', 'toollength'] },
-  { id: 'probing',   name: 'Probing',                       modules: ['toollength', 'edgefinder', 'centerfinder', 'rotation'] },
-  { id: 'exclusion', name: 'Exclusion Zones',               modules: ['exclusionzones'] },
-  { id: 'tools',     name: 'Tools',                         modules: ['surfacing'] },
-];
-
 export const OPT_COLOR_DEFAULTS: Record<string, string> = {
   // UI theme
   text:     '#f1f5f9',
@@ -257,33 +202,4 @@ export const OPT_COLOR_CSS_VARS: Record<string, string> = {
   vpRapid:    '--vp-rapid',
   vpExecuted: '--vp-executed',
   vpTool:     '--vp-tool',
-};
-
-export const OPT_LOCKABLE_TABS = [
-  { id: 'settings', label: 'SETTINGS: GRBL' },
-  { id: 'tooltable', label: 'TOOL TABLE' },
-];
-
-// Tabs that can be shown/hidden. 'run' and 'options' are always visible.
-export const OPT_HIDEABLE_TABS = [
-  { id: 'settings',   label: 'SETTINGS: GRBL' },
-  { id: 'camera',     label: 'CAMERA' },
-  { id: 'tooltable',  label: 'TOOL TABLE' },
-  { id: 'offsets',    label: 'OFFSETS' },
-  { id: 'probing',    label: 'PROBING' },
-  { id: 'exclusions', label: 'EXCLUSION ZONES' },
-  { id: 'flight',     label: 'FLIGHT RECORDER' },
-  { id: 'modules',    label: 'MODULES' },
-];
-
-export const TB_BTN_DEFAULTS: Record<string, boolean> = {
-  'tbBtn-reset': true,
-  'tbBtn-unlock': true,
-  'sdBtnWrap': true,
-  'tbBtn-uploadOpen': true,
-  'tbBtn-open': true,
-  'btnStart': true,
-  'btnPause': true,
-  'btnStop': true,
-  'tbBtn-home': true,
 };

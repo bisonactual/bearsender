@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════
-// Options — connection, colours, tab locks, toolbar
+// Options — connection, colours, jog steps, zone colours
 // ═══════════════════════════════════════════════
 
-import { state, OPT_COLOR_DEFAULTS, OPT_COLOR_CSS_VARS, OPT_LOCKABLE_TABS, OPT_HIDEABLE_TABS, TB_BTN_DEFAULTS } from './state';
+import { state, OPT_COLOR_DEFAULTS, OPT_COLOR_CSS_VARS } from './state';
 import { lsGet, lsSet } from './ui';
 import { log } from './console';
 import { rebuildSteps, updateFeedSliderMax } from './modules/jog';
@@ -104,108 +104,6 @@ export function optLoadColors(): void {
   });
 }
 
-// ── Tab locks ─────────────────────────────────────────────────────────────────
-export function optBuildTabLockList(): void {
-  const container = document.getElementById('optTabLockList');
-  if (!container) return;
-  container.innerHTML = '';
-  OPT_LOCKABLE_TABS.forEach(t => {
-    const row = document.createElement('div'); row.className = 'opt-tab-lock-item'; row.id = 'optlockrow-' + t.id;
-    const name = document.createElement('span'); name.className = 'opt-tab-lock-name'; name.textContent = t.label;
-    const status = document.createElement('span'); status.className = 'opt-tab-lock-status'; status.id = 'optlockstatus-' + t.id;
-    status.textContent = state._lockedTabs.has(t.id) ? '🔒 LOCKED' : '🔓 UNLOCKED';
-    const btn = document.createElement('button');
-    btn.className = 'opt-tab-lock-btn' + (state._lockedTabs.has(t.id) ? ' locked' : '');
-    btn.id = 'optlockbtn-' + t.id;
-    btn.textContent = state._lockedTabs.has(t.id) ? 'Unlock' : 'Lock';
-    btn.onclick = () => optToggleTabLock(t.id);
-    row.appendChild(name); row.appendChild(status); row.appendChild(btn);
-    container.appendChild(row);
-  });
-}
-
-export function optToggleTabLock(tabId: string): void {
-  if (state._lockedTabs.has(tabId)) {
-    state._lockedTabs.delete(tabId);
-  } else {
-    const activeTab = document.querySelector('.tab-btn.active');
-    if (activeTab && activeTab.id === 'tab-' + tabId) {
-      // switchTab imported dynamically to avoid circular dep
-      import('./main').then(m => m.switchTab('options'));
-    }
-    state._lockedTabs.add(tabId);
-  }
-  optApplyTabLocks();
-  optSaveTabLocks();
-  optBuildTabLockList();
-}
-
-export function optApplyTabLocks(): void {
-  OPT_LOCKABLE_TABS.forEach(t => {
-    const btn = document.getElementById('tab-' + t.id);
-    if (!btn) return;
-    btn.classList.toggle('tab-locked', state._lockedTabs.has(t.id));
-  });
-}
-
-function optSaveTabLocks(): void {
-  lsSet('fs-opt-tablocks', [...state._lockedTabs]);
-}
-
-export function optLoadTabLocks(): void {
-  state._lockedTabs = new Set(lsGet<string[]>('fs-opt-tablocks', []));
-  optApplyTabLocks();
-}
-
-// ── Toolbar button visibility ─────────────────────────────────────────────────
-export function initToolbarOptions(): void {
-  const stored = lsGet<Record<string, boolean>>('fs-tb-btn-opts', {});
-  document.querySelectorAll<HTMLLabelElement>('.tb-opt-toggle').forEach(label => {
-    const btnId = label.dataset.btn!;
-    const cb = label.querySelector('input[type=checkbox]') as HTMLInputElement;
-    const visible = (btnId in stored) ? stored[btnId] : (TB_BTN_DEFAULTS[btnId] !== false);
-    cb.checked = visible;
-    const el = document.getElementById(btnId);
-    if (el) el.classList.toggle('tb-item-hidden', !visible);
-  });
-  _updateRow1MachineSep();
-  _updateRow2Visibility();
-}
-
-export function saveTbOpt(cb: HTMLInputElement): void {
-  const btnId = cb.closest('.tb-opt-toggle')!.getAttribute('data-btn')!;
-  const el = document.getElementById(btnId);
-  if (el) el.classList.toggle('tb-item-hidden', !cb.checked);
-  const stored = lsGet<Record<string, boolean>>('fs-tb-btn-opts', {});
-  stored[btnId] = cb.checked;
-  lsSet('fs-tb-btn-opts', stored);
-  _updateRow1MachineSep();
-  _updateRow2Visibility();
-}
-
-function _updateRow1MachineSep(): void {
-  const anyVisible = ['tbBtn-reset', 'tbBtn-unlock'].some(id => {
-    const el = document.getElementById(id);
-    return el && !el.classList.contains('tb-item-hidden');
-  });
-  const sep = document.getElementById('tbSep-row1-machine');
-  if (sep) sep.classList.toggle('tb-item-hidden', !anyVisible);
-}
-
-function _updateRow2Visibility(): void {
-  const runBtns = ['tbBtn-open', 'btnStart', 'btnPause', 'btnStop'];
-  const anyRunVis = runBtns.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('tb-item-hidden'); });
-  const homeEl = document.getElementById('tbBtn-home');
-  const homeVis = homeEl && !homeEl.classList.contains('tb-item-hidden');
-  const row2 = document.getElementById('toolbar-row2');
-  if (row2) row2.style.display = (anyRunVis || homeVis) ? '' : 'none';
-  const openHidden = !document.getElementById('tbBtn-open') || document.getElementById('tbBtn-open')!.classList.contains('tb-item-hidden');
-  const runSep = document.getElementById('tbSep-row2-run');
-  if (runSep) runSep.classList.toggle('tb-item-hidden', openHidden);
-  const homeSep = document.getElementById('tbSep-row2-home');
-  if (homeSep) homeSep.classList.toggle('tb-item-hidden', !homeVis);
-}
-
 // ── Jog step sizes & max speeds ───────────────────────────────────────────────
 export function optSaveJogSteps(): void {
   lsSet('fs-opt-jogsteps', {
@@ -294,46 +192,4 @@ export function optGetBearColor(flags: number): string {
   if (blocksJog) return (document.getElementById('optBearColorJog') as HTMLInputElement)?.value || '#ffcc00';
   if (blocksTool) return (document.getElementById('optBearColorTool') as HTMLInputElement)?.value || '#cc44ff';
   return (document.getElementById('optBearColorAll') as HTMLInputElement)?.value || '#ff2222';
-}
-
-// ── Tab visibility ────────────────────────────────────────────────────────────
-
-export function optBuildTabVisList(): void {
-  const container = document.getElementById('optTabVisList');
-  if (!container) return;
-  container.innerHTML = '';
-  const stored = lsGet<Record<string, boolean>>('fs-opt-tabvis', {});
-  OPT_HIDEABLE_TABS.forEach(t => {
-    const visible = stored[t.id] !== false; // default visible
-    const label = document.createElement('label');
-    label.className = 'tb-opt-toggle';
-    label.style.padding = '8px 14px';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = visible;
-    cb.addEventListener('change', () => optToggleTabVis(t.id, cb.checked));
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(' ' + t.label));
-    container.appendChild(label);
-  });
-}
-
-function optToggleTabVis(tabId: string, visible: boolean): void {
-  const stored = lsGet<Record<string, boolean>>('fs-opt-tabvis', {});
-  stored[tabId] = visible;
-  lsSet('fs-opt-tabvis', stored);
-  optApplyTabVis();
-}
-
-export function optApplyTabVis(): void {
-  const stored = lsGet<Record<string, boolean>>('fs-opt-tabvis', {});
-  OPT_HIDEABLE_TABS.forEach(t => {
-    const visible = stored[t.id] !== false;
-    const btn = document.getElementById('tab-' + t.id);
-    if (btn) btn.style.display = visible ? '' : 'none';
-  });
-}
-
-export function optLoadTabVis(): void {
-  optApplyTabVis();
 }

@@ -1,0 +1,296 @@
+// ═══════════════════════════════════════════════
+// The app shell: top bar, position line, message line, screens, bottom bar
+// ═══════════════════════════════════════════════
+
+import type { ComponentChildren } from 'preact';
+import { useEffect } from 'preact/hooks';
+import type { Signal } from '@preact/signals';
+import * as connection from '../stores/connection';
+import * as machine from '../stores/machine';
+import * as job from '../stores/job';
+import * as messages from '../stores/messages';
+import * as flight from '../stores/flight';
+import * as ui from './ui';
+import { mode, nextSection, awaitedSection, toolLabel } from './mode';
+import { toggleConnect, rtSend } from '../connection';
+import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm } from '../streaming';
+import { alarmText } from '../parser';
+import { Legacy } from './Legacy';
+import { JobScreen } from './JobScreen';
+import { startCarriedScreens } from './carried';
+import { IconHome, IconReady, IconPlay, IconPause, IconStop, IconWrench, IconWarn, IconUnplugged } from './icons';
+
+const num = (v: number, digits = 0) => v.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+// ── Top bar ───────────────────────────────────────────────────────────────────
+
+const SCREENS: [ui.Screen, string][] = [['job', 'JOB'], ['setup', 'SETUP'], ['probing', 'PROBING'], ['tools', 'TOOLS'], ['settings', 'SETTINGS']];
+
+function linkText(): string {
+  const status = connection.status.value;
+  if (status === 'disconnected') return 'not connected';
+  if (status === 'connecting') return 'connecting to ' + connection.address.value;
+  const plugin = flight.plugin.value;
+  const recorder = !plugin ? '' : !plugin.storage ? 'flight recorder: no FRAM'
+    : flight.enabled.value ? 'flight recorder on' : 'flight recorder off';
+  const fw = connection.firmware.value;
+  return [connection.address.value, 'grblHAL' + (fw ? ' ' + fw : ''), recorder].filter(Boolean).join(' · ');
+}
+
+function TopBar() {
+  const m = mode.value;
+  const link = connection.status.value;
+  const current = ui.screen.value;
+  return (
+    <header class="fs-top">
+      <div class="fs-logo"><span>FLEXI</span>SENDER</div>
+      <nav class="fs-nav" aria-label="Screens">
+        {SCREENS.map(([id, label]) => (
+          <button type="button" class={'fs-nav-btn' + (current === id ? ' is-on' : '')} aria-current={current === id ? 'page' : undefined}
+            onClick={() => { ui.screen.value = id; }}>{label}</button>
+        ))}
+      </nav>
+      <span class="fs-link">{linkText()}</span>
+      <div class="fs-top-actions">
+        <button type="button" class="fs-btn" disabled={link === 'connecting'} onClick={() => toggleConnect()}>
+          {link === 'connected' ? 'DISCONNECT' : 'CONNECT'}
+        </button>
+        <button type="button" class="fs-btn" disabled={link !== 'connected'} onClick={() => sendReset()}>RESET</button>
+        <button type="button" class="fs-home" disabled={link !== 'connected' || m === 'running' || m === 'hold' || m === 'change'}
+          onClick={() => sendHome()}><IconHome />HOME</button>
+      </div>
+    </header>
+  );
+}
+
+// ── Position line ─────────────────────────────────────────────────────────────
+
+interface StateView { label: string; sub: string; tone: '' | 'go' | 'stop'; icon: ComponentChildren; }
+
+function stateView(): StateView {
+  const m = mode.value;
+  if (m === 'offline') return { label: 'OFFLINE', sub: 'not connected', tone: '', icon: <IconUnplugged /> };
+  if (m === 'alarm') return { label: 'ALARM', sub: 'machine stopped', tone: 'stop', icon: <IconWarn /> };
+  if (m === 'change') return { label: 'TOOL CHANGE', sub: 'waiting for you', tone: '', icon: <IconWrench /> };
+  if (m === 'running') return { label: 'RUNNING', sub: 'no action needed', tone: 'go', icon: <IconPlay /> };
+  if (m === 'hold') return { label: 'HOLD', sub: 'paused, press Resume', tone: '', icon: <IconPause size={22} /> };
+  const ready = (label: string, sub: string): StateView => ({ label, sub, tone: '', icon: <IconReady /> });
+  switch (machine.stateName.value) {
+    case 'idle': return ready('READY', machine.homed.value ? 'homed, idle' : 'idle, not homed');
+    case 'home': return ready('HOMING', 'finding home');
+    case 'jog': return ready('JOGGING', 'moving');
+    case 'run': return ready('MOVING', 'running a command');
+    case 'hold': return ready('HOLD', 'feed hold');
+    case 'door': return ready('DOOR OPEN', 'close it to go on');
+    case 'check': return ready('CHECK MODE', 'G-code is checked, not run');
+    case 'sleep': return ready('SLEEP', 'reset to wake');
+    default: return ready('CONNECTED', 'waiting for a status report');
+  }
+}
+
+function PositionLine() {
+  const view = stateView();
+  const ref = ui.posRef.value;
+  const pos = ref === 'work' ? machine.wpos.value : machine.mpos.value;
+  return (
+    <div class="fs-posline">
+      <div class={'fs-state' + (view.tone ? ' is-' + view.tone : '')}>
+        {view.icon}
+        <div><div class="fs-state-label">{view.label}</div><div class="fs-state-sub">{view.sub}</div></div>
+      </div>
+      <div role="group" aria-label="Position" class="fs-axes">
+        {(['x', 'y', 'z'] as const).map(a => (
+          <div class="fs-axis"><span class="fs-axis-name">{a.toUpperCase()}</span><span class="fs-axis-value">{pos[a].toFixed(3)}</span></div>
+        ))}
+      </div>
+      <div class="fs-posref">
+        <span class="fs-wcs">{machine.wcs.value}</span>
+        {/* TO GO needs the end point of the executing line. The old parser can't give it reliably
+            (no G91, G20 or G53), so it waits for step 2's interpreter. */}
+        <div role="group" aria-label="Position reference" class="fs-seg">
+          {([['work', 'WORK'], ['machine', 'MACHINE']] as const).map(([id, label]) => (
+            <button type="button" aria-pressed={ref === id ? 'true' : 'false'} class={ref === id ? 'is-on' : ''}
+              onClick={() => { ui.posRef.value = id; }}>{label}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Message line ──────────────────────────────────────────────────────────────
+
+function MessagesButton() {
+  return (
+    <button type="button" class="fs-btn fs-btn-msg" onClick={() => { ui.screen.value = 'job'; ui.pickPanel('messages'); }}>
+      MESSAGES ({messages.list.value.length})
+    </button>
+  );
+}
+
+function MessageLine() {
+  const m = mode.value;
+  const file = job.file.value;
+  if (m === 'alarm') {
+    // After a lost link the ALARM: line came while FlexiSender was away; the flight record keeps the code.
+    const record = flight.record.value;
+    const code = machine.alarm.value ?? (job.result.value === 'link lost' && record?.alarm ? record.alarm : null);
+    const text = code !== null ? alarmText(String(code)) : 'ALARM';
+    const detail = text.includes(': ') ? text.slice(text.indexOf(': ') + 2) : 'The controller is in alarm.';
+    return (
+      <div role="alert" class="fs-msgline is-alarm">
+        <span class="fs-msg-tag"><IconWarn size={18} />{code !== null ? 'ALARM ' + code : 'ALARM'}</span>
+        <span class="fs-msg-text">{detail} Check the machine, then unlock{file && code !== null && code >= 80 ? ' and resume' : ''}.</span>
+        <button type="button" class="fs-btn fs-btn-alarm" onClick={() => unlockAlarm()}>UNLOCK</button>
+      </div>
+    );
+  }
+  if (m === 'change') {
+    const section = awaitedSection.value;
+    const z = machine.mpos.value.z;
+    return (
+      <div role="alert" class="fs-msgline is-action">
+        <span class="fs-msg-tag">ACTION NEEDED</span>
+        <span class="fs-msg-text">
+          Load <strong>{section ? toolLabel(section.tool) : 'the next tool'}</strong>, measure it, then press Resume.{' '}
+          Spindle {machine.spindle.value > 0 ? 'at ' + num(machine.spindle.value) + ' rpm' : 'stopped'}, tool at machine Z {z.toFixed(3)}.
+        </span>
+      </div>
+    );
+  }
+  let text: ComponentChildren;
+  if (m === 'offline') text = <>Not connected. Press <strong>CONNECT</strong>; the controller's address is in Settings, Options.</>;
+  else if (m === 'running') {
+    const next = nextSection.value;
+    text = next
+      ? <>Next action: change to <strong>{toolLabel(next.tool)}</strong> at line {num(next.changeLine)}.</>
+      : <>No action needed until the job ends.</>;
+  } else if (m === 'hold') text = <>Feed hold. Press <strong>Resume</strong> to carry on, or Stop to end the job.</>;
+  else if (!file) text = <>No job loaded. Press <strong>Load Job</strong> to open a G-code file.</>;
+  else if (job.result.value === 'completed') text = <><strong>{file}</strong> completed in {job.fmtDuration(job.elapsedMs.value)}.</>;
+  else if (job.result.value) {
+    const how: Record<string, string> = { stopped: 'was stopped', error: 'halted on an error', alarm: 'was stopped by an alarm', 'link lost': 'stopped when the connection was lost' };
+    const at = job.executingLine.value;
+    text = <><strong>{file}</strong> {how[job.result.value]}{at ? ' at line ' + num(at) : ''}, after {job.fmtDuration(job.elapsedMs.value)}. The record is in the Recorder panel; press Start to run it again from the top.</>;
+  }
+  else text = <>Ready to start <strong>{file}</strong>. Work through the setup list, then press Start.</>;
+  return (
+    <div role="status" class="fs-msgline">
+      <span class="fs-msg-text">{text}</span>
+      <MessagesButton />
+    </div>
+  );
+}
+
+// ── Bottom bar ────────────────────────────────────────────────────────────────
+
+function Override({ label, value, unit, pct, down, up, name }: { label: string; value: number; unit: string; pct: number; down: string; up: string; name: string }) {
+  const off = !connection.connected.value;
+  return (
+    <div class="fs-ovr">
+      <div class="fs-ovr-read">
+        <div class="fs-cap">{label}</div>
+        <div><span class="fs-ovr-value">{num(value)}</span> <span class="fs-unit">{unit}</span></div>
+      </div>
+      <button type="button" class="fs-step" disabled={off} aria-label={name + ' override down 10%'} onClick={() => rtSend(down)}>−</button>
+      <span class="fs-ovr-pct">{pct}%</span>
+      <button type="button" class="fs-step" disabled={off} aria-label={name + ' override up 10%'} onClick={() => rtSend(up)}>+</button>
+    </div>
+  );
+}
+
+// Real-time override bytes: feed ±10% 0x91/0x92, spindle ±10% 0x9A/0x9B, rapid 100/50/25% 0x95/0x96/0x97.
+const NEXT_RAPID: Record<number, string> = { 100: '\x96', 50: '\x97', 25: '\x95' };
+
+function BottomBar() {
+  const m = mode.value;
+  const ov = machine.overrides.value;
+  const linked = connection.connected.value;
+  const resume = m === 'hold' || m === 'change';
+  const canStart = linked && (resume || (m === 'ready' && !!job.file.value && !job.running.value && machine.stateName.value === 'idle'));
+  const start = () => {
+    // At a tool change, or a hold FlexiSender didn't ask for, the controller waits for cycle start.
+    if (m === 'change' || (m === 'hold' && !job.paused.value)) rtSend('~');
+    else startJob();
+  };
+  return (
+    <footer class="fs-bottom">
+      <Override label="FEED" name="Feed" value={machine.feed.value} unit="mm/min" pct={ov.feed} down={'\x92'} up={'\x91'} />
+      <Override label="SPINDLE" name="Spindle" value={machine.spindle.value} unit="rpm" pct={ov.spindle} down={'\x9B'} up={'\x9A'} />
+      <div class="fs-ovr">
+        <div class="fs-cap">RAPID</div>
+        <button type="button" class="fs-btn fs-rapid" disabled={!linked} aria-label={'Rapid override, now ' + ov.rapid + '%. Press to change'}
+          onClick={() => rtSend(NEXT_RAPID[ov.rapid] ?? '\x95')}>{ov.rapid}%</button>
+      </div>
+      <span class="fs-grow" />
+      <div class="fs-run">
+        <button type="button" class="fs-run-btn is-start" disabled={!canStart} onClick={start}><IconPlay size={18} />{resume ? 'RESUME' : 'START'}</button>
+        <button type="button" class="fs-run-btn is-hold" disabled={m !== 'running'} onClick={() => pauseJob()}><IconPause />HOLD</button>
+        <button type="button" class="fs-run-btn is-stop" disabled={!job.running.value} onClick={() => stopJob()}><IconStop />STOP</button>
+      </div>
+    </footer>
+  );
+}
+
+// ── Screens ───────────────────────────────────────────────────────────────────
+
+function SubTabs<T extends string>({ tabs, value }: { tabs: [T, string][]; value: Signal<T> }) {
+  return (
+    <div role="tablist" class="fs-subtabs">
+      {tabs.map(([id, label]) => (
+        <button type="button" role="tab" aria-selected={value.value === id ? 'true' : 'false'} class={value.value === id ? 'is-on' : ''}
+          onClick={() => { value.value = id; }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+const SETUP_TABS: [ui.SetupTab, string][] = [['machine', 'MACHINE'], ['offsets', 'OFFSETS'], ['camera', 'CAMERA']];
+const SETTINGS_TABS: [ui.SettingsTab, string][] = [['grbl', 'GRBL SETTINGS'], ['zones', 'EXCLUSION ZONES'], ['options', 'OPTIONS'], ['flight', 'FLIGHT RECORDER'], ['console', 'CONSOLE']];
+
+function SetupScreen() {
+  const tab = ui.setupTab.value;
+  return (
+    <section class="fs-screen" hidden={ui.screen.value !== 'setup'}>
+      <SubTabs tabs={SETUP_TABS} value={ui.setupTab} />
+      <div class="fs-sub fs-sub-scroll" hidden={tab !== 'machine'}>
+        <Legacy class="fs-cards" ids={['mod-position', 'mod-jogging', 'mod-spindle', 'mod-overrides', 'mod-macros', 'mod-signals', 'mod-limits', 'mod-surfacing', 'mod-sdcard']} />
+      </div>
+      <div class="fs-sub" hidden={tab !== 'offsets'}><Legacy class="fs-legacy" ids={['tabpanel-offsets']} /></div>
+      <div class="fs-sub" hidden={tab !== 'camera'}><Legacy class="fs-legacy" ids={['tabpanel-camera']} /></div>
+    </section>
+  );
+}
+
+function SettingsScreen() {
+  const tab = ui.settingsTab.value;
+  return (
+    <section class="fs-screen" hidden={ui.screen.value !== 'settings'}>
+      <SubTabs tabs={SETTINGS_TABS} value={ui.settingsTab} />
+      <div class="fs-sub" hidden={tab !== 'grbl'}><Legacy class="fs-legacy" ids={['tabpanel-settings']} /></div>
+      <div class="fs-sub" hidden={tab !== 'zones'}><Legacy class="fs-legacy" ids={['tabpanel-exclusions']} /></div>
+      <div class="fs-sub" hidden={tab !== 'options'}><Legacy class="fs-legacy" ids={['tabpanel-options']} /></div>
+      <div class="fs-sub" hidden={tab !== 'flight'}><Legacy class="fs-legacy" ids={['tabpanel-flight']} /></div>
+      <div class="fs-sub" hidden={tab !== 'console'}><Legacy class="fs-legacy fs-console" ids={['mod-console', 'touchKbdOverlay']} /></div>
+    </section>
+  );
+}
+
+export function App() {
+  const s = ui.screen.value;
+  // After the first render, so the carried-over panels are in their screens.
+  useEffect(() => startCarriedScreens(), []);
+  return (
+    <div class="fs-shell">
+      <TopBar />
+      <PositionLine />
+      <MessageLine />
+      <JobScreen hidden={s !== 'job'} />
+      <SetupScreen />
+      <section class="fs-screen" hidden={s !== 'probing'}><Legacy class="fs-legacy" ids={['tabpanel-probing']} /></section>
+      <section class="fs-screen" hidden={s !== 'tools'}><Legacy class="fs-legacy" ids={['tabpanel-tooltable']} /></section>
+      <SettingsScreen />
+      <BottomBar />
+    </div>
+  );
+}

@@ -18,6 +18,9 @@ import { lsGet, lsSet, esc } from './ui';
 import { streamLines, type SendLine } from './streaming';
 import { on as onBus } from './bus';
 import { jobId, numberedLine, programLines, modalScan, resumePreamble, resumeStart, ResumeRefused } from './flight-recorder-resume';
+import { batch } from '@preact/signals';
+import * as flight from './stores/flight';
+import * as job from './stores/job';
 
 export interface FlightRecord {
   state: string;      // Idle, Running, Stopped, Retracted, Completed
@@ -67,6 +70,19 @@ let _handshakeAnswered = false;     // the [VER:] line of a $I+ reply has arrive
 
 const HANDSHAKE_RETRY = 2500;   // ms between attempts while the controller doesn't answer
 const HANDSHAKE_LIMIT = 90000;  // ms before we give up waiting
+
+/** Copies what this module knows into the flight recorder store, for the job screen. */
+function publish(): void {
+  batch(() => {
+    flight.enabled.value = frEnabled();
+    flight.plugin.value = _pluginDetected ? { version: _version, storage: !_noStorage } : null;
+    flight.record.value = _record;
+    flight.events.value = _events;
+    flight.eventsLoading.value = _eventsLoading;
+    flight.watchdog.value = _watchdogSupported;
+    flight.undercut.value = _undercut;
+  });
+}
 
 // ── Switching it on ───────────────────────────────────────────────────────────
 
@@ -129,8 +145,19 @@ function finishHandshake(): void {
   if (frActive()) queryController();
 }
 
+/** Reads the record again ($FLIGHT), unless the controller can't answer now. */
+export function frReadRecord(): void {
+  if (state.connected && _pluginDetected && !_noStorage && !state.running && !_helpLoading && !_handshakeThen) cmdSend('$FLIGHT');
+}
+
+/** Clears the event log on the controller ($EVENTSCLEAR). */
+export function frClearEvents(): void {
+  if (state.connected && _pluginDetected) { sendCmd('$EVENTSCLEAR'); _events = []; renderEvents(); }
+}
+
 export function frDisconnected(): void {
   frCancelHandshake();
+  flight.eventsReadAt.value = null;
   _pluginDetected = false;
   _noStorage = false;
   _watchdogSupported = null;
@@ -300,6 +327,7 @@ function startResume(record: FlightRecord, plan: ResumePlan): void {
   }
   log('info', `✈ Resuming job ${record.job} from line ${line}`);
   closeModal();
+  job.started(true, line);
   streamLines(lines, true);
 }
 
@@ -428,6 +456,7 @@ export function renderFlightTab(): void {
 }
 
 function renderRecord(): void {
+  publish();
   const el = document.getElementById('frRecord');
   if (!el) return;
   if (!_record) {
@@ -467,6 +496,7 @@ const SETTINGS: SettingRow[] = [
 ];
 
 function renderSettings(): void {
+  publish();
   const el = document.getElementById('frSettings');
   if (!el) return;
   if (!state.connected || !_pluginDetected || _noStorage) {
@@ -495,6 +525,8 @@ function renderSettings(): void {
 }
 
 function renderEvents(): void {
+  publish();
+  if (!_eventsLoading && _events.length) flight.eventsReadAt.value = Date.now();
   const el = document.getElementById('frEvents');
   if (!el) return;
   if (_eventsLoading) { el.innerHTML = '<div class="fr-empty">Reading…</div>'; return; }
@@ -515,8 +547,9 @@ function renderEvents(): void {
   el.innerHTML = `<table class="fr-table fr-events"><tr><th>Boot</th><th>Time (s)</th><th>Event</th><th></th><th></th></tr>${rows}</table>`;
 }
 
-function loadEvents(): void {
-  if (!state.connected || !_pluginDetected || _noStorage) return;
+/** Reads the last 100 events from the controller, unless it can't answer now. */
+export function frLoadEvents(): void {
+  if (!state.connected || !_pluginDetected || _noStorage || _eventsLoading || state.running) return;
   _events = [];
   _eventsLoading = true;
   renderEvents();
@@ -527,14 +560,14 @@ export function initFlightRecorderTab(): void {
   const on = (id: string, fn: () => void) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   on('frTabToggleBtn', () => frSetEnabled(!frEnabled()));
   on('frTabRefreshBtn', () => { if (state.connected && _pluginDetected) queryController(); });
-  on('frEventsRefreshBtn', () => loadEvents());
+  on('frEventsRefreshBtn', () => frLoadEvents());
   on('frEventsClearBtn', () => { if (state.connected && _pluginDetected) { sendCmd('$EVENTSCLEAR'); _events = []; renderEvents(); } });
   on('frModalClose', () => closeModal());
 
   const option = document.getElementById('optFlightRecorder') as HTMLInputElement | null;
   if (option) option.addEventListener('change', () => frSetEnabled(option.checked));
   const undercut = document.getElementById('frUndercut') as HTMLInputElement | null;
-  if (undercut) undercut.addEventListener('change', () => { _undercut = undercut.checked; });
+  if (undercut) undercut.addEventListener('change', () => { _undercut = undercut.checked; publish(); });
 
   onBus('status', ['state'], () => updateResumeDialog());
   renderFlightTab();

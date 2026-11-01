@@ -6,6 +6,7 @@ import { state, DTYPE_MAP } from './state';
 import { log } from './console';
 import { cmdSend } from './connection';
 import { renderSettingsUI } from './settings-render';
+import * as machine from './stores/machine';
 
 export function loadSettings(): void {
   if (!state.connected) { log('info', 'Connect first'); return; }
@@ -81,6 +82,7 @@ export function settingsIntercept(raw: string): boolean {
   if (state.esPhase === 'values' && raw.match(/^\$\d+=/)) {
     const eq = raw.indexOf('=');
     state.settingsValues[parseInt(raw.slice(1, eq))] = raw.slice(eq + 1);
+    machine.settings.value = { ...state.settingsValues };
     return true;
   }
 

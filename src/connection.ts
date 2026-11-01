@@ -10,6 +10,11 @@ import { updateRunButtons } from './streaming';
 import { renderProgLimits } from './gcode';
 import { ezResetPluginState, renderEzTab, renderEzModule } from './exclusion-zones';
 import { frEnabled, frConnectHandshake, frDisconnected } from './flight-recorder';
+import { batch } from '@preact/signals';
+import * as connection from './stores/connection';
+import * as machine from './stores/machine';
+import * as job from './stores/job';
+import * as messages from './stores/messages';
 
 // ── Poll rate ─────────────────────────────────────────────────────────────────
 export function setPollRate(ms: number): void {
@@ -41,7 +46,9 @@ function disconnect(): void {
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function connectWs(): void {
   const url = (document.getElementById('wsUrl') as HTMLInputElement).value.trim();
-  if (!url) return;
+  if (!url) { messages.push('link', 'No controller address. Set it in Settings, Options.'); return; }
+  connection.transport.value = 'websocket';
+  connection.address.value = url;
   setStatus('connecting');
   log('info', 'Connecting to ' + url + '…');
   try {
@@ -57,12 +64,14 @@ function disconnectWs(): void { if (state.ws) state.ws.close(); }
 
 function feedBuffer(chunk: string): void {
   state._rxBuf += chunk;
-  let nl;
-  while ((nl = state._rxBuf.indexOf('\n')) !== -1) {
-    const line = state._rxBuf.slice(0, nl).replace(/\r$/, '').trim();
-    state._rxBuf = state._rxBuf.slice(nl + 1);
-    if (line) parseResponse(line);
-  }
+  batch(() => {
+    let nl;
+    while ((nl = state._rxBuf.indexOf('\n')) !== -1) {
+      const line = state._rxBuf.slice(0, nl).replace(/\r$/, '').trim();
+      state._rxBuf = state._rxBuf.slice(nl + 1);
+      if (line) parseResponse(line);
+    }
+  });
 }
 
 function onMessage(evt: MessageEvent): void {
@@ -90,6 +99,8 @@ async function connectSerial(): Promise<void> {
       ? `USB ${info.usbVendorId.toString(16).toUpperCase()}:${(info.usbProductId || 0).toString(16).toUpperCase()} @ ${baud}`
       : `Serial @ ${baud}`;
     document.getElementById('serialPortLabel')!.textContent = label;
+    connection.transport.value = 'serial';
+    connection.address.value = label;
 
     state.serialAbort = new AbortController();
     state.serialWriter = state.serialPort.writable.getWriter();
@@ -137,7 +148,7 @@ function onOpen(): void {
   state._rxBuf = '';
   setStatus('connected');
   log('info', state.connMode === 'serial' ? 'Serial connected' : 'WebSocket connected');
-  document.getElementById('connectBtn')!.textContent = 'DISCONNECT';
+  messages.push('link', 'Connected to ' + connection.address.value + '.');
   setPollRate(POLL_NORM);
   if (frEnabled()) {
     // No reset with the flight recorder on. If the last job lost its sender the controller may
@@ -165,12 +176,25 @@ function loadOffsetsOnConnect(): void {
 }
 
 function onClose(): void {
+  const wasRunning = state.running;
   state.connected = false;
   setStatus('disconnected');
   log('info', 'Disconnected');
-  document.getElementById('connectBtn')!.textContent = 'CONNECT';
+  messages.push('link', 'Disconnected.');
   if (state.statusInterval) clearInterval(state.statusInterval);
   state.running = false; state.paused = false;
+  if (wasRunning) job.finished('link lost');
+  batch(() => {
+    machine.state.value = '';
+    machine.wco.value = null;
+    machine.offsets.value = {};
+    machine.offsetsRead.value = false;
+    machine.toolTable.value = null;
+    machine.homed.value = false;
+    machine.feed.value = 0;
+    machine.spindle.value = 0;
+    connection.firmware.value = '';
+  });
   state.rxInFlight = 0; state.sentQueue.length = 0;
   updateRunButtons();
   const fb = document.getElementById('limitsFrameBtn') as HTMLButtonElement | null;
@@ -218,18 +242,15 @@ export function sendCmd(cmd: string): void {
 }
 
 // ── Status display ────────────────────────────────────────────────────────────
-export function setStatus(s: string): void {
-  document.getElementById('statusDot')!.className = 'status-dot ' + s;
-  document.getElementById('statusText')!.textContent = s.toUpperCase();
+export function setStatus(s: 'disconnected' | 'connecting' | 'connected'): void {
+  connection.status.value = s;
 }
 
 export function updateBufDisplay(): void {
-  document.getElementById('bufVal')!.textContent = 'RX: ' + state.rxInFlight + '/' + state.RX_BUFFER_SIZE + 'B';
+  const el = document.getElementById('bufVal');
+  if (el) el.textContent = 'RX: ' + state.rxInFlight + '/' + state.RX_BUFFER_SIZE + 'B';
 }
 
 export function _updateHomeBtnHomed(): void {
-  const btn = document.getElementById('tbBtn-home');
-  if (!btn) return;
-  btn.classList.toggle('homed', state.machineHomed);
-  btn.classList.toggle('not-homed', !state.machineHomed);
+  machine.homed.value = state.machineHomed;
 }

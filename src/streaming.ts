@@ -8,6 +8,7 @@ import { log } from './console';
 import { cmdSend, rtSend } from './connection';
 import { updateProgress } from './gcode';
 import { frActive, frEnabled, frJobLines } from './flight-recorder';
+import * as job from './stores/job';
 
 export interface SendLine { text: string; line: number; }
 
@@ -26,6 +27,7 @@ export function startJob(): void {
   if (frEnabled() && !recorded) log('info', '✈ The flight recorder is on, but this controller has no Flight Recorder plugin. Running without a record.');
   log('info', 'Starting job: ' + state.gcodeLines.length + ' lines  (RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes)' +
       (recorded ? '  flight recorder on' : ''));
+  job.started(recorded);
   streamLines(recorded ? frJobLines() : plainLines(), recorded);
 }
 
@@ -67,8 +69,11 @@ function _pumpQueue(): void {
     if (state.rxInFlight + wouldCost > hwm) break;
 
     cmdSend(text);
+    const sent = state.sentQueue[state.sentQueue.length - 1];
+    if (sent && sent.line === text && line > 0) sent.fileLine = line;
     log('tx', text);
     state.lineHead++;
+    if (line > 0) job.sentLine.value = line;
     updateProgress(line, state.gcodeLines.length);
   }
 
@@ -76,6 +81,7 @@ function _pumpQueue(): void {
     state.running = false;
     log('info', '✓ Job complete');
     updateRunButtons();
+    job.finished('completed');
   }
 }
 
@@ -95,16 +101,17 @@ export function stopJob(): void {
   state.rxInFlight = 0; state.sentQueue.length = 0; state.lineHead = 0;
   log('info', 'Job stopped — soft reset sent');
   updateRunButtons();
+  job.finished('stopped');
 }
 
 export function updateRunButtons(): void {
-  ['btnStart'].forEach(id => { (document.getElementById(id) as HTMLButtonElement).disabled = state.running && !state.paused; });
-  ['btnPause'].forEach(id => { (document.getElementById(id) as HTMLButtonElement).disabled = !state.running; });
-  ['btnStop'].forEach(id => { (document.getElementById(id) as HTMLButtonElement).disabled = !state.running && !state.paused; });
+  job.running.value = state.running;
+  job.paused.value = state.paused;
 }
 
 export function sendReset(): void {
   if (!state.connected) return;
+  if (state.running) job.finished('stopped');
   rtSend('\x18');
   state.running = false; state.paused = false;
   state.rxInFlight = 0; state.sentQueue.length = 0; state.lineHead = 0;

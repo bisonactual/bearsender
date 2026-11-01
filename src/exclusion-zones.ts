@@ -9,7 +9,8 @@ import { scene } from './viewport';
 import { optGetBearColor, optGetBearScale } from './options';
 import { lsGet, lsSet } from './ui';
 
-declare const THREE: any;
+import * as THREE from 'three';
+import * as machine from './stores/machine';
 
 export interface EzZone {
   slot: number;
@@ -48,6 +49,7 @@ export function ezResetPluginState(): void {
   delete state.settingsValues[130];
   delete state.settingsValues[131];
   delete state.settingsValues[132];
+  machine.settings.value = { ...state.settingsValues };
 }
 
 // ── Flags ─────────────────────────────────────────────────────────────────────
@@ -435,6 +437,7 @@ export function rebuildZoneMeshes(): void {
       ctx.fillStyle = blocked.length ? '#ff4444' : '#44ff88';
       ctx.fillText(label, 256, 64);
       const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
       sprite.position.set(cx, z.zmax + 3, cz); scene.add(sprite); _zoneMeshes.push(sprite); _zoneSprites.push(sprite);
     }

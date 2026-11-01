@@ -6,6 +6,7 @@ import { state } from './state';
 import { fmtOffset } from './ui';
 import { log } from './console';
 import { sendCmd } from './connection';
+import * as machine from './stores/machine';
 
 function parseToolTableLine(line: string): any {
   const semi = line.indexOf(';');
@@ -160,6 +161,7 @@ export function toolTableIntercept(raw: string): boolean {
     state.ttPhase = 'idle';
     state.ttEntries = state._ttLines.map(parseToolTableLine).filter(e => e.tool > 0);
     state._ttLines = [];
+    machine.toolTable.value = [...state.ttEntries];
     renderToolTable();
     ttSetStatus('');
     const tabBtn = document.getElementById('btnTTRefresh') as HTMLButtonElement | null;

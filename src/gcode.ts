@@ -8,8 +8,8 @@ import { sendCmd } from './connection';
 import { buildToolpathMesh, fitView } from './viewport';
 import { WCS_ENTRIES } from './offsets';
 import { frFileLoaded } from './flight-recorder';
-
-declare const THREE: any;
+import * as THREE from 'three';
+import * as job from './stores/job';
 
 const WCS_CODES: Record<string, string> = {
   '54': 'G54', '55': 'G55', '56': 'G56', '57': 'G57', '58': 'G58', '59': 'G59',
@@ -92,6 +92,7 @@ export function processGcode(text: string, name: string): void {
   state.gcodeLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   state.lineHead = 0; state.segmentIndex = 0;
   document.getElementById('fileName')!.textContent = name;
+  job.loaded(name, state.gcodeLines);
   updateProgress(0, state.gcodeLines.length);
 
   refreshLoadedProgramPreview();
@@ -117,7 +118,6 @@ export function refreshLoadedProgramPreview(): void {
   buildToolpathMesh(state.toolpathSegments);
   fitView();
 
-  (document.getElementById('btnStart') as HTMLButtonElement).disabled = false;
   document.getElementById('vpStats')!.innerHTML =
     `X: 0.000&nbsp;&nbsp;Y: 0.000&nbsp;&nbsp;Z: 0.000<br>CUTS: ${state.totalMoves}&nbsp;&nbsp;RAPIDS: ${state.totalRapids}`;
 
@@ -268,6 +268,7 @@ export function computeProgLimits(rawText: string): void {
 }
 
 export function renderProgLimits(): void {
+  job.limits.value = state.progLimits;
   const emptyEl = document.getElementById('limitsEmpty');
   const contentEl = document.getElementById('limitsContent');
   const tabsEl = document.getElementById('limitsTabs');

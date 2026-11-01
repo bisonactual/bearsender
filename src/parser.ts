@@ -9,22 +9,27 @@ import { pumpQueue, updateRunButtons } from './streaming';
 import { updateExecutedPath, toolGroup } from './viewport';
 import { settingsIntercept, tryInterceptValue, onSettingWriteOk, onSettingWriteErr, tryParseSettingLine } from './settings';
 import { toolTableIntercept, renderToolTable, renderModTT } from './tooltable';
-import { bearCheckPlugin, bearIntercept, bearParseStatus } from './bear';
 import { ezCheckPlugin, ezIntercept, ezParseStatus } from './exclusion-zones';
 import { emit, type StatusReport } from './bus';
 import { offsetsIntercept, offsetsInterceptOk } from './offsets';
 import { frCheckPlugin, frIntercept } from './flight-recorder';
 import { segmentsUpToLine } from './gcode';
+import { batch } from '@preact/signals';
+import * as machine from './stores/machine';
+import * as job from './stores/job';
+import * as messages from './stores/messages';
+import * as connection from './stores/connection';
 
 export function parseResponse(raw: string): void {
   if (raw.startsWith('<') && raw.endsWith('>')) { parseStatus(raw.slice(1, -1)); return; }
 
   // Always dequeue sentQueue on ok/error — before intercepts, so RX tracking stays in sync
-  let _dequeuedSent: { line: string; bytes: number } | undefined;
+  let _dequeuedSent: { line: string; bytes: number; fileLine?: number } | undefined;
   if (raw === 'ok' || raw.startsWith('error:')) {
     _dequeuedSent = state.sentQueue.shift();
     if (_dequeuedSent) {
       state.rxInFlight = Math.max(0, state.rxInFlight - _dequeuedSent.bytes);
+      if (_dequeuedSent.fileLine) job.ackedLine.value = _dequeuedSent.fileLine;
     }
     updateBufDisplay();
   }
@@ -34,8 +39,6 @@ export function parseResponse(raw: string): void {
   if (state.ttPhase === 'loading' && toolTableIntercept(raw)) return;
 
   if (frIntercept(raw, _dequeuedSent)) return;
-
-  if (bearIntercept(raw)) return;
 
   if (ezIntercept(raw)) return;
 
@@ -47,8 +50,9 @@ export function parseResponse(raw: string): void {
     offsetsInterceptOk();
     if (raw.startsWith('error:')) {
       log('err', raw + (_dequeuedSent ? '  ← "' + _dequeuedSent.line + '"' : ''));
+      messages.push('error', raw + (_dequeuedSent ? ' on "' + _dequeuedSent.line + '"' : ''));
       onSettingWriteErr(raw);
-      if (state.running) { state.running = false; updateRunButtons(); log('alarm', 'Stream halted on error. Fix G-code and restart.'); }
+      if (state.running) { state.running = false; updateRunButtons(); log('alarm', 'Stream halted on error. Fix G-code and restart.'); job.finished('error'); }
     } else {
       if (state.pendingSettingWrite) { onSettingWriteOk(); }
     }
@@ -66,9 +70,17 @@ export function parseResponse(raw: string): void {
 
   if (raw.startsWith('ALARM:')) {
     log('alarm', raw);
+    const code = parseInt(raw.slice(6));
+    batch(() => {
+      machine.alarm.value = isNaN(code) ? null : code;
+      machine.state.value = 'Alarm';
+    });
+    messages.push('alarm', alarmText(raw.slice(6)));
     setMachineState('ALARM');
     emit<StatusReport>('status', new Set(['state']), { machineState: 'ALARM' });
+    const wasRunning = state.running;
     state.running = false; updateRunButtons();
+    if (wasRunning) job.finished('alarm');
     return;
   }
 
@@ -89,7 +101,8 @@ export function parseResponse(raw: string): void {
   if (raw.match(/^\$\d+=/)) { tryParseSettingLine(raw); log('rx', raw); return; }
 
   if (raw.startsWith('[') || raw.startsWith('Grbl') || raw.startsWith('GrblHAL') || raw.startsWith('>')) {
-    bearCheckPlugin(raw);
+    if (raw.startsWith('[MSG:') && raw.length > 6) messages.push('msg', raw.slice(5, -1));
+    if (raw.startsWith('[VER:')) connection.firmware.value = raw.slice(5, -1).split(':')[0];
     ezCheckPlugin(raw);
     frCheckPlugin(raw);
     log('info', raw); return;
@@ -98,17 +111,29 @@ export function parseResponse(raw: string): void {
 }
 
 function parseStatus(s: string): void {
+  batch(() => parseStatusReport(s));
+}
+
+function parseStatusReport(s: string): void {
   const parts = s.split('|');
   const report: StatusReport = { machineState: parts[0] };
   const tags = new Set<string>(['state']);
 
   setMachineState(parts[0]);
+  machine.state.value = parts[0];
+  if (!parts[0].startsWith('Alarm')) machine.alarm.value = null;
+  else if (parts[0].includes(':')) machine.alarm.value = parseInt(parts[0].split(':')[1]) || machine.alarm.value;
   let hasPn = false;
+  let wpos: machine.Vec3 | null = null;
   for (let i = 1; i < parts.length; i++) {
     const colon = parts[i].indexOf(':');
     if (colon === -1) continue;
     const key = parts[i].slice(0, colon);
     const vals = parts[i].slice(colon + 1).split(',');
+    if (key === 'WPos') wpos = { x: parseFloat(vals[0]) || 0, y: parseFloat(vals[1]) || 0, z: parseFloat(vals[2]) || 0 };
+    if (key === 'MPos') machine.mpos.value = { x: parseFloat(vals[0]) || 0, y: parseFloat(vals[1]) || 0, z: parseFloat(vals[2]) || 0 };
+    if (key === 'WCO') machine.wco.value = { x: parseFloat(vals[0]) || 0, y: parseFloat(vals[1]) || 0, z: parseFloat(vals[2]) || 0 };
+    if (key === 'H') machine.homed.value = vals[0] === '1';
     if (key === 'MPos' || key === 'WPos') {
       state.machineX = parseFloat(vals[0]) || 0;
       state.machineY = parseFloat(vals[1]) || 0;
@@ -120,12 +145,15 @@ function parseStatus(s: string): void {
     if (key === 'FS' || key === 'F') {
       report.fs = { feed: vals[0] || '0', spindle: vals[1] || '0' };
       tags.add('fs');
+      machine.feed.value = parseFloat(vals[0]) || 0;
+      machine.spindle.value = parseFloat(vals[1]) || 0;
     }
     if (key === 'T') {
       const tn = parseInt(vals[0]);
       if (!isNaN(tn)) {
         report.tool = tn;
         tags.add('tool');
+        machine.tool.value = tn;
         if (tn !== state.currentToolNumber) {
           state.currentToolNumber = tn;
           if (state.ttEntries.length) renderToolTable();
@@ -136,6 +164,7 @@ function parseStatus(s: string): void {
       const ln = parseInt(vals[0]);
       report.ln = ln;
       tags.add('ln');
+      job.reportedLine.value = ln;
       // A numbered job's Ln is a line of the file, otherwise it's taken as a segment count.
       state.segmentIndex = state.jobNumbered ? segmentsUpToLine(ln) : ln;
       updateExecutedPath(state.segmentIndex);
@@ -149,6 +178,7 @@ function parseStatus(s: string): void {
       if (!isNaN(feed) && !isNaN(rapid) && !isNaN(spin)) {
         report.ov = { feed, rapid, spindle: spin };
         tags.add('ov');
+        machine.overrides.value = { feed, rapid, spindle: spin };
       }
     }
     if (key === 'Ct') {
@@ -156,11 +186,10 @@ function parseStatus(s: string): void {
       if (!isNaN(ct)) {
         report.tool = ct;
         tags.add('tool');
+        machine.tool.value = ct;
         if (ct !== state.currentToolNumber) {
           state.currentToolNumber = ct;
-          if (document.getElementById('tabpanel-tooltable')!.classList.contains('active')) {
-            renderToolTable();
-          }
+          renderToolTable();
           renderModTT();
         }
       }
@@ -169,29 +198,31 @@ function parseStatus(s: string): void {
       const wcs = vals[0] && vals[0].toUpperCase();
       report.wcs = wcs;
       tags.add('wcs');
+      if (wcs) machine.wcs.value = wcs;
     }
     if (key === 'Pn') {
       hasPn = true;
       report.pins = vals[0] || '';
       tags.add('pins');
     }
-    if (key === 'BEAR') {
-      report.bear = vals[0] || '';
-      tags.add('bear');
-      bearParseStatus(report.bear);
-    }
     if (key === 'EZ') {
       report.bear = vals[0] || '';
       tags.add('bear');
-      bearParseStatus(report.bear);
       ezParseStatus(report.bear);
     }
   }
   if (!hasPn) { report.pins = ''; tags.add('pins'); }
+  machine.pins.value = report.pins ?? '';
+  // A report in WPos: the machine position is the work position plus the offset.
+  if (wpos) {
+    const o = machine.wco.value ?? { x: 0, y: 0, z: 0 };
+    machine.mpos.value = { x: wpos.x + o.x, y: wpos.y + o.y, z: wpos.z + o.z };
+  }
 
   emit('status', tags, report);
 
-  document.getElementById('vpStats')!.innerHTML =
+  const stats = document.getElementById('vpStats');
+  if (stats) stats.innerHTML =
     `X: ${state.machineX.toFixed(3)}&nbsp;&nbsp;Y: ${state.machineY.toFixed(3)}&nbsp;&nbsp;Z: ${state.machineZ.toFixed(3)}<br>` +
     `RX: ${state.rxInFlight}/${state.RX_BUFFER_SIZE}B&nbsp;&nbsp;QUEUE: ${state.sentQueue.length}`;
 }
@@ -201,4 +232,32 @@ export function setMachineState(s: string): void {
   if (sl === 'alarm') { state.machineHomed = false; _updateHomeBtnHomed(); }
   if (sl === 'idle' && state._prevMachineStateSl === 'home') { state.machineHomed = true; _updateHomeBtnHomed(); }
   state._prevMachineStateSl = sl;
+}
+
+// grblHAL alarm codes, and the Flight Recorder plugin's own (80, 81).
+const ALARMS: Record<number, string> = {
+  1: 'Hard limit triggered. Position may be lost; home again.',
+  2: 'Soft limit: the move was outside the machine travel.',
+  3: 'Reset while moving. Position may be lost; home again.',
+  4: 'Probe fail: the probe was already triggered before the cycle.',
+  5: 'Probe fail: the probe did not make contact.',
+  6: 'Homing failed: reset during the cycle.',
+  7: 'Homing failed: the door opened.',
+  8: 'Homing failed: the pull-off did not clear the switch.',
+  9: 'Homing failed: no switch found.',
+  10: 'Emergency stop.',
+  11: 'Homing required.',
+  12: 'A limit switch is engaged.',
+  13: 'Probe protection triggered.',
+  14: 'Spindle did not reach speed.',
+  15: 'Homing failed: could not square the axis.',
+  16: 'Motor fault.',
+  17: 'Homing failed: the axis is not set up for it.',
+  80: 'Connection lost mid-job. Tool retracted and spindle stopped.',
+  81: 'Connection lost mid-job and the retract could not finish. The machine stopped where it was.',
+};
+
+export function alarmText(code: string): string {
+  const n = parseInt(code);
+  return 'ALARM ' + code + (ALARMS[n] ? ': ' + ALARMS[n] : '');
 }

@@ -5,6 +5,7 @@
 import { state } from './state';
 import { log } from './console';
 import { cmdSend } from './connection';
+import * as machine from './stores/machine';
 
 export function markDirty(id: number, val: string): void {
   state.settingsDirty[id] = val;
@@ -27,7 +28,7 @@ export function writeSetting(id: number): void {
 export function onSettingWriteOk(): void {
   if (!state.pendingSettingWrite) return;
   const { id, btn } = state.pendingSettingWrite;
-  if (state.settingsDirty[id] !== undefined) { state.settingsValues[id] = state.settingsDirty[id]; delete state.settingsDirty[id]; }
+  if (state.settingsDirty[id] !== undefined) { state.settingsValues[id] = state.settingsDirty[id]; delete state.settingsDirty[id]; machine.settings.value = { ...state.settingsValues }; }
   const row = document.getElementById('srow-' + id); if (row) row.classList.remove('dirty');
   if (btn) { btn.className = 'setting-write ok'; btn.textContent = 'SAVED \u2713'; setTimeout(() => { if (btn) { btn.className = 'setting-write'; btn.textContent = 'WRITE $' + id; } }, 2000); }
   state.pendingSettingWrite = null;
@@ -48,6 +49,7 @@ export function tryInterceptValue(raw: string): boolean {
   if (raw.match(/^\$\d+=/) && state.esPhase !== 'values') {
     const eq = raw.indexOf('=');
     state.settingsValues[parseInt(raw.slice(1, eq))] = raw.slice(eq + 1);
+    machine.settings.value = { ...state.settingsValues };
     return true;
   }
   return false;
@@ -66,5 +68,6 @@ export function tryParseSettingLine(raw: string): void {
   } else if (raw.match(/^\$\d+=/)) {
     const eq = raw.indexOf('=');
     state.settingsValues[parseInt(raw.slice(1, eq))] = raw.slice(eq + 1);
+    machine.settings.value = { ...state.settingsValues };
   }
 }

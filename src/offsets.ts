@@ -7,6 +7,7 @@ import { log } from './console';
 import { sendCmd, cmdSend } from './connection';
 import { lsGet, lsSet } from './ui';
 import { refreshWcsMarkers } from './viewport';
+import * as machine from './stores/machine';
 
 // ── Coordinate systems in display order ──────────────────────────────────────
 
@@ -75,6 +76,7 @@ function refreshLoadedProgramPreviewIfNeeded(): void {
 export function offsetsInterceptOk(): void {
   if (state.wcsPhase === 'loading') {
     state.wcsPhase = 'idle';
+    machine.offsetsRead.value = true;
     renderOffsetsTable();
     refreshLoadedProgramPreviewIfNeeded();
   }
@@ -83,6 +85,7 @@ export function offsetsInterceptOk(): void {
 // ── Render ────────────────────────────────────────────────────────────────────
 
 export function renderOffsetsTable(): void {
+  machine.offsets.value = { ...state.wcsOffsets };
   refreshWcsMarkers();
   const tbody = document.getElementById('wcsTableBody');
   const empty = document.getElementById('wcsEmpty');

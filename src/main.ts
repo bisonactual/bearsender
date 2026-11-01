@@ -1,14 +1,15 @@
 // ═══════════════════════════════════════════════
-// Main entry point — wires modules, exposes globals
+// Main entry point — wires the carried-over screens, then mounts the shell
 // ═══════════════════════════════════════════════
 
+import { render, h } from 'preact';
 import { state } from './state';
-import { lsGet, lsSet, $ } from './ui';
+import { lsGet, lsSet } from './ui';
 import { log, clearConsole, sendManual, handleConInput, conAutoUpdate } from './console';
-import { toggleConnect, sendCmd } from './connection';
-import { initViewport, setView, fitView, toggleToolhead, vpApply, setProjection, vpRefreshColors, toggleWcsMarkers, refreshWcsMarkers } from './viewport';
+import { sendCmd } from './connection';
+import { initViewport, setView, fitView, toggleToolhead, vpApply, setProjection, toggleWcsMarkers } from './viewport';
 import { loadFile, uploadAndOpenFile, frameProgram } from './gcode';
-import { startJob, pauseJob, stopJob, updateRunButtons, sendReset, unlockAlarm, sendHome, goToXY0, setWCS } from './streaming';
+import { updateRunButtons } from './streaming';
 import { mount as mountJog, initKeyboardJog } from './modules/jog';
 import { mount as mountPosition } from './modules/position';
 import { mount as mountOverrides } from './modules/overrides';
@@ -20,70 +21,27 @@ import { mount as mountToolLength } from './probing/tool-length';
 import { mount as mountEdgeFinder } from './probing/edge-finder-module';
 import { mount as mountCenterFinder } from './probing/center-finder-module';
 import { mount as mountRotation } from './probing/rotation-module';
-import { initProbingTab } from './probing/probing-tab';
 import { loadPreview3D, clearPreview3D, stepPreview3D, playPreview3D } from './probing/probe-preview-3d';
 import { loadSettings, filterSettings, writeAllDirty } from './settings';
 import { loadToolTable } from './tooltable';
-import { loadOffsets, renderOffsetsTable } from './offsets';
+import { loadOffsets } from './offsets';
 import { toggleSdPanel, closeSdPanel, sdRefreshFiles, sdRunSelected, initSdClickOutside } from './sd';
-import { initCameraTab, selectCamera, startCamera, stopCamera, measureOffset, goToCamera, goToSpindle, zeroAtCrosshair, camMouseDown, camMouseMove, camMouseUp, setCrosshairStyle, setCrosshairColor, loadCamSettings, saveCamSettings, drawOverlay, initCameraListeners } from './camera';
+import { selectCamera, startCamera, stopCamera, measureOffset, goToCamera, goToSpindle, zeroAtCrosshair, camMouseDown, camMouseMove, camMouseUp, setCrosshairStyle, setCrosshairColor, loadCamSettings, drawOverlay, initCameraListeners } from './camera';
 import { kbdPress, kbdBackspace, kbdClear, kbdSend, toggleTouchKeyboard } from './keyboard';
-import { toggleModule, setModSize, setConsoleLines, modInitPositions, toggleModLock, modDragStart, modTouchStart, initModDragListeners, toggleGroup, toggleGroupCollapse } from './modules';
-import { initDock, dockModule, undockModule, isDockingEnabled, setDockingEnabled } from './dock';
-import { optSetConnMode, optSaveConnSettings, optLoadConnSettings, optLoadColors, optLoadTabLocks, optBuildTabLockList, initToolbarOptions, saveTbOpt, optApplyColor, optHexChange, optResetColor, optResetAllColors, optSaveJogSteps, optLoadJogSteps, optApplyJogSteps, optApplyJogShowUnits, optLoadJogShowUnits, optSaveBearColors, optLoadBearColors, optBuildTabVisList, optLoadTabVis } from './options';
-import { bearRefresh, bearCheckPlugin, bearIntercept, bearParseStatus, bearShowAddForm, bearEditZone, bearSaveZone, bearDeleteZone, bearCancelEdit } from './bear';
-import { initExclusionZonesTab, ezRefresh, renderEzTab, renderEzModule, rebuildZoneMeshes } from './exclusion-zones';
-import { initFlightRecorderTab, renderFlightTab } from './flight-recorder';
-
-// ── Tab switching ─────────────────────────────────────────────────────────────
-export function switchTab(tab: string): void {
-  if (tab !== 'options' && state._lockedTabs.has(tab)) return;
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('tab-' + tab)!.classList.add('active');
-  document.getElementById('tabpanel-' + tab)!.classList.add('active');
-  try { lsSet('fs-active-tab', tab); } catch (_) {}
-  if (tab === 'settings' && !state.settingsLoaded && state.connected) loadSettings();
-  if (tab === 'camera' && !state._camTabInited) { state._camTabInited = true; initCameraTab(); }
-  if (tab === 'probing' && !state._probingTabInited) { state._probingTabInited = true; initProbingTab(); }
-  if (tab === 'tooltable') loadToolTable();
-  if (tab === 'offsets') loadOffsets();
-  if (tab === 'exclusions') renderEzTab();
-  if (tab === 'flight') renderFlightTab();
-}
+import { optSetConnMode, optSaveConnSettings, optLoadConnSettings, optLoadColors, optApplyColor, optHexChange, optResetColor, optResetAllColors, optSaveJogSteps, optLoadJogSteps, optApplyJogSteps, optApplyJogShowUnits, optLoadJogShowUnits, optSaveBearColors, optLoadBearColors } from './options';
+import { initExclusionZonesTab, rebuildZoneMeshes } from './exclusion-zones';
+import { initFlightRecorderTab } from './flight-recorder';
+import { App } from './app/App';
 
 // ── Expose to window for HTML onclick handlers ────────────────────────────────
 const w = window as any;
-
-// Connection
-// (wired in initChunk1Events)
-
-// Job
-// (wired in initChunk1Events)
-
-// File
-// (wired in initChunk1Events)
-
-// Viewport
-// (wired in initChunk1Events)
 w.vpApply = vpApply;
 w.setProjection = setProjection;
 
-// Jog
-// (wired in initChunk2Events)
-
-// Overrides
-// (wired in initChunk2Events)
-
-// Remaining window globals — only for dynamically generated HTML onclick handlers
+// Window globals for dynamically generated HTML onclick handlers
 w.sendCmd = sendCmd;  // used by settings-widgets.ts generated HTML
 w.loadPreview3D = loadPreview3D;
 w.clearPreview3D = clearPreview3D;
-w.bearShowAddForm = bearShowAddForm;
-w.bearEditZone = bearEditZone;
-w.bearSaveZone = bearSaveZone;
-w.bearDeleteZone = bearDeleteZone;
-w.bearCancelEdit = bearCancelEdit;
 
 // ── Shared event helper ───────────────────────────────────────────────────────
 function on(id: string, evt: string, fn: (e: any) => void): void {
@@ -154,12 +112,6 @@ function initChunk3Events(): void {
   });
   on('btnResetAllColors', 'click', () => optResetAllColors());
 
-  // Options — toolbar visibility
-  document.querySelectorAll<HTMLLabelElement>('.tb-opt-toggle').forEach(label => {
-    const cb = label.querySelector('input[type=checkbox]') as HTMLInputElement;
-    if (cb) cb.addEventListener('change', () => saveTbOpt(cb));
-  });
-
   // Options — exclusion zone colours
   ['optBearColorAll', 'optBearColorGcode', 'optBearColorJog', 'optBearColorTool', 'optBearColorSafe'].forEach(id => {
     on(id, 'input', () => { optSaveBearColors(); rebuildZoneMeshes(); const p = document.getElementById(id) as HTMLInputElement; const s = p?.nextElementSibling as HTMLElement; if (s) s.style.background = p.value; });
@@ -182,40 +134,8 @@ function initChunk3Events(): void {
   });
 }
 
-// ── Event wiring (chunk 2: modules) ───────────────────────────────────────────
+// ── Event wiring (chunk 2: console, limits, tool table, keyboard) ─────────────
 function initChunk2Events(): void {
-
-  // Note: module drag handles and close buttons are wired after all mount() calls
-  // in the init section below, so that JSX-mounted modules are included.
-
-  // Module config toggles + size buttons
-  document.querySelectorAll<HTMLElement>('[data-module-id]').forEach(cfgCard => {
-    const moduleId = cfgCard.dataset.moduleId;
-    if (!moduleId) return;
-    const sw = cfgCard.querySelector('.mod-switch');
-    if (sw) sw.addEventListener('click', () => toggleModule(moduleId));
-    cfgCard.querySelectorAll<HTMLElement>('.mod-size-btn').forEach(btn => {
-      btn.addEventListener('click', e => setModSize(moduleId, btn.textContent!.toLowerCase(), e));
-    });
-  });
-  // Group toggles
-  document.querySelectorAll('.mod-group-toggle').forEach(toggle => {
-    const groupId = (toggle as HTMLElement).dataset.groupId;
-    if (groupId) toggle.addEventListener('click', () => toggleGroup(groupId));
-  });
-  document.querySelectorAll('[data-collapse-group]').forEach(el => {
-    el.addEventListener('click', () => toggleGroupCollapse((el as HTMLElement).dataset.collapseGroup!));
-  });
-  document.querySelectorAll('.mod-toggle-card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('.mod-switch, .mod-lines-btn')) return;
-      card.classList.toggle('expanded');
-    });
-  });
-  // Console lines buttons
-  document.querySelectorAll<HTMLElement>('.mod-lines-btn').forEach(btn => {
-    btn.addEventListener('click', e => setConsoleLines(parseInt(btn.textContent!), e));
-  });
 
   // Console
   on('btnConClear', 'click', () => clearConsole());
@@ -230,15 +150,6 @@ function initChunk2Events(): void {
   // Tool table
   on('modTTRefresh', 'click', () => loadToolTable());
   on('btnTTRefresh', 'click', () => loadToolTable());
-
-  // Bear
-  const bearRefreshBtns = document.querySelectorAll<HTMLElement>('.module-drag-handle .tb-btn');
-  // Bear refresh is the ↻ button in the bear module header — find it by parent
-  const bearMod = document.getElementById('mod-bear');
-  if (bearMod) {
-    const refreshBtn = bearMod.querySelector('.module-drag-handle .tb-btn');
-    if (refreshBtn) refreshBtn.addEventListener('click', () => bearRefresh());
-  }
 
   // Touch keyboard (delegated)
   const kbd = document.getElementById('touchKbdOverlay');
@@ -269,42 +180,20 @@ function initChunk2Events(): void {
   }
 }
 
-// ── Event wiring (chunk 1: toolbar, tabs, viewport header, SD) ────────────────
+// ── Event wiring (chunk 1: files, SD, viewport header) ────────────────────────
 function initChunk1Events(): void {
 
-  // Toolbar row 1
-  on('connectBtn', 'click', () => toggleConnect());
+  // Files
   on('sdCardBtn', 'click', () => toggleSdPanel());
-  on('tbBtn-uploadOpen', 'click', () => $('uploadFileInput').click());
+  on('tbBtn-uploadOpen', 'click', () => document.getElementById('uploadFileInput')!.click());
   on('uploadFileInput', 'change', (e) => uploadAndOpenFile(e.target as HTMLInputElement));
-  on('tbBtn-reset', 'click', () => sendReset());
-  on('tbBtn-unlock', 'click', () => unlockAlarm());
-
-  // Toolbar row 2
-  on('tbBtn-open', 'click', () => $('fileInput').click());
-  on('fileInput', 'change', (e) => loadFile(e.target as HTMLInputElement));
-  on('btnStart', 'click', () => startJob());
-  on('btnPause', 'click', () => pauseJob());
-  on('btnStop', 'click', () => stopJob());
-  on('tbBtn-home', 'click', () => sendHome());
+  on('fileInput', 'change', (e) => { loadFile(e.target as HTMLInputElement); (e.target as HTMLInputElement).value = ''; });
 
   // SD panel
   on('sdRefreshBtn', 'click', () => sdRefreshFiles());
   on('sdCloseBtn', 'click', () => closeSdPanel());
   on('sdRunBtn', 'click', () => sdRunSelected());
   on('btnWcsRefresh', 'click', () => loadOffsets());
-
-  // Tab bar
-  document.querySelectorAll<HTMLElement>('.tab-btn[data-tab]').forEach(btn => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab!));
-  });
-  on('modLockBtn', 'click', () => toggleModLock());
-  on('dockToggleBtn', 'click', () => {
-    const enabled = !isDockingEnabled();
-    setDockingEnabled(enabled);
-    document.getElementById('dockToggleIcon')!.textContent = enabled ? '📌' : '📎';
-    document.getElementById('dockToggleLabel')!.textContent = enabled ? 'DOCK ON' : 'DOCK OFF';
-  });
 
   // Viewport header
   document.querySelectorAll<HTMLElement>('.view-btn[data-view]').forEach(btn => {
@@ -345,99 +234,37 @@ function copyDebugStats(): void {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+// The carried-over panels are built into #legacy first; the shell then moves each into its screen.
 initChunk1Events();
 initChunk2Events();
 initChunk3Events();
 initViewport();
-const mainEl = document.querySelector('.main') as HTMLElement;
-mountPosition(mainEl);
-mountOverrides(mainEl);
-mountSpindle(mainEl);
-mountMacros(mainEl);
-mountJog(mainEl);
-mountSignals(mainEl);
-mountSurfacing(mainEl);
-mountToolLength(mainEl);
-mountEdgeFinder(mainEl);
-mountCenterFinder(mainEl);
-mountRotation(mainEl);
+const legacyEl = document.getElementById('legacy') as HTMLElement;
+mountPosition(legacyEl);
+mountOverrides(legacyEl);
+mountSpindle(legacyEl);
+mountMacros(legacyEl);
+mountJog(legacyEl);
+mountSignals(legacyEl);
+mountSurfacing(legacyEl);
+mountToolLength(legacyEl);
+mountEdgeFinder(legacyEl);
+mountCenterFinder(legacyEl);
+mountRotation(legacyEl);
 initKeyboardJog();
 
-// Re-wire drag handles now that all JSX-mounted modules are in the DOM.
-// initChunk2Events() runs before the mount() calls so querySelectorAll misses them.
-document.querySelectorAll<HTMLElement>('.module-drag-handle').forEach(handle => {
-  const card = handle.closest('.module-card') as HTMLElement;
-  if (!card) return;
-  const modId = card.id;
-  handle.addEventListener('mousedown', e => modDragStart(e as MouseEvent, modId));
-  handle.addEventListener('touchstart', e => modTouchStart(e as TouchEvent, modId), { passive: false });
-});
-document.querySelectorAll<HTMLElement>('.module-drag-close').forEach(btn => {
-  const card = btn.closest('.module-card') as HTMLElement;
-  if (!card) return;
-  btn.addEventListener('click', () => toggleModule(card.id.replace('mod-', ''), false));
-});
-
-// Add diagonal resize handles to all module cards
-document.querySelectorAll<HTMLElement>('.module-card').forEach(card => {
-  const handle = document.createElement('div');
-  handle.className = 'module-resize-handle';
-  card.appendChild(handle);
-
-  const startResize = (startX: number, startY: number) => {
-    const startW = card.offsetWidth;
-    const baseScale = parseFloat(card.dataset.modScale || '1');
-
-    const onMove = (mx: number, my: number) => {
-      const dx = mx - startX;
-      const dy = my - startY;
-      const delta = (dx + dy) / 2;
-      const newScale = Math.max(0.5, Math.min(2.0, baseScale + delta / startW));
-      card.style.transform = `scale(${newScale})`;
-      card.style.transformOrigin = 'top left';
-      card.dataset.modScale = String(newScale);
-    };
-
-    const onMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY);
-    const onTouchMove = (e: TouchEvent) => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY); };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onUp);
-      document.removeEventListener('touchmove', onTouchMove);
-      document.removeEventListener('touchend', onUp);
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onUp);
-    document.addEventListener('touchmove', onTouchMove, { passive: false });
-    document.addEventListener('touchend', onUp);
-  };
-
-  handle.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); startResize(e.clientX, e.clientY); });
-  handle.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); startResize(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
-});
-
-initModDragListeners();
 initSdClickOutside();
 initCameraListeners();
 loadCamSettings();
+
+// The console keeps the line count chosen in the old MODULES tab.
+state.consoleMaxLines = lsGet<Record<string, any>>('fs-modules', {})._consoleLines || state.consoleMaxLines;
 
 log('info', 'FlexiSender ready — IOSender-compatible character-counting stream.');
 log('info', 'Open a G-code file to preview the toolpath, then connect and run.');
 updateRunButtons();
 
 window.addEventListener('load', () => {
-  modInitPositions();
-  // Restore last active tab
-  const savedTab = lsGet<string>('fs-active-tab', '');
-  if (savedTab) { try { switchTab(savedTab); } catch (_) {} }
-  const mainEl = document.querySelector('.viewport-wrap') as HTMLElement;
-  if (mainEl) initDock(mainEl);
-  try { if (lsGet('fs-mod-locked', false)) toggleModLock(); } catch (_) {}
-  // Restore dock toggle state
-  if (!isDockingEnabled()) {
-    document.getElementById('dockToggleIcon')!.textContent = '📎';
-    document.getElementById('dockToggleLabel')!.textContent = 'DOCK OFF';
-  }
   const fields: Record<string, number> = { vpXMin: state.vpXMin, vpXMax: state.vpXMax, vpYMin: state.vpYMin, vpYMax: state.vpYMax };
   for (const [id, val] of Object.entries(fields)) {
     const el = document.getElementById(id) as HTMLInputElement | null;
@@ -448,15 +275,10 @@ window.addEventListener('load', () => {
   // Save WS URL on change
   const wsInput = document.getElementById('wsUrl') as HTMLInputElement | null;
   if (wsInput) wsInput.addEventListener('change', () => optSaveConnSettings());
-  optLoadTabLocks();
-  optBuildTabLockList();
-  initToolbarOptions();
   optLoadJogSteps();
   optApplyJogSteps();
   optLoadJogShowUnits();
   optLoadBearColors();
-  optBuildTabVisList();
-  optLoadTabVis();
   initExclusionZonesTab();
   initFlightRecorderTab();
   // Restore auto-load settings toggle
@@ -469,36 +291,12 @@ window.addEventListener('load', () => {
     projOrtho.classList.toggle('selected', state.vpOrtho);
   }
 
-  // ── Column selectors ────────────────────────────────────────────────────────
-  const modColSel = document.getElementById('modColSelect') as HTMLSelectElement | null;
+  // ── Column selector ─────────────────────────────────────────────────────────
   const optColSel = document.getElementById('optColSelect') as HTMLSelectElement | null;
-  const modBody = document.querySelector('.modules-page-body') as HTMLElement | null;
   const optGrid = document.querySelector('.options-grid') as HTMLElement | null;
-  const savedModCols = lsGet('fs-mod-cols', '2');
   const savedOptCols = lsGet('fs-opt-cols', '2');
-  if (modColSel) { modColSel.value = savedModCols; if (modBody) modBody.style.setProperty('--mod-cols', savedModCols); }
   if (optColSel) { optColSel.value = savedOptCols; if (optGrid) optGrid.style.setProperty('--opt-cols', savedOptCols); }
-  if (modColSel) modColSel.addEventListener('change', () => { if (modBody) modBody.style.setProperty('--mod-cols', modColSel.value); lsSet('fs-mod-cols', modColSel.value); });
   if (optColSel) optColSel.addEventListener('change', () => { if (optGrid) optGrid.style.setProperty('--opt-cols', optColSel.value); lsSet('fs-opt-cols', optColSel.value); });
-
-  // ── Module search ───────────────────────────────────────────────────────────
-  const modSearchInput = document.getElementById('modSearch') as HTMLInputElement | null;
-  if (modSearchInput) {
-    modSearchInput.addEventListener('input', () => {
-      const q = modSearchInput.value.toLowerCase().trim();
-      document.querySelectorAll<HTMLElement>('.mod-group').forEach(group => {
-        let anyVisible = false;
-        group.querySelectorAll<HTMLElement>('.mod-toggle-card').forEach(card => {
-          const name = card.querySelector('.mod-toggle-name')?.textContent?.toLowerCase() || '';
-          const desc = card.querySelector('.mod-toggle-desc')?.textContent?.toLowerCase() || '';
-          const match = !q || name.includes(q) || desc.includes(q);
-          card.style.display = match ? '' : 'none';
-          if (match) anyVisible = true;
-        });
-        group.style.display = anyVisible ? '' : 'none';
-      });
-    });
-  }
 
   // ── Options search ──────────────────────────────────────────────────────────
   const optSearchInput = document.getElementById('optSearch') as HTMLInputElement | null;
@@ -514,3 +312,5 @@ window.addEventListener('load', () => {
     });
   }
 });
+
+render(h(App, null), document.getElementById('app')!);
