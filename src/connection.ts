@@ -189,7 +189,13 @@ function onClose(): void {
     machine.wco.value = null;
     machine.offsets.value = {};
     machine.offsetsRead.value = false;
+    machine.offsetsAtConnect.value = null;
+    machine.offsetWrites.value = {};
+    machine.tlo.value = null;
     machine.toolTable.value = null;
+    machine.toolTableError.value = null;
+    machine.alarm.value = null;
+    machine.tool.value = null;
     machine.homed.value = false;
     machine.feed.value = 0;
     machine.spindle.value = 0;
@@ -251,6 +257,7 @@ export function updateBufDisplay(): void {
   if (el) el.textContent = 'RX: ' + state.rxInFlight + '/' + state.RX_BUFFER_SIZE + 'B';
 }
 
+/** Homed after a homing cycle. Otherwise the store follows the controller's own H: field. */
 export function _updateHomeBtnHomed(): void {
-  machine.homed.value = state.machineHomed;
+  if (state.machineHomed) machine.homed.value = true;
 }

@@ -162,6 +162,7 @@ export function toolTableIntercept(raw: string): boolean {
     state.ttEntries = state._ttLines.map(parseToolTableLine).filter(e => e.tool > 0);
     state._ttLines = [];
     machine.toolTable.value = [...state.ttEntries];
+    machine.toolTableError.value = null;
     renderToolTable();
     ttSetStatus('');
     const tabBtn = document.getElementById('btnTTRefresh') as HTMLButtonElement | null;
@@ -174,6 +175,7 @@ export function toolTableIntercept(raw: string): boolean {
   if (raw.startsWith('error:')) {
     state.ttPhase = 'idle';
     state._ttLines = [];
+    machine.toolTableError.value = raw;
     ttSetStatus('⚠ ' + raw);
     const tabBtn = document.getElementById('btnTTRefresh') as HTMLButtonElement | null;
     const modBtn = document.getElementById('modTTRefresh') as HTMLButtonElement | null;

@@ -51,6 +51,7 @@ export function offsetsIntercept(raw: string): boolean {
     // TLO can be single value (Z only) or X,Y,Z
     state.tloOffset = vals.length === 1 ? vals[0] : (vals[2] ?? vals[0]);
     state.tloActive = state.tloOffset !== 0;
+    machine.tlo.value = state.tloOffset;
     renderOffsetsTable();
     return true;
   }
@@ -77,6 +78,7 @@ export function offsetsInterceptOk(): void {
   if (state.wcsPhase === 'loading') {
     state.wcsPhase = 'idle';
     machine.offsetsRead.value = true;
+    if (!machine.offsetsAtConnect.value) machine.offsetsAtConnect.value = { ...state.wcsOffsets };
     renderOffsetsTable();
     refreshLoadedProgramPreviewIfNeeded();
   }

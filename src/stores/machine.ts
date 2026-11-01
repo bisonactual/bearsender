@@ -18,6 +18,12 @@ export const wcs = signal('G54');
 /** The $# table, read on connect. */
 export const offsets = signal<Record<string, Vec3>>({});
 export const offsetsRead = signal(false);
+/** The $# table as first read after connecting, to tell what was set this session. */
+export const offsetsAtConnect = signal<Record<string, Vec3> | null>(null);
+/** How each work offset was last written this session: probed (G10 L2, G92) or zeroed (G10 L20). */
+export const offsetWrites = signal<Record<string, 'probed' | 'zeroed'>>({});
+/** The tool length offset from $# ([TLO:]), null until read. */
+export const tlo = signal<number | null>(null);
 export const overrides = signal<Overrides>({ feed: 100, rapid: 100, spindle: 100 });
 export const feed = signal(0);
 export const spindle = signal(0);
@@ -30,6 +36,8 @@ export const homed = signal(false);
 export const tool = signal<number | null>(null);
 /** The $TTLIST answer. Null until the controller has answered. */
 export const toolTable = signal<ToolEntry[] | null>(null);
+/** The error $TTLIST got, when the controller has no tool table. */
+export const toolTableError = signal<string | null>(null);
 /** $ settings values read so far. */
 export const settings = signal<Record<number, string>>({});
 

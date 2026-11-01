@@ -4,14 +4,14 @@
 
 import { state } from './state';
 import { log } from './console';
-import { updateBufDisplay, _updateHomeBtnHomed } from './connection';
+import { updateBufDisplay, _updateHomeBtnHomed, rtSend } from './connection';
 import { pumpQueue, updateRunButtons } from './streaming';
 import { updateExecutedPath, toolGroup } from './viewport';
 import { settingsIntercept, tryInterceptValue, onSettingWriteOk, onSettingWriteErr, tryParseSettingLine } from './settings';
 import { toolTableIntercept, renderToolTable, renderModTT } from './tooltable';
 import { ezCheckPlugin, ezIntercept, ezParseStatus } from './exclusion-zones';
 import { emit, type StatusReport } from './bus';
-import { offsetsIntercept, offsetsInterceptOk } from './offsets';
+import { offsetsIntercept, offsetsInterceptOk, loadOffsets } from './offsets';
 import { frCheckPlugin, frIntercept } from './flight-recorder';
 import { segmentsUpToLine } from './gcode';
 import { batch } from '@preact/signals';
@@ -55,6 +55,7 @@ export function parseResponse(raw: string): void {
       if (state.running) { state.running = false; updateRunButtons(); log('alarm', 'Stream halted on error. Fix G-code and restart.'); job.finished('error'); }
     } else {
       if (state.pendingSettingWrite) { onSettingWriteOk(); }
+      noteOffsetWrite(_dequeuedSent?.line);
     }
     pumpQueue();
     return;
@@ -120,6 +121,9 @@ function parseStatusReport(s: string): void {
   const tags = new Set<string>(['state']);
 
   setMachineState(parts[0]);
+  // A full report (0x87) on each change of state: it carries the alarm code, H (homed), T (tool) and WCO,
+  // which the plain report leaves out.
+  if (parts[0].split(':')[0].toLowerCase() !== machine.stateName.value) setTimeout(() => rtSend('\x87'), 0);
   machine.state.value = parts[0];
   if (!parts[0].startsWith('Alarm')) machine.alarm.value = null;
   else if (parts[0].includes(':')) machine.alarm.value = parseInt(parts[0].split(':')[1]) || machine.alarm.value;
@@ -232,6 +236,23 @@ export function setMachineState(s: string): void {
   if (sl === 'alarm') { state.machineHomed = false; _updateHomeBtnHomed(); }
   if (sl === 'idle' && state._prevMachineStateSl === 'home') { state.machineHomed = true; _updateHomeBtnHomed(); }
   state._prevMachineStateSl = sl;
+}
+
+const WCS_BY_P: Record<number, string> = { 1: 'G54', 2: 'G55', 3: 'G56', 4: 'G57', 5: 'G58', 6: 'G59', 7: 'G59.1', 8: 'G59.2', 9: 'G59.3' };
+
+/** After a command that writes a work offset or the tool length: read $# again, and ask for WCO. */
+function noteOffsetWrite(command: string | undefined): void {
+  if (!command || state.running) return;
+  const c = command.toUpperCase().replace(/\s+/g, '');
+  const g10 = c.match(/G0*10L0*(20|2)(?!\d)(?:P0*(\d+))?/);
+  const g92 = /G92(?![.\d])/.test(c);
+  if (!g10 && !g92 && !/G43\.1|G49(?!\d)/.test(c)) return;
+  if (g10 || g92) {
+    const wcs = (g10 && g10[2] && WCS_BY_P[parseInt(g10[2])]) || machine.wcs.value;
+    machine.offsetWrites.value = { ...machine.offsetWrites.value, [wcs]: g10 && g10[1] === '20' ? 'zeroed' : 'probed' };
+  }
+  loadOffsets();
+  rtSend('\x87');
 }
 
 // grblHAL alarm codes, and the Flight Recorder plugin's own (80, 81).
