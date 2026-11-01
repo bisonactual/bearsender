@@ -8,6 +8,7 @@ import { sendCmd } from './connection';
 import * as command from './command';
 import { lsGet, lsSet } from './ui';
 import { refreshWcsMarkers } from './viewport';
+import { reportMm } from './units';
 import * as machine from './stores/machine';
 
 // ── Coordinate systems in display order ──────────────────────────────────────
@@ -42,7 +43,7 @@ export async function loadOffsets(): Promise<void> {
     // [G54:x,y,z] [G55:...] [G28:...]; [PRB:] is the last probe's, not an offset
     const m = raw.match(/^\[([A-Z0-9.]+):([^\]]+)\]$/);
     if (!m || !OFFSET_KEYS.has(m[1])) continue;
-    const vals = m[2].split(',').map(Number);
+    const vals = m[2].split(',').map(v => reportMm(Number(v)));
     // Store normalised: x, y, z (pad with 0 if fewer axes reported)
     state.wcsOffsets[m[1]] = { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
   }
@@ -56,7 +57,7 @@ export async function loadOffsets(): Promise<void> {
 // [TLO:z] or [TLO:x,y,z], in the $# reply and pushed after a status report when it changes.
 command.on('tlo', raw => {
   log('info', raw);
-  const vals = raw.slice(5, -1).split(',').map(Number);
+  const vals = raw.slice(5, -1).split(',').map(v => reportMm(Number(v)));
   state.tloOffset = vals.length === 1 ? vals[0] : (vals[2] ?? vals[0]);
   state.tloActive = state.tloOffset !== 0;
   machine.tlo.value = state.tloOffset;
@@ -109,9 +110,10 @@ export function renderOffsetsTable(): void {
                    : isHome       ? 'wcs-row wcs-home'
                    : 'wcs-row';
 
-    // Axis inputs — TLO is Z-only, G28/G30 are preset positions (read-only style)
+    // Axis inputs — TLO is Z-only. G28/G30 are shown, not edited: grblHAL stores them only from where
+    // the machine is (G28.1/G30.1), they are usually left at home, and the console can still store them.
     const axisCell = (axis: 'x'|'y'|'z', val: number) => {
-      if (isTlo && axis !== 'z') return `<td class="wcs-td wcs-td-num wcs-disabled">${fmt(val)}</td>`;
+      if ((isTlo && axis !== 'z') || isHome) return `<td class="wcs-td wcs-td-num wcs-disabled">${fmt(val)}</td>`;
       return `<td class="wcs-td wcs-td-num">
         <input type="number" class="wcs-val-input" step="0.001"
           data-code="${entry.code}" data-axis="${axis}"
@@ -130,7 +132,7 @@ export function renderOffsetsTable(): void {
       <td class="wcs-td wcs-td-actions">
         ${isTlo ? `
           <button class="wcs-btn wcs-btn-clear" data-code="TLO" title="Cancel TLO (G49)">G49</button>
-        ` : `
+        ` : isHome ? '' : `
           <button class="wcs-btn wcs-btn-pos" data-code="${entry.code}" title="Set to current machine position">POS</button>
           <button class="wcs-btn wcs-btn-write" data-code="${entry.code}" title="Write values to controller">WRITE</button>
           <button class="wcs-btn wcs-btn-clear" data-code="${entry.code}" title="Zero all axes">ZERO</button>
@@ -213,21 +215,10 @@ function writeOffset(code: string): void {
   const vals = getInputVals(code);
   if (!vals) return;
 
-  let cmd: string;
-  if (code === 'G28' || code === 'G30') {
-    // G28.1 / G30.1 stores current machine position — move there first then store
-    // For manual edit we use G28.1/G30.1 after moving to the entered position
-    cmd = `G90G0X${vals.x.toFixed(4)}Y${vals.y.toFixed(4)}Z${vals.z.toFixed(4)}`;
-    sendCmd(cmd);
-    sendCmd(code + '.1');
-  } else {
-    // G10 L2 P<n> — persistent WCS offset
-    const entry = WCS_ENTRIES.find(e => e.code === code);
-    if (!entry) return;
-    const p = entry.id;
-    cmd = `G10L2P${p}X${vals.x.toFixed(4)}Y${vals.y.toFixed(4)}Z${vals.z.toFixed(4)}`;
-    sendCmd(cmd);
-  }
+  // G10 L2 P<n>, in mm — persistent WCS offset. The G28/G30 rows have no write (see renderOffsetsTable).
+  const entry = WCS_ENTRIES.find(e => e.code === code);
+  if (!entry || !entry.id) return;
+  sendCmd(`G21G10L2P${entry.id}X${vals.x.toFixed(4)}Y${vals.y.toFixed(4)}Z${vals.z.toFixed(4)}`);
 
   // Update local state and re-render
   state.wcsOffsets[code] = { x: vals.x, y: vals.y, z: vals.z };
@@ -241,14 +232,9 @@ function writeOffset(code: string): void {
 function zeroOffset(code: string): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
   const entry = WCS_ENTRIES.find(e => e.code === code);
-  if (!entry) return;
+  if (!entry || !entry.id) return;
 
-  if (code === 'G28' || code === 'G30') {
-    sendCmd(`G0X0Y0Z0`);
-    sendCmd(code + '.1');
-  } else {
-    sendCmd(`G10L2P${entry.id}X0Y0Z0`);
-  }
+  sendCmd(`G10L2P${entry.id}X0Y0Z0`);
   state.wcsOffsets[code] = { x: 0, y: 0, z: 0 };
   renderOffsetsTable();
   refreshLoadedProgramPreviewIfNeeded();
@@ -258,15 +244,11 @@ function zeroOffset(code: string): void {
 function setToCurrentPos(code: string): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
   const entry = WCS_ENTRIES.find(e => e.code === code);
-  if (!entry) return;
+  if (!entry || !entry.id) return;
 
+  // The machine position, in mm (parser.ts), even when the controller reports WPos.
   const x = state.machineX, y = state.machineY, z = state.machineZ;
-
-  if (code === 'G28' || code === 'G30') {
-    sendCmd(code + '.1');
-  } else {
-    sendCmd(`G10L2P${entry.id}X${x.toFixed(4)}Y${y.toFixed(4)}Z${z.toFixed(4)}`);
-  }
+  sendCmd(`G21G10L2P${entry.id}X${x.toFixed(4)}Y${y.toFixed(4)}Z${z.toFixed(4)}`);
 
   state.wcsOffsets[code] = { x, y, z };
   renderOffsetsTable();

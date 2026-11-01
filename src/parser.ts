@@ -8,7 +8,8 @@
 import { state } from './state';
 import { log } from './console';
 import { _updateHomeBtnHomed, rtSend } from './connection';
-import { updateRunButtons } from './streaming';
+import { endRunOnAlarm } from './streaming';
+import { reportMm } from './units';
 import { updateExecutedPath, toolGroup } from './viewport';
 import { renderToolTable, renderModTT } from './tooltable';
 import { ezParseStatus } from './exclusion-zones';
@@ -30,7 +31,7 @@ export function initParser(): void {
   });
   command.on('banner', line => log('info', line));
   command.on('startup', line => log('info', line));
-  command.on('gc', line => log('info', line));
+  command.on('gc', line => { log('info', line); machine.modal.value = line.slice(4, -1).trim().split(/\s+/); });
   command.onReply((reply, { job, quiet }) => {
     if (reply.result === 'error') { if (!quiet) messages.push('error', `error:${reply.code} on "${reply.command}"`); }
     else if (!job) noteOffsetWrite(reply.command);
@@ -47,9 +48,9 @@ function onAlarm(raw: string): void {
   messages.push('alarm', alarmText(raw.slice(6)));
   setMachineState('ALARM');
   emit<StatusReport>('status', new Set(['state']), { machineState: 'ALARM' });
-  const wasRunning = state.running;
-  state.running = false; updateRunButtons();
-  if (wasRunning) job.finished('alarm');
+  endRunOnAlarm();
+  // The full report says whether the machine is still homed; the next plain one would look unchanged.
+  rtSend('\x87');
 }
 
 function parseStatusReport(s: string): void {
@@ -65,28 +66,23 @@ function parseStatusReport(s: string): void {
   if (!parts[0].startsWith('Alarm')) machine.alarm.value = null;
   else if (parts[0].includes(':')) machine.alarm.value = parseInt(parts[0].split(':')[1]) || machine.alarm.value;
   let hasPn = false;
+  // Positions in mm whatever $13 says. The report gives MPos, or WPos with WCO now or earlier.
+  const vec = (vals: string[]): machine.Vec3 => ({ x: reportMm(parseFloat(vals[0]) || 0), y: reportMm(parseFloat(vals[1]) || 0), z: reportMm(parseFloat(vals[2]) || 0) });
+  let mpos: machine.Vec3 | null = null;
   let wpos: machine.Vec3 | null = null;
   for (let i = 1; i < parts.length; i++) {
     const colon = parts[i].indexOf(':');
     if (colon === -1) continue;
     const key = parts[i].slice(0, colon);
     const vals = parts[i].slice(colon + 1).split(',');
-    if (key === 'WPos') wpos = { x: parseFloat(vals[0]) || 0, y: parseFloat(vals[1]) || 0, z: parseFloat(vals[2]) || 0 };
-    if (key === 'MPos') machine.mpos.value = { x: parseFloat(vals[0]) || 0, y: parseFloat(vals[1]) || 0, z: parseFloat(vals[2]) || 0 };
-    if (key === 'WCO') machine.wco.value = { x: parseFloat(vals[0]) || 0, y: parseFloat(vals[1]) || 0, z: parseFloat(vals[2]) || 0 };
+    if (key === 'WPos') wpos = vec(vals);
+    if (key === 'MPos') mpos = vec(vals);
+    if (key === 'WCO') machine.wco.value = vec(vals);
     if (key === 'H') machine.homed.value = vals[0] === '1';
-    if (key === 'MPos' || key === 'WPos') {
-      state.machineX = parseFloat(vals[0]) || 0;
-      state.machineY = parseFloat(vals[1]) || 0;
-      state.machineZ = parseFloat(vals[2]) || 0;
-      report.mpos = { x: state.machineX, y: state.machineY, z: state.machineZ };
-      tags.add('mpos');
-      toolGroup.position.set(state.machineX, state.machineZ, -state.machineY);
-    }
     if (key === 'FS' || key === 'F') {
       report.fs = { feed: vals[0] || '0', spindle: vals[1] || '0' };
       tags.add('fs');
-      machine.feed.value = parseFloat(vals[0]) || 0;
+      machine.feed.value = reportMm(parseFloat(vals[0]) || 0);
       machine.spindle.value = parseFloat(vals[1]) || 0;
     }
     if (key === 'T') {
@@ -154,10 +150,20 @@ function parseStatusReport(s: string): void {
   }
   if (!hasPn) { report.pins = ''; tags.add('pins'); }
   machine.pins.value = report.pins ?? '';
-  // A report in WPos: the machine position is the work position plus the offset.
-  if (wpos) {
-    const o = machine.wco.value ?? { x: 0, y: 0, z: 0 };
-    machine.mpos.value = { x: wpos.x + o.x, y: wpos.y + o.y, z: wpos.z + o.z };
+  // A report in WPos: the machine position is the work position plus the offset in force (WCO, which
+  // has G92 and the tool length offset in it). Until a WCO has come it isn't known: ask for one.
+  if (wpos && !mpos) {
+    const o = machine.wco.value;
+    if (o) mpos = { x: wpos.x + o.x, y: wpos.y + o.y, z: wpos.z + o.z };
+    else rtSend('\x87');
+  }
+  // The store, the old state fields and the bus all get the machine position, never the work one.
+  if (mpos) {
+    machine.mpos.value = mpos;
+    state.machineX = mpos.x; state.machineY = mpos.y; state.machineZ = mpos.z;
+    report.mpos = { ...mpos };
+    tags.add('mpos');
+    toolGroup.position.set(mpos.x, mpos.z, -mpos.y);
   }
 
   emit('status', tags, report);
@@ -173,7 +179,8 @@ function parseStatusReport(s: string): void {
 
 export function setMachineState(s: string): void {
   const sl = s.toLowerCase().split(':')[0];
-  if (sl === 'alarm') { state.machineHomed = false; _updateHomeBtnHomed(); }
+  // An alarm: not homed until the controller's H: says otherwise (the full report asked for on ALARM:).
+  if (sl === 'alarm' && state._prevMachineStateSl !== 'alarm') { state.machineHomed = false; machine.homed.value = false; _updateHomeBtnHomed(); }
   if (sl === 'idle' && state._prevMachineStateSl === 'home') { state.machineHomed = true; _updateHomeBtnHomed(); }
   state._prevMachineStateSl = sl;
 }

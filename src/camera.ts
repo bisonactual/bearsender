@@ -236,9 +236,10 @@ export function measureOffset(): void {
 
 export function goToCamera(): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
+  // A machine position (parser.ts), so a machine-coordinate move (G53), in mm.
   const tx = state.machineX + state.camOffsetX;
   const ty = state.machineY + state.camOffsetY;
-  sendCmd('G0 X' + tx.toFixed(4) + ' Y' + ty.toFixed(4));
+  sendCmd('G21 G53 G0 X' + tx.toFixed(4) + ' Y' + ty.toFixed(4));
   log('info', 'Moving spindle to camera position');
 }
 
@@ -246,13 +247,13 @@ export function goToSpindle(): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
   const tx = state.machineX - state.camOffsetX;
   const ty = state.machineY - state.camOffsetY;
-  sendCmd('G0 X' + tx.toFixed(4) + ' Y' + ty.toFixed(4));
+  sendCmd('G21 G53 G0 X' + tx.toFixed(4) + ' Y' + ty.toFixed(4));
   log('info', 'Moving spindle back from camera position');
 }
 
 export function zeroAtCrosshair(): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
-  sendCmd('G10 L20 P' + machine.activeP.value + ' X' + state.camOffsetX.toFixed(4) + ' Y' + state.camOffsetY.toFixed(4));
+  sendCmd('G21 G10 L20 P' + machine.activeP.value + ' X' + state.camOffsetX.toFixed(4) + ' Y' + state.camOffsetY.toFixed(4));
   log('info', 'WCS zeroed at camera position');
 }
 

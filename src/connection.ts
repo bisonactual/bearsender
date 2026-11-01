@@ -166,6 +166,8 @@ function onOpen(): void {
 async function afterConnect(): Promise<void> {
   const steps: (() => Promise<unknown>)[] = [
     async () => readBuildInfo((await command.send('$I+', { log: true })).lines),
+    // Report units first: positions and offsets are read into mm by it (units.ts).
+    () => command.send('$13', { quiet: true }),
     frConnected,
     ezConnected,
     async () => { if (lsGet('fs-opt-autoload-settings', false)) await loadSettings(); },
@@ -280,7 +282,8 @@ export function updateBufDisplay(): void {
   if (el) el.textContent = 'RX: ' + command.stats().bytes + '/' + state.RX_BUFFER_SIZE + 'B';
 }
 
-/** Homed after a homing cycle. Otherwise the store follows the controller's own H: field. */
+/** Homed after a homing cycle. Otherwise the store follows the controller's own H: field (and an
+ *  alarm clears it until a full report says otherwise: parser.ts). */
 export function _updateHomeBtnHomed(): void {
   if (state.machineHomed) machine.homed.value = true;
 }

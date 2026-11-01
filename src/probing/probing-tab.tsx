@@ -326,7 +326,7 @@ function wireTlEvents(container: HTMLElement): void {
       let tlo = result.z;
       if (tloRef !== null) tlo -= tloRef + cfg.touchPlateHeight;
       else if (mode === 'touchplate') tlo -= cfg.touchPlateHeight;
-      sendCmd(`G43.1Z${tlo.toFixed(4)}`);
+      sendCmd(`G21G43.1Z${tlo.toFixed(4)}`);
       const resEl = document.getElementById('probTlResult');
       if (resEl) resEl.textContent = `Z=${result.z.toFixed(4)}  TLO=${tlo.toFixed(4)} mm`;
       setStatus(statusId, '✓ Complete — TLO applied', 'ok');

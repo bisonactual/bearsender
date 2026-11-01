@@ -89,7 +89,8 @@ export function segmentsUpToLine(line: number): number {
 }
 
 export function processGcode(text: string, name: string): void {
-  state.gcodeLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  // CR, LF or CRLF: grblHAL ends a line at either, so a lone CR inside a line would split it there.
+  state.gcodeLines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l.length > 0);
   state.lineHead = 0; state.segmentIndex = 0;
   document.getElementById('fileName')!.textContent = name;
   job.loaded(name, state.gcodeLines);
@@ -394,16 +395,16 @@ export function frameProgram(): void {
     return;
   }
 
-  // Build Z command
+  // Build Z command. G21 G90 first: the frame is absolute mm, whatever a probe or a job left.
   let zCmd: string;
   if (ref === 'absolute') {
-    zCmd = `G53 G0 Z${safeZ.toFixed(4)}`;
+    zCmd = `G21 G90 G53 G0 Z${safeZ.toFixed(4)}`;
   } else {
     const refOff = state.wcsOffsets[ref] || { x: 0, y: 0, z: 0 };
     const curOff = off;
     const absZ = safeZ + refOff.z;
     const workZ = absZ - curOff.z;
-    zCmd = `G0 Z${workZ.toFixed(4)}`;
+    zCmd = `G21 G90 G0 Z${workZ.toFixed(4)}`;
   }
 
   const f = (v: number) => v.toFixed(4);

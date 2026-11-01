@@ -131,7 +131,7 @@ async function doProbe(): Promise<void> {
     }
   }
 
-  sendCmd(`G43.1Z${tlo.toFixed(4)}`);
+  sendCmd(`G21G43.1Z${tlo.toFixed(4)}`);
   log('info', `Tool length offset applied: G43.1 Z${tlo.toFixed(4)}`);
   if (_resultDisplay) _resultDisplay.textContent = `Z=${result.z.toFixed(4)}  TLO=${tlo.toFixed(4)} mm`;
   setStatus('✓ Complete — TLO applied', 'ok');

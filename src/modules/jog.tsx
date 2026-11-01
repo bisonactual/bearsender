@@ -281,7 +281,7 @@ export function startJog(dir: string): void {
       }
     }
     setJogging(true);
-    sendCmd('$J=G91 X' + xSign + step + ' Y' + ySign + step + ' F' + f);
+    sendCmd('$J=G21G91 X' + xSign + step + ' Y' + ySign + step + ' F' + f);
     return;
   }
 
@@ -299,7 +299,8 @@ export function startJog(dir: string): void {
     }
   }
   setJogging(true);
-  sendCmd('$J=G91 ' + axis + sign + axisStep + ' F' + f);
+  // G21: the steps are mm, whatever the last job left. A jog doesn't change the modal state.
+  sendCmd('$J=G21G91 ' + axis + sign + axisStep + ' F' + f);
 }
 
 export function clearWaypoints(): void {
@@ -310,7 +311,8 @@ export function clearWaypoints(): void {
 }
 
 export function stopJog(): void {
-  // grblHAL empties its input on a jog cancel; the command layer gets the line in step again.
+  // grblHAL empties its input on a jog cancel; the command layer gets the line in step again, and
+  // drops the jogs it hasn't sent yet, so none starts after the key or button is let go.
   rtSend('\x85');
   setJogging(false);
   clearWaypoints();
@@ -466,7 +468,7 @@ export function initKeyboardJog(): void {
     const axis = dir[0], sign = dir[1] === '+' ? '' : '-';
     const f = jogFeedValue(axis === 'Z');
     highlightJogBtn(dir, true);
-    sendCmd('$J=G91 ' + axis + sign + KEYBOARD_JOG_DIST + ' F' + f);
+    sendCmd('$J=G21G91 ' + axis + sign + KEYBOARD_JOG_DIST + ' F' + f);
   });
 
   document.addEventListener('keyup', e => {

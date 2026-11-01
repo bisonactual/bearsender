@@ -7,11 +7,19 @@
 // once the probe cycle has ended, with the [PRB:] line before its ok when $10 asks for it; without
 // that, $# gives the same line. A move is answered once it is planned, so G4 P0 goes after it: its
 // ok comes when the planner is empty, that is, when the machine has stopped there.
+//
+// Every move and write says G21: the distances are millimetres whatever the last job left. A
+// routine reads the distance mode and units first ($G) and puts them back when it ends, however it
+// ends, so its G91 moves don't leave the next move incremental. Cancel stops the move in progress
+// (a hold, then the reset once the machine has stopped), and the routine owns the machine until then.
 
 import { state } from '../state';
 import { log } from '../console';
 import { sendCmd } from '../connection';
+import { stopMachine, isStopping } from '../streaming';
+import { reportMm } from '../units';
 import * as command from '../command';
+import * as machine from '../stores/machine';
 
 export const WCS_P: Record<string, number> = {
   G54: 1,
@@ -48,11 +56,11 @@ export function applyXYResult(x: number, y: number, axes: string, opts: { mode?:
   const fy = (y + yOff).toFixed(4);
   if (opts.mode === 'G92') {
     const parts = axes === 'XY' ? `X${fx}Y${fy}` : axes === 'X' ? `X${fx}` : `Y${fy}`;
-    sendCmd(`G92${parts}`);
+    sendCmd(`G21G92${parts}`);
   } else if (opts.mode === 'G10') {
     const p = WCS_P[wcs] ?? 1;
     const parts = axes === 'XY' ? `X${fx}Y${fy}` : axes === 'X' ? `X${fx}` : `Y${fy}`;
-    sendCmd(`G10L2P${p}${parts}`);
+    sendCmd(`G21G10L2P${p}${parts}`);
   }
   log('info', `Probed ${axes}: X=${fx} Y=${fy} → ${wcs} (${opts.mode})`);
 }
@@ -61,10 +69,10 @@ export function applyZResult(z: number, plateHeight: number, wcsHeight: number, 
   const wcs = opts.wcs || getActiveWcs();
   const fz = (z - plateHeight - wcsHeight).toFixed(4);
   if (opts.mode === 'G92') {
-    sendCmd(`G92Z${fz}`);
+    sendCmd(`G21G92Z${fz}`);
   } else if (opts.mode === 'G10') {
     const p = WCS_P[wcs] ?? 1;
-    sendCmd(`G10L2P${p}Z${fz}`);
+    sendCmd(`G21G10L2P${p}Z${fz}`);
   }
   log('info', `Probed Z: raw=${z.toFixed(4)} plate=${plateHeight} → Z${fz} → ${wcs} (${opts.mode})`);
 }
@@ -77,13 +85,41 @@ export function isProbingRunning(): boolean {
 export async function runProbing<T>(sequence: () => Promise<T>): Promise<T | null> {
   if (!state.connected) { log('err', 'Not connected'); return null; }
   if (_running) { log('err', 'Probing already in progress'); return null; }
+  // Sent now, a probe would wait unread in the controller and run after the Resume, in the job.
+  if (machine.stateName.value === 'tool' && !command.toolChangeAcknowledged()) {
+    log('err', 'The controller is at a tool change and reads no commands until Resume, so nothing was sent.');
+    return null;
+  }
   _running = true;
   _cancelled = false;
+  const modes = await readModes();
   try {
     return await sequence();
   } finally {
-    _running = false;
     _cancel = null;
+    // After a Cancel, the reset comes first (it puts back grblHAL's own defaults).
+    while (isStopping()) await new Promise(r => setTimeout(r, 50));
+    await restoreModes(modes);
+    _running = false;
+  }
+}
+
+/** The distance mode and units now, from the [GC:] line that $G brings: as "G21G90". */
+async function readModes(): Promise<string> {
+  try { await command.send('$G'); }
+  catch (e) { if (!(e instanceof command.CommandFailed)) throw e; }
+  const words = machine.modal.value;
+  return (words.includes('G20') ? 'G20' : 'G21') + (words.includes('G91') ? 'G91' : 'G90');
+}
+
+async function restoreModes(modes: string): Promise<void> {
+  try {
+    const reply = await command.send(modes, { quiet: true });
+    if (reply.result === 'ok') log('info', `Probing ended: ${modes} as before`);
+    else log('err', `Probing ended, but ${modes} was refused (error:${reply.code}): check the distance mode and units before the next move`);
+  } catch (e) {
+    if (!(e instanceof command.CommandFailed)) throw e;
+    log('err', `Probing ended without putting back ${modes} (${e.why}): check the distance mode and units before the next move`);
   }
 }
 
@@ -99,7 +135,7 @@ function orCancel<T>(p: Promise<T>): Promise<T | null> {
 function parseProbe(lines: string[]): ProbeResult | null {
   for (const raw of lines) {
     const m = raw.match(/^\[PRB:([^,]+),([^,]+),([^:]+):(\d)\]$/);
-    if (m) return { x: parseFloat(m[1]), y: parseFloat(m[2]), z: parseFloat(m[3]), success: m[4] === '1' };
+    if (m) return { x: reportMm(parseFloat(m[1])), y: reportMm(parseFloat(m[2])), z: reportMm(parseFloat(m[3])), success: m[4] === '1' };
   }
   return null;
 }
@@ -107,7 +143,7 @@ function parseProbe(lines: string[]): ProbeResult | null {
 /** A probing move, and where it touched. */
 async function probeMove(cmd: string): Promise<ProbeResult | null> {
   if (_cancelled) return null;
-  const reply = await orCancel(command.send(cmd, { log: true }));
+  const reply = await orCancel(command.send('G21' + cmd, { log: true }));
   if (!reply || reply.result !== 'ok') return null;
   const result = parseProbe(reply.lines);
   if (result) return result;
@@ -118,14 +154,19 @@ async function probeMove(cmd: string): Promise<ProbeResult | null> {
 /** A move, waiting until the machine has stopped at its end. */
 async function sendAndWait(cmd: string): Promise<boolean> {
   if (_cancelled) return false;
-  const replies = await orCancel(Promise.all([command.send(cmd, { log: true }), command.send('G4P0')]));
+  const replies = await orCancel(Promise.all([command.send('G21' + cmd, { log: true }), command.send('G4P0')]));
   return !!replies && replies.every(r => r.result === 'ok');
 }
 
+/** Cancel: the routine stops sending, and a move in progress is stopped too. */
 export function cancelProbing(): void {
+  if (!_running) return;
   _cancelled = true;
-  _running = false;
   if (_cancel) { _cancel(); _cancel = null; }
+  if (command.stats().waiting.length) {
+    log('info', 'Probing cancelled: stopping the move in progress');
+    stopMachine();
+  } else log('info', 'Probing cancelled');
 }
 
 export async function runToolLengthProbe(seq: any): Promise<ProbeResult | null> {

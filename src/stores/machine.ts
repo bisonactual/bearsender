@@ -40,6 +40,8 @@ export const toolTable = signal<ToolEntry[] | null>(null);
 export const toolTableError = signal<string | null>(null);
 /** $ settings values read so far. */
 export const settings = signal<Record<number, string>>({});
+/** The modal state from the last [GC:] line: G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0. */
+export const modal = signal<string[]>([]);
 
 /** The P word that selects each work offset in G10. */
 export const WCS_P: Record<string, number> = { G54: 1, G55: 2, G56: 3, G57: 4, G58: 5, G59: 6, 'G59.1': 7, 'G59.2': 8, 'G59.3': 9 };
