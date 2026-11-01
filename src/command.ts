@@ -134,6 +134,9 @@ let lastSent: JobSource | null | 'clear' = 'clear';
 let toolAcked = false;
 let resumeWhenAnswered = false;   // Resume was pressed with replies still to come
 let leavingTool = false;          // cycle start sent after an acknowledge
+// With $341 1 or 2 grblHAL refuses the cycle start until $TPW has measured the tool, and says so
+// in a [MSG:]; a failed probe says "try again". The tool change goes on, acknowledged.
+const RESUME_REFUSED = /\$TPW first|try again/i;
 
 const pushSubs = new Map<PushKind, ((line: string) => void)[]>();
 const replySubs: ((reply: Reply, info: { job: boolean; quiet: boolean }) => void)[] = [];
@@ -424,6 +427,12 @@ function pushed(kind: PushKind, line: string): void {
   }
   // Jogging at a tool change reports Jog, and a hold Hold: the tool change goes on through both.
   if (kind === 'status' && !/^<(Tool|Jog|Hold)[|:>]/.test(line)) notAtToolChange();
+  if (kind === 'msg' && leavingTool && RESUME_REFUSED.test(line)) {
+    leavingTool = false;
+    toolAcked = true;
+    trace('sync', 'cycle start refused at the tool change: ' + line);
+    pump();
+  }
   deliver(kind, line);
 }
 

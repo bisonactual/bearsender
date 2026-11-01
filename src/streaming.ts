@@ -238,6 +238,26 @@ export function resumeToolChange(): void {
   command.resumeToolChange();
 }
 
+/** MEASURE at a tool change with $341 1 or 2: the controller probes the new tool where it is and
+ *  sets its length ($TPW). With 1 that is over the touch plate the operator jogged to; with 2 the
+ *  machine is already at the toolsetter (G59.3). It needs the tool change acknowledged. */
+export function measureAtToolChange(): void {
+  if (!command.toolChangeAcknowledged()) {
+    log('err', 'The tool change isn\'t acknowledged yet, so the controller can\'t take $TPW. Try again in a moment.');
+    return;
+  }
+  log('info', 'MEASURE: $TPW, the controller probes the tool and sets its length');
+  command.send('$TPW', { log: true, quiet: true }).then(reply => {
+    // $TPW answers error:47 when the probe found nothing (grblHAL's tc_probe_workpiece).
+    const why = reply.code === 47 ? 'the probe found nothing' : errorText(reply.code);
+    const text = reply.result === 'ok'
+      ? 'Tool measured ($TPW): the controller has set its length. Take away any touch plate, then press Resume.'
+      : `The controller didn't measure the tool: error:${reply.code}${why ? ' (' + why + ')' : ''}. Check the probe and its position, then MEASURE again.`;
+    log(reply.result === 'ok' ? 'info' : 'err', text);
+    messages.push(reply.result === 'ok' ? 'job' : 'error', text);
+  }, e => { if (!(e instanceof command.CommandFailed)) throw e; });
+}
+
 // ── Stop ─────────────────────────────────────────────────────────────────────
 //
 // A feed hold, then the reset once a status report says the machine has stopped. A reset while it

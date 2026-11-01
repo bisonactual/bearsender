@@ -11,7 +11,7 @@ import * as job from '../stores/job';
 import * as messages from '../stores/messages';
 import * as flight from '../stores/flight';
 import * as ui from './ui';
-import { mode, moving, nextSection, awaitedSection, toolLabel } from './mode';
+import { mode, moving, nextSection, awaitedSection, toolLabel, toolChangeMode } from './mode';
 import { toggleConnect, rtSend, sendCmd } from '../connection';
 import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm, resumeToolChange } from '../streaming';
 import { alarmText } from '../parser';
@@ -248,11 +248,16 @@ function MessageLine() {
   if (m === 'change') {
     const section = awaitedSection.value;
     const z = machine.mpos.value.z;
+    // How the controller measures at a tool change, by $341 (JobScreen.tsx, measureCheck).
+    const tc = toolChangeMode();
+    const how = tc === 1 || tc === 2 ? <>, press <strong>MEASURE</strong> in Setup, then press Resume.</>
+      : tc === 3 ? <>, then press Resume; the controller measures it.</>
+      : <>, then press Resume.</>;
     return (
       <div role="alert" class="fs-msgline is-action">
         <span class="fs-msg-tag">ACTION NEEDED</span>
         <span class="fs-msg-text">
-          Load <strong>{section ? toolLabel(section.tool) : 'the next tool'}</strong>, measure it, then press Resume.{' '}
+          Load <strong>{section ? toolLabel(section.tool) : 'the next tool'}</strong>{how}{' '}
           Spindle {machine.spindle.value > 0 ? 'at ' + num(machine.spindle.value) + ' rpm' : 'stopped'}, tool at machine Z {z.toFixed(3)}.
         </span>
       </div>

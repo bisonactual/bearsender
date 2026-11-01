@@ -11,7 +11,8 @@ import * as job from '../stores/job';
 import * as flight from '../stores/flight';
 import * as camera from '../stores/camera';
 import * as ui from './ui';
-import { mode, panel, leftPanel, scan, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel } from './mode';
+import { mode, panel, leftPanel, scan, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel, toolChangeMode } from './mode';
+import { measureAtToolChange } from '../streaming';
 import type { ToolSection } from './toolscan';
 import { Legacy } from './Legacy';
 import { frOpenResume, frLoadEvents, frClearEvents, frReadRecord } from '../flight-recorder';
@@ -221,7 +222,8 @@ interface Check {
   tone: Tone;
   text: string;
   detail?: string;
-  actions?: [string, ui.Popup][];
+  /** A button: a popup to open, or something to do. */
+  actions?: [string, ui.Popup | (() => void)][];
   /** What the tick means on this line, when it isn't just "confirmed". */
   tickWord?: string;
   noTick?: boolean;
@@ -343,6 +345,17 @@ function recorderCheck(): Check {
   return { key, tone: 'done', text: 'Flight recorder ready', detail: `plugin v${fr.version}, FRAM found`, actions };
 }
 
+// At a tool change grblHAL refuses every move but jogging, so the Probing tab can't measure there.
+// The controller measures itself: $TPW with $341 1 or 2, on its own after Resume with 3.
+function measureCheck(key: string, tlo: number | null): Check {
+  const detail = tlo ? `TLO now ${mm(tlo)} mm` : '';
+  const m = toolChangeMode();
+  if (m === 1) return { key, tone: 'todo', text: 'Measure the tool length: jog over the touch plate, then MEASURE ($TPW)', detail, actions: [['MEASURE', measureAtToolChange]] };
+  if (m === 2) return { key, tone: 'todo', text: 'Measure the tool length on the toolsetter: MEASURE ($TPW)', detail, actions: [['MEASURE', measureAtToolChange]] };
+  if (m === 3) return { key, tone: 'todo', text: 'The controller measures the tool after Resume', detail: '$341=3, semi-automatic', noTick: true };
+  return { key, tone: 'todo', text: 'The controller can\'t measure the tool at a tool change', detail: m === null ? '$341 not read yet' : `$341=${m}; 1 or 2 measure with $TPW, 3 on its own`, noTick: true };
+}
+
 function changeChecks(): Check[] {
   const s = awaitedSection.value;
   const sections = scan.value.sections;
@@ -354,7 +367,7 @@ function changeChecks(): Check[] {
     { key: key + 'spindle', tone: spinning ? 'fail' : 'done', text: spinning ? `Spindle still turning at ${num(machine.spindle.value)} rpm` : 'Spindle stopped',
       detail: 'tool at machine Z ' + machine.mpos.value.z.toFixed(3) },
     { key: key + 'load', tone: 'todo', text: 'Load ' + (s ? toolLabel(s.tool) : 'the next tool'), detail: entry && entry.pocket ? 'pocket ' + entry.pocket : '' },
-    { key: key + 'measure', tone: 'todo', text: 'Measure the tool length', detail: tlo ? `TLO now ${mm(tlo)} mm` : '', actions: [['MEASURE', 'measure']] },
+    measureCheck(key + 'measure', tlo),
     { key: key + 'resume', tone: 'todo', text: 'Press Resume', detail: s && sections[sections.indexOf(s)]?.name ? sections[sections.indexOf(s)].name + ' starts' : '', noTick: true },
   ];
 }
@@ -389,8 +402,8 @@ function SetupPanel() {
               <span class="fs-check-main">{c.text}</span>{' '}
               <span class="fs-check-detail">{[c.detail, ticked ? (c.tickWord ?? 'confirmed') : ''].filter(Boolean).join(' · ')}</span>
             </span>
-            {c.actions?.map(([label, popup]) => (
-              <button type="button" class="fs-btn fs-btn-xs" onClick={() => { ui.popup.value = popup; }}>{label}</button>
+            {c.actions?.map(([label, act]) => (
+              <button type="button" class="fs-btn fs-btn-xs" onClick={() => { if (typeof act === 'function') act(); else ui.popup.value = act; }}>{label}</button>
             ))}
             {!c.noTick && (
               <button type="button" class={'fs-tick' + (ticked ? ' is-on' : '')} aria-pressed={ticked ? 'true' : 'false'}

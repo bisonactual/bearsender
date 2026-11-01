@@ -26,6 +26,12 @@ export const mode = computed<Mode>(() => {
   return 'ready';
 });
 
+/** The tool change mode, $341: 0 pause only, 1 manual, 2 manual at G59.3, 3 semi-automatic, 4 ignored. */
+export function toolChangeMode(): number | null {
+  const v = parseInt(machine.settings.value[341] ?? '');
+  return isNaN(v) ? null : v;
+}
+
 /** The machine is moving or held in a move, whether or not BearSender is sending a job. */
 export const moving = computed(() => ['run', 'jog', 'hold', 'home', 'door', 'tool'].includes(machine.stateName.value));
 
