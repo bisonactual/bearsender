@@ -208,8 +208,9 @@ export function frIntercept(raw: string, sent?: { line: string }): boolean {
     return false;
   }
 
-  // The command list, only read to see whether the watchdog is there.
-  if (_helpLoading && !raw.startsWith('ALARM') && !raw.startsWith('[MSG')) {
+  // The command list, only read to see whether the watchdog is there. It is asked for together with
+  // $FLIGHT and $790-$792, so their replies (sent first) arrive while it loads and must get through.
+  if (_helpLoading && !raw.startsWith('ALARM') && !raw.startsWith('[MSG') && !raw.startsWith('[FLIGHT:') && !/^\$\d+=/.test(raw)) {
     if (raw.startsWith('$WATCHDOGTEST')) _watchdogListed = true;
     return true;
   }
