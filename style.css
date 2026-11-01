@@ -1254,14 +1254,21 @@
   .fs-set:hover { background: #2a1a0e; }
   .fs-btn.is-on { border-color: var(--text); }
   .fs-btn-tall { height: 44px; }
-  /* Signals sit inline after Z, two rows high; the line tightens while they show. */
-  .fs-sigs { align-self: center; display: grid; grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 3px 4px; }
-  .fs-sig { padding: 1px 5px; border-radius: 5px; border: 1px solid var(--border2); color: var(--text2); font-family: var(--cond); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-align: center; }
-  .fs-posline.has-sigs { gap: 10px 16px; }
-  .fs-posline.has-sigs .fs-axes { gap: 6px 18px; }
-  .fs-posline.has-sigs .fs-axis { min-width: 0; gap: 6px; }
-  .fs-posline.has-sigs .fs-axis-value { font-size: 28px; }
+  /* Signals sit inline after Z: one row of chips the size of the work offset chip. Below 1760 px wide the line
+     tightens while they show, so they still fit on it; below 1280 px the chips shrink too, and more below 1200 px. */
+  .fs-sigs { align-self: center; display: flex; gap: 6px; }
+  .fs-sig { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 32px; min-width: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--border2); color: var(--text2); font-family: var(--cond); font-size: 15px; font-weight: 700; letter-spacing: 0.06em; white-space: nowrap; }
   .fs-sig.is-on { border-color: var(--warn-text); background: var(--warn-text); color: #1a1208; }
+  @media (max-width: 1759px) {
+    .fs-posline.has-sigs { gap: 10px 12px; }
+    .fs-posline.has-sigs .fs-state { min-width: 0; }
+    .fs-posline.has-sigs .fs-axes { gap: 6px 18px; }
+    .fs-posline.has-sigs .fs-axis { min-width: 0; gap: 6px; }
+    .fs-posline.has-sigs .fs-axis-value { font-size: 28px; }
+    .fs-posline.has-sigs .fs-posref .fs-btn-sm { padding: 0 8px; }
+    .fs-posline.has-sigs .fs-seg button { padding: 0 10px; }
+    .fs-sig { padding: 0 8px; font-size: 14px; }
+  }
   .fs-seg { display: flex; border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
   .fs-seg button { height: 44px; padding: 0 14px; border: 0; background: var(--surface); color: var(--text-mid); font-family: var(--cond) !important; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; }
   .fs-seg button.is-on { background: var(--text); color: var(--bg); }
@@ -1293,10 +1300,37 @@
   .fs-console #mod-console { width: auto; flex: 1; min-height: 0; border-radius: 0; border: 0; }
   .fs-console #mod-console .module-body { padding: 0; }
   .fs-console #mod-console .console-out { min-height: 0; }
+  /* Carried-over panels in the job screen's right panel */
+  .fs-panel-box { height: 420px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .fs-macros #mod-macros { width: auto; border: 0; background: none; }
+  .fs-macros #mod-macros .module-drag-handle { display: none; }
+  .fs-macros #mod-macros .module-body { padding: 0; }
+  .fs-macros #mod-macros[data-mod-size] .macro-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .fs-macros #mod-macros[data-mod-size] .macro-btn { min-height: 56px; padding: 0 10px; font-size: 15px; color: var(--text); }
+  /* The camera panel came without styles: settings on the left, the picture with its overlay on the right. */
+  .fs-cam .camera-outer { flex: 1; min-height: 0; display: flex; }
+  .fs-cam .camera-sidebar { width: 220px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; border-right: 1px solid var(--border); background: var(--surface); }
+  .fs-cam .cam-label { margin-bottom: 4px; font-family: var(--cond); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--text2); text-transform: uppercase; }
+  .fs-cam .cam-select, .fs-cam .cam-offset-input { width: 100%; box-sizing: border-box; height: 32px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg); color: var(--text); font-family: var(--mono); }
+  .fs-cam .cam-btn, .fs-cam .ccs-btn { min-height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); font-family: var(--cond); font-weight: 700; letter-spacing: 0.06em; }
+  .fs-cam .cam-btn.primary { border-color: var(--accent2); color: var(--accent); }
+  .fs-cam .ccs-btn.active { border-color: var(--text); }
+  .fs-cam .cam-slider-row, .fs-cam .cam-crosshair-style { display: flex; align-items: center; gap: 6px; }
+  .fs-cam .cam-slider { flex: 1; min-width: 0; }
+  .fs-cam .cam-offset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .fs-cam .cam-offset-label, .fs-cam .cam-pos-lbl { font-size: 11px; color: var(--text2); }
+  .fs-cam .cam-pos-row { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; }
+  .fs-cam .cam-divider { border-top: 1px solid var(--border); }
+  .fs-cam .camera-main { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
+  .fs-cam .camera-off-msg { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text2); font-size: 14px; }
+  .fs-cam .camera-video-wrap { max-width: 100%; max-height: 100%; }
+  .fs-cam #camVideo { display: block; max-width: 100%; max-height: 418px; }
+  .fs-cam #camCanvas, .fs-cam .cam-drag-layer { position: absolute; inset: 0; }
 
   /* Cards on the job screen */
   .fs-card { box-sizing: border-box; background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
   .fs-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+  .fs-head-end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .fs-current { padding: 14px 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 32px; flex-shrink: 0; }
   .fs-current-name { flex: 1 1 240px; min-width: 0; }
   .fs-file { font-family: var(--cond); font-size: 26px; font-weight: 600; overflow-wrap: anywhere; }
@@ -1388,6 +1422,7 @@
   .fs-popup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .fs-popup-cards { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; padding: 16px; overflow: auto; font-size: 13px; line-height: normal; }
   .fs-popup-tall { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 13px; line-height: normal; }
+  .fs-popup-list { width: min(760px, 90vw); box-sizing: border-box; padding: 8px 16px 14px; overflow-y: auto; }
 
   /* Narrow screens: tighter position line, so the signals still fit on it */
   @media (max-width: 1280px) {
@@ -1397,8 +1432,18 @@
     .fs-axis { min-width: 0; gap: 6px; }
     .fs-axis-value { font-size: 28px; }
     .fs-posline.has-sigs .fs-axis-value { font-size: 24px; }
+    .fs-sigs { gap: 4px; }
+    .fs-sig { height: 26px; min-width: 26px; padding: 0 5px; border-radius: 6px; font-size: 12px; letter-spacing: 0.04em; }
     .fs-seg button { padding: 0 10px; font-size: 13px; }
     .fs-posref .fs-btn-sm { padding: 0 8px; }
+  }
+  @media (max-width: 1200px) {
+    .fs-posline.has-sigs { gap: 8px; }
+    .fs-posline.has-sigs .fs-axes { gap: 4px 12px; }
+    .fs-posline.has-sigs .fs-axis-value { font-size: 22px; }
+    .fs-posline.has-sigs .fs-set { padding: 0 4px; }
+    .fs-sigs { gap: 3px; }
+    .fs-sig { height: 24px; min-width: 24px; padding: 0 4px; font-size: 11px; }
   }
 
   /* Bottom bar */

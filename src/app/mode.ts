@@ -8,6 +8,7 @@ import * as machine from '../stores/machine';
 import * as job from '../stores/job';
 import * as messages from '../stores/messages';
 import * as flight from '../stores/flight';
+import * as camera from '../stores/camera';
 import * as ui from './ui';
 import { scanTools, sectionAt } from './toolscan';
 
@@ -38,18 +39,25 @@ export const recordToResume = computed(() => {
   return !!r && flight.enabled.value && (r.state === 'Stopped' || r.state === 'Retracted') && r.ln > 0 && UNEXPECTED.has(r.why);
 });
 
-/** AUTO: Setup before a start and at a tool change, Program while running, Recorder after a stop.
- *  An alarm opens the Recorder only after a stop or a lost link this session, or with a job to resume;
- *  a power-up alarm such as 11 (homing required) opens Setup. */
+/** AUTO, right panel: Setup before a start and at a tool change; while running the Camera if one is set up,
+ *  otherwise the Recorder; the Recorder after a stop. An alarm opens the Recorder only after a stop or a lost
+ *  link this session, or with a job to resume; a power-up alarm such as 11 (homing required) opens Setup. */
 export const autoPanel = computed<ui.Panel>(() => {
   const m = mode.value;
-  if (m === 'running' || m === 'hold') return 'program';
+  if (m === 'running' || m === 'hold') return camera.device.value !== null ? 'camera' : 'recorder';
   if (m === 'change') return 'setup';
   if (stoppedShort.value || (m === 'alarm' && recordToResume.value)) return 'recorder';
   return 'setup';
 });
 
 export const panel = computed<ui.Panel>(() => ui.auto.value ? autoPanel.value : ui.pickedPanel.value);
+
+/** AUTO, left panel: the Program while running, the Jobs list otherwise. */
+export const leftPanel = computed<ui.LeftPanel>(() => {
+  if (!ui.leftAuto.value) return ui.pickedLeft.value;
+  const m = mode.value;
+  return m === 'running' || m === 'hold' ? 'program' : 'jobs';
+});
 
 export const scan = computed(() => scanTools(job.lines.value));
 
@@ -80,7 +88,7 @@ export function toolLabel(tool: number): string {
   return 'T' + tool + (desc ? ' · ' + desc : '');
 }
 
-// The controller says nothing at an M6, so the Messages panel gets a line of its own.
+// The controller says nothing at an M6, so the messages get a line of their own.
 let lastMode: Mode = 'offline';
 effect(() => {
   const m = mode.value;

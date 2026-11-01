@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════
 
 import { Component, createRef } from 'preact';
+import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
 import { state } from '../state';
 import { initProbingTab } from '../probing/probing-tab';
@@ -10,6 +11,7 @@ import { loadOffsets } from '../offsets';
 import { loadToolTable } from '../tooltable';
 import { renderFlightTab } from '../flight-recorder';
 import * as connection from '../stores/connection';
+import * as messages from '../stores/messages';
 import * as ui from './ui';
 
 /** Lends carried-over panels to a popup, and puts each back where it came from on close. */
@@ -40,7 +42,25 @@ class Borrow extends Component<{ ids: string[]; class?: string }> {
   }
 }
 
-interface PopupDef { title: string; ids: string[]; tall: boolean; open?: () => void; }
+/** A popup lends carried-over panels (ids), or shows a body of its own. */
+interface PopupDef { title: string; ids?: string[]; body?: () => ComponentChildren; tall: boolean; open?: () => void; }
+
+const clock = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+function MessagesList() {
+  const list = messages.list.value;
+  return (
+    <div class="fs-popup-list">
+      {list.length ? list.map(m => (
+        <div class="fs-message">
+          <span class="fs-message-time fs-mono">{clock(m.at)}</span>
+          <span class={'fs-message-text' + (m.kind === 'alarm' || m.kind === 'error' ? ' is-warn' : '')}>{m.text}</span>
+        </div>
+      )) : <div class="fs-event-empty">No messages yet.</div>}
+      <div class="fs-note-sm">Controller messages, alarms, errors and job events, newest first. The raw console is the Console tab on the job screen.</div>
+    </div>
+  );
+}
 
 const POPUPS: Record<ui.Popup, PopupDef> = {
   jog: { title: 'JOG', ids: ['mod-jogging', 'mod-position'], tall: false },
@@ -50,6 +70,7 @@ const POPUPS: Record<ui.Popup, PopupDef> = {
   frame: { title: 'FRAME THE PROGRAM', ids: ['mod-limits'], tall: false },
   tools: { title: 'TOOL TABLE', ids: ['tabpanel-tooltable'], tall: true, open: () => loadToolTable() },
   recorder: { title: 'FLIGHT RECORDER SETTINGS', ids: ['tabpanel-flight'], tall: true, open: () => renderFlightTab() },
+  messages: { title: 'MESSAGES', body: () => <MessagesList />, tall: false },
 };
 
 /** The probing panels are built on first use, as the old tab did; then the wanted sub-tab is picked. */
@@ -68,7 +89,7 @@ function PopupPanel({ id }: { id: ui.Popup }) {
           <h2 class="fs-h">{def.title}</h2>
           <button type="button" class="fs-btn fs-btn-sm" onClick={() => { ui.popup.value = null; }}>CLOSE</button>
         </div>
-        <Borrow class={def.tall ? 'fs-popup-tall' : 'fs-popup-cards'} ids={def.ids} />
+        {def.ids ? <Borrow class={def.tall ? 'fs-popup-tall' : 'fs-popup-cards'} ids={def.ids} /> : def.body!()}
       </section>
     </div>
   );

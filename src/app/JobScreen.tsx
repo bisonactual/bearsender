@@ -1,16 +1,17 @@
 // ═══════════════════════════════════════════════
-// The job screen: Current Job strip, Jobs list, and the switchable panel
+// The job screen: Current Job strip, and two switchable panels: Jobs and Program on the left, the rest on the right
 // ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
+import type { Signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
-import * as messages from '../stores/messages';
 import * as flight from '../stores/flight';
+import * as camera from '../stores/camera';
 import * as ui from './ui';
-import { mode, panel, scan, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel } from './mode';
+import { mode, panel, leftPanel, scan, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel } from './mode';
 import type { ToolSection } from './toolscan';
 import { Legacy } from './Legacy';
 import { frOpenResume, frLoadEvents, frClearEvents, frReadRecord } from '../flight-recorder';
@@ -85,7 +86,7 @@ function CurrentJob() {
   );
 }
 
-// ── Jobs list ─────────────────────────────────────────────────────────────────
+// ── Left panel: Jobs ──────────────────────────────────────────────────────────
 
 const RESULT_WORDS: Record<job.JobResult, string> = { completed: 'Done', stopped: 'Stopped', error: 'Error', alarm: 'Alarm', 'link lost': 'Link lost' };
 
@@ -132,15 +133,7 @@ function JobsList() {
   const status = programStatus();
   const lastSame = last && last.name === file && last.result === 'completed';
   return (
-    <section aria-labelledby="fs-jobs" class="fs-card fs-jobs">
-      <div class="fs-card-head">
-        <h2 id="fs-jobs" class="fs-h">JOBS</h2>
-        <div class="fs-row-gap">
-          <button type="button" class="fs-btn fs-btn-sm" disabled={m === 'running' || m === 'hold' || m === 'change'}
-            onClick={() => document.getElementById('fileInput')?.click()}>LOAD JOB</button>
-          <button type="button" class="fs-btn fs-btn-sm" disabled title="The queue comes in a later step">ADD TO QUEUE</button>
-        </div>
-      </div>
+    <div>
       <div class="fs-jobs-scroll">
         <div class="fs-jobs-table">
           <div class="fs-jobs-row is-head">
@@ -198,11 +191,22 @@ function JobsList() {
         </div>
       </div>
       <div class="fs-note">AT is the line each tool starts on, for now. RUNTIME is measured from the last run of the file. Per-tool times, sounds and the queue come in a later step.</div>
-    </section>
+    </div>
   );
 }
 
-// ── Panel: Setup ──────────────────────────────────────────────────────────────
+function JobsButtons() {
+  const m = mode.value;
+  return (
+    <>
+      <button type="button" class="fs-btn fs-btn-sm" disabled={m === 'running' || m === 'hold' || m === 'change'}
+        onClick={() => document.getElementById('fileInput')?.click()}>LOAD JOB</button>
+      <button type="button" class="fs-btn fs-btn-sm" disabled title="The queue comes in a later step">ADD TO QUEUE</button>
+    </>
+  );
+}
+
+// ── Right panel: Setup ────────────────────────────────────────────────────────
 //
 // The job's setup, and the way into the setup tools. Every line reads its own state, says what's done
 // and what's left, takes a tick from the operator, and opens the tool for it. Informational only:
@@ -388,7 +392,7 @@ function SetupPanel() {
   );
 }
 
-// ── Panel: Program ────────────────────────────────────────────────────────────
+// ── Left panel: Program ───────────────────────────────────────────────────────
 
 function ProgramPanel() {
   const lines = job.lines.value;
@@ -421,7 +425,7 @@ function ProgramPanel() {
   );
 }
 
-// ── Panel: Recorder ───────────────────────────────────────────────────────────
+// ── Right panel: Recorder ─────────────────────────────────────────────────────
 
 const REASONS: Record<string, string> = {
   timeout: 'the sender went quiet', usb: 'the USB link was lost', network: 'the network link was lost',
@@ -530,7 +534,9 @@ function RecorderPanel() {
   );
 }
 
-// ── Panel: Preview and Messages ───────────────────────────────────────────────
+// ── Right panel: Preview, Camera, Console, Macros ─────────────────────────────
+//
+// The carried-over panels stay mounted, hidden while another tab shows.
 
 function PreviewPanel({ hidden }: { hidden: boolean }) {
   const full = ui.fullView.value;
@@ -546,48 +552,88 @@ function PreviewPanel({ hidden }: { hidden: boolean }) {
   );
 }
 
-function MessagesPanel() {
-  const list = messages.list.value;
+function CameraPanel({ hidden }: { hidden: boolean }) {
   return (
-    <div>
-      {list.length ? list.map(m => (
-        <div class="fs-message">
-          <span class="fs-message-time fs-mono">{clock(m.at)}</span>
-          <span class={'fs-message-text' + (m.kind === 'alarm' || m.kind === 'error' ? ' is-warn' : '')}>{m.text}</span>
-        </div>
-      )) : <div class="fs-event-empty">No messages yet.</div>}
-      <div class="fs-note-sm">Controller messages, alarms, errors and job events. The raw console is in Settings, Console.</div>
+    <div hidden={hidden}>
+      <Legacy class="fs-legacy fs-panel-box fs-cam" ids={['tabpanel-camera']} />
+      <div class="fs-note-sm">
+        {camera.device.value === null
+          ? 'No camera set up: pick one and press START. BearSender remembers it, starts it whenever this tab shows, and AUTO shows it while a job runs.'
+          : 'The camera runs only while this tab shows.'}
+      </div>
     </div>
   );
 }
 
-// ── The switchable panel ──────────────────────────────────────────────────────
+function ConsolePanel({ hidden }: { hidden: boolean }) {
+  return (
+    <div hidden={hidden}>
+      <Legacy class="fs-legacy fs-panel-box fs-console" ids={['mod-console', 'touchKbdOverlay']} />
+    </div>
+  );
+}
 
-const TABS: [ui.Panel, string][] = [['setup', 'SETUP'], ['program', 'PROGRAM'], ['recorder', 'RECORDER'], ['preview', 'PREVIEW'], ['messages', 'MESSAGES']];
+function MacrosPanel({ hidden }: { hidden: boolean }) {
+  return (
+    <div hidden={hidden}>
+      <Legacy class="fs-macros" ids={['mod-macros']} />
+    </div>
+  );
+}
+
+// ── The switchable panels ─────────────────────────────────────────────────────
+
+/** Tabs, and AUTO: while it's on the panel follows the job; picking a tab turns it off and keeps that tab. */
+function PanelHead<T extends string>({ label, tabs, current, pick, auto, picked, autoTitle, children }: {
+  label: string; tabs: [T, string][]; current: T; pick: (id: T) => void; auto: Signal<boolean>; picked: Signal<T>; autoTitle: string; children?: ComponentChildren;
+}) {
+  const autoOn = auto.value;
+  return (
+    <div class="fs-card-head">
+      <div role="tablist" aria-label={label} class="fs-tabs">
+        {tabs.map(([id, text]) => (
+          <button type="button" role="tab" aria-selected={current === id ? 'true' : 'false'} class={current === id ? 'is-on' : ''}
+            onClick={() => pick(id)}>{text}</button>
+        ))}
+      </div>
+      <div class="fs-head-end">
+        {children}
+        <button type="button" class={'fs-auto' + (autoOn ? ' is-on' : '')} aria-pressed={autoOn ? 'true' : 'false'} title={autoTitle}
+          onClick={() => { if (autoOn) picked.value = current; auto.value = !autoOn; }}>AUTO</button>
+      </div>
+    </div>
+  );
+}
+
+const LEFT_TABS: [ui.LeftPanel, string][] = [['jobs', 'JOBS'], ['program', 'PROGRAM']];
+
+function LeftPanel() {
+  const current = leftPanel.value;
+  return (
+    <section aria-label="Jobs and program" class="fs-card fs-jobs">
+      <PanelHead label="Left panel" tabs={LEFT_TABS} current={current} pick={ui.pickLeft} auto={ui.leftAuto} picked={ui.pickedLeft}
+        autoTitle="Follow the job: the Program while running, the Jobs list otherwise">
+        {current === 'jobs' && <JobsButtons />}
+      </PanelHead>
+      {current === 'jobs' ? <JobsList /> : <ProgramPanel />}
+    </section>
+  );
+}
+
+const TABS: [ui.Panel, string][] = [['setup', 'SETUP'], ['recorder', 'RECORDER'], ['preview', 'PREVIEW'], ['camera', 'CAMERA'], ['console', 'CONSOLE'], ['macros', 'MACROS']];
 
 function JobPanel() {
   const current = panel.value;
-  const autoOn = ui.auto.value;
-  let body: ComponentChildren = null;
-  if (current === 'setup') body = <SetupPanel />;
-  if (current === 'program') body = <ProgramPanel />;
-  if (current === 'recorder') body = <RecorderPanel />;
-  if (current === 'messages') body = <MessagesPanel />;
   return (
     <section aria-label="Job panel" class="fs-card fs-panel">
-      <div class="fs-card-head">
-        <div role="tablist" aria-label="Panel" class="fs-tabs">
-          {TABS.map(([id, label]) => (
-            <button type="button" role="tab" aria-selected={current === id ? 'true' : 'false'} class={current === id ? 'is-on' : ''}
-              onClick={() => ui.pickPanel(id)}>{label}</button>
-          ))}
-        </div>
-        <button type="button" class={'fs-auto' + (autoOn ? ' is-on' : '')} aria-pressed={autoOn ? 'true' : 'false'}
-          title="Follow the job: Setup before the start and at tool changes, Program while running, Recorder after a stop"
-          onClick={() => { if (!autoOn) ui.pickedPanel.value = current; ui.auto.value = !autoOn; }}>AUTO</button>
-      </div>
-      {body}
+      <PanelHead label="Panel" tabs={TABS} current={current} pick={ui.pickPanel} auto={ui.auto} picked={ui.pickedPanel}
+        autoTitle="Follow the job: Setup before the start and at tool changes; while running the Camera if one is set up, otherwise the Recorder; the Recorder after a stop" />
+      {current === 'setup' && <SetupPanel />}
+      {current === 'recorder' && <RecorderPanel />}
       <PreviewPanel hidden={current !== 'preview'} />
+      <CameraPanel hidden={current !== 'camera'} />
+      <ConsolePanel hidden={current !== 'console'} />
+      <MacrosPanel hidden={current !== 'macros'} />
     </section>
   );
 }
@@ -597,7 +643,7 @@ export function JobScreen({ hidden }: { hidden: boolean }) {
     <main class="fs-screen fs-job" hidden={hidden}>
       <CurrentJob />
       <div class="fs-job-row">
-        <JobsList />
+        <LeftPanel />
         <JobPanel />
       </div>
     </main>

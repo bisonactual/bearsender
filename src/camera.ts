@@ -7,6 +7,7 @@ import { lsGet, lsSet } from './ui';
 import { log } from './console';
 import { sendCmd } from './connection';
 import * as machine from './stores/machine';
+import * as camera from './stores/camera';
 
 export async function initCameraTab(): Promise<void> {
   try {
@@ -34,6 +35,31 @@ export function selectCamera(_deviceId: string): void {
   if (state.camActive) stopCamera();
 }
 
+// The Camera tab on the job screen runs the camera only while it shows.
+let wanted = false;
+let starting = false;
+let observing = false;
+
+/** The Camera tab is showing: start the camera chosen before, if it is plugged in. */
+export async function showCamera(): Promise<void> {
+  wanted = true;
+  if (!state._camTabInited) { state._camTabInited = true; await initCameraTab(); }
+  const id = camera.device.value;
+  if (!wanted || starting || state.camActive || id === null) return;
+  const sel = document.getElementById('camSelect') as HTMLSelectElement;
+  if (id && ![...sel.options].some(o => o.value === id)) return;
+  sel.value = id;
+  starting = true;
+  try { await startCamera(); } finally { starting = false; }
+  if (!wanted) stopCamera();
+}
+
+/** The Camera tab is hidden: stop the camera. */
+export function hideCamera(): void {
+  wanted = false;
+  if (state.camActive) stopCamera();
+}
+
 export async function startCamera(): Promise<void> {
   const deviceId = (document.getElementById('camSelect') as HTMLSelectElement).value;
   const constraints: any = { video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } } : { width: { ideal: 1920 }, height: { ideal: 1080 } } };
@@ -52,9 +78,11 @@ export async function startCamera(): Promise<void> {
     (document.getElementById('camGoSpindleBtn') as HTMLButtonElement).disabled = false;
     (document.getElementById('camZeroHereBtn') as HTMLButtonElement).disabled = false;
     state.camActive = true;
+    camera.active.value = true;
+    camera.device.value = deviceId;
 
     resizeCamCanvas();
-    new ResizeObserver(resizeCamCanvas).observe(video);
+    if (!observing) { observing = true; new ResizeObserver(resizeCamCanvas).observe(video); }
     requestAnimationFrame(camLoop);
   } catch (e: any) {
     log('err', 'Camera error: ' + e.message);
@@ -64,6 +92,7 @@ export async function startCamera(): Promise<void> {
 export function stopCamera(): void {
   if (state.camStream) { state.camStream.getTracks().forEach(t => t.stop()); state.camStream = null; }
   state.camActive = false;
+  camera.active.value = false;
   document.getElementById('camWrap')!.style.display = 'none';
   document.getElementById('camOffMsg')!.style.display = '';
   (document.getElementById('camStartBtn') as HTMLButtonElement).disabled = false;

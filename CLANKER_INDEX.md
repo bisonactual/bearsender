@@ -11,8 +11,9 @@ and then bundles into `dist/bearsender.html`. Preact with
 Signal stores, one per feature. New code reads only these. `connection.ts` (state, transport, address, firmware),
 `machine.ts` (state, positions, WCO, offsets, overrides, feed/spindle, pins, alarm, homed, tool, tool table, $ settings),
 `job.ts` (file, lines, running/paused, sent/accepted/reported line, start/end, result, last job in localStorage, limits),
-`messages.ts` ([MSG:], alarms, errors, job and link events), `flight.ts` (plugin, record, events, watchdog, undercut).
-Fed by parser.ts, connection.ts, streaming.ts, gcode.ts, offsets.ts, tooltable.ts, settings-*.ts and flight-recorder.ts.
+`messages.ts` ([MSG:], alarms, errors, job and link events), `flight.ts` (plugin, record, events, watchdog, undercut),
+`camera.ts` (the camera last started in this browser, which is what "set up" means; whether it is showing).
+Fed by parser.ts, connection.ts, streaming.ts, gcode.ts, offsets.ts, tooltable.ts, settings-*.ts, flight-recorder.ts and camera.ts.
 
 ## src/command.ts
 The command layer: every line to the controller goes through it, and it matches each `ok`/`error:N` to its command
@@ -27,12 +28,14 @@ everything before. `commandTrace()` on window prints its last 3000 events.
 
 ## src/app/
 The shell (Preact). `App.tsx`: top bar, position line, message line, the five screens, bottom bar. `JobScreen.tsx`:
-Current Job strip, Jobs list, the switchable panel (Setup checks, Program, Recorder, Preview, Messages) with AUTO.
+Current Job strip and two switchable panels, each with AUTO: on the left Jobs and Program; on the right Setup checks,
+Recorder, Preview, Camera, Console and Macros (the last three carried over, and kept mounted).
 `Popup.tsx`: the popups (jog, offsets, probe, measure, frame, tool table, recorder settings), which borrow
-carried-over panels and put them back on close. `asks.ts`: what the shell reads by itself on connect ($22, $130-$132,
+carried-over panels and put them back on close, and the Messages list. `asks.ts`: what the shell reads by itself on connect ($22, $130-$132,
 $TTLIST) and when the operator's ticks reset. `mode.ts`: what the job screen shows, worked out from the stores. `toolscan.ts`: TEMPORARY T…M6 scan until the G-code
 interpreter. `Legacy.tsx`: moves a carried-over DOM panel from `#legacy` into a screen. `carried.ts`: the old screens'
-start-up (what switchTab did). `ui.ts`: which screen, sub-tab and panel are showing.
+start-up (what switchTab did), and the camera running only while its tab shows. `ui.ts`: which screen, sub-tab and
+panels are showing.
 
 ## src/state.ts
 The old shared `state` object, kept for the carried-over screens. Constants: poll rates, pin maps, colour defaults, dtype map.
@@ -88,7 +91,7 @@ Barrel re-export of all settings-* modules.
 SD card file browser dropdown. Fetches file list via HTTP (`/sdfiles`, `/sdcard`, `/sd`). Run-from-SD command.
 
 ## src/camera.ts
-Camera engine: getUserMedia, crosshair overlay (cross/circle/dot styles), zoom, drag-to-move crosshair, offset measurement workflow, go-to-camera/spindle, zero-at-crosshair. Settings persistence.
+Camera engine: getUserMedia, crosshair overlay (cross/circle/dot styles), zoom, drag-to-move crosshair, offset measurement workflow, go-to-camera/spindle, zero-at-crosshair. Settings persistence. `showCamera()`/`hideCamera()` for the job screen's Camera tab: start the camera chosen before, stop it when the tab hides.
 
 ## src/keyboard.ts
 Touch keyboard overlay: QWERTY + numpad, buffer management, send to console input.

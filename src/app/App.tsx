@@ -92,11 +92,11 @@ function stateView(): StateView {
   }
 }
 
-// Input pins (Pn:) shown on the position line: pin letters, short label, name. E-stop lights on E (grblHAL) or R,
+// Input pins (Pn:) shown on the position line: pin letters, label, name. E-stop lights on E (grblHAL) or R,
 // and the toolsetter on T, as the old Signals panel had it.
 const SIGNALS: [string, string, string][] = [
-  ['X', 'X', 'X limit'], ['Y', 'Y', 'Y limit'], ['Z', 'Z', 'Z limit'], ['P', 'PRB', 'Probe'],
-  ['T', 'TLS', 'Toolsetter'], ['D', 'DOOR', 'Door'], ['ER', 'ESTOP', 'E-stop'],
+  ['X', 'X', 'X limit'], ['Y', 'Y', 'Y limit'], ['Z', 'Z', 'Z limit'], ['P', 'PROBE', 'Probe'],
+  ['T', 'TLS', 'Toolsetter'], ['D', 'DOOR', 'Door'], ['ER', 'E-STOP', 'E-stop'],
 ];
 
 function Signals() {
@@ -155,7 +155,7 @@ function PositionLine() {
 
 function MessagesButton() {
   return (
-    <button type="button" class="fs-btn fs-btn-msg" onClick={() => { ui.screen.value = 'job'; ui.pickPanel('messages'); }}>
+    <button type="button" class="fs-btn fs-btn-msg" onClick={() => { ui.popup.value = 'messages'; }}>
       MESSAGES ({messages.list.value.length})
     </button>
   );
@@ -316,8 +316,9 @@ function SubTabs<T extends string>({ tabs, value }: { tabs: [T, string][]; value
   );
 }
 
-const SETUP_TABS: [ui.SetupTab, string][] = [['machine', 'MACHINE'], ['offsets', 'OFFSETS'], ['camera', 'CAMERA']];
-const SETTINGS_TABS: [ui.SettingsTab, string][] = [['grbl', 'GRBL SETTINGS'], ['zones', 'EXCLUSION ZONES'], ['options', 'OPTIONS'], ['flight', 'FLIGHT RECORDER'], ['console', 'CONSOLE']];
+// Camera, Console and Macros are tabs of the job screen's right panel.
+const SETUP_TABS: [ui.SetupTab, string][] = [['machine', 'MACHINE'], ['offsets', 'OFFSETS']];
+const SETTINGS_TABS: [ui.SettingsTab, string][] = [['grbl', 'GRBL SETTINGS'], ['zones', 'EXCLUSION ZONES'], ['options', 'OPTIONS'], ['flight', 'FLIGHT RECORDER']];
 
 function SetupScreen() {
   const tab = ui.setupTab.value;
@@ -325,10 +326,9 @@ function SetupScreen() {
     <section class="fs-screen" hidden={ui.screen.value !== 'setup'}>
       <SubTabs tabs={SETUP_TABS} value={ui.setupTab} />
       <div class="fs-sub fs-sub-scroll" hidden={tab !== 'machine'}>
-        <Legacy class="fs-cards" ids={['mod-position', 'mod-jogging', 'mod-spindle', 'mod-overrides', 'mod-macros', 'mod-limits', 'mod-surfacing', 'mod-sdcard']} />
+        <Legacy class="fs-cards" ids={['mod-position', 'mod-jogging', 'mod-spindle', 'mod-overrides', 'mod-limits', 'mod-surfacing', 'mod-sdcard']} />
       </div>
       <div class="fs-sub" hidden={tab !== 'offsets'}><Legacy class="fs-legacy" ids={['tabpanel-offsets']} /></div>
-      <div class="fs-sub" hidden={tab !== 'camera'}><Legacy class="fs-legacy" ids={['tabpanel-camera']} /></div>
     </section>
   );
 }
@@ -342,7 +342,6 @@ function SettingsScreen() {
       <div class="fs-sub" hidden={tab !== 'zones'}><Legacy class="fs-legacy" ids={['tabpanel-exclusions']} /></div>
       <div class="fs-sub" hidden={tab !== 'options'}><Legacy class="fs-legacy" ids={['tabpanel-options']} /></div>
       <div class="fs-sub" hidden={tab !== 'flight'}><Legacy class="fs-legacy" ids={['tabpanel-flight']} /></div>
-      <div class="fs-sub" hidden={tab !== 'console'}><Legacy class="fs-legacy fs-console" ids={['mod-console', 'touchKbdOverlay']} /></div>
     </section>
   );
 }
