@@ -20,9 +20,14 @@ export const mode = computed<Mode>(() => {
   const s = machine.stateName.value;
   if (s === 'alarm') return 'alarm';
   if (s === 'tool') return 'change';
-  if (job.running.value) return s === 'hold' || job.paused.value ? 'hold' : 'running';
+  // The controller's hold or door, whoever started the motion (a job, the console, the SD card).
+  if (s === 'hold' || s === 'door') return 'hold';
+  if (job.running.value) return job.paused.value ? 'hold' : 'running';
   return 'ready';
 });
+
+/** The machine is moving or held in a move, whether or not BearSender is sending a job. */
+export const moving = computed(() => ['run', 'jog', 'hold', 'home', 'door', 'tool'].includes(machine.stateName.value));
 
 /** The last run stopped short (stopped, error, alarm, lost link) and nothing has started since. */
 export const stoppedShort = computed(() => {

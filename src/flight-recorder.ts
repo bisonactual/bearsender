@@ -5,7 +5,8 @@
 // Works with the Flight Recorder plugin for grblHAL (github.com/bisonactual/Flight-Recorder).
 // With it switched on (Options, or the FLIGHT RECORDER tab) FlexiSender:
 //   - stamps each job with $FLIGHT=<job id> and numbers every line N<line>, so the
-//     controller keeps a record of the line it is executing
+//     controller keeps a record of the line it is executing. The stamp goes on its own, and the
+//     lines only once it is accepted; a refused stamp sends none of them.
 //   - doesn't reset the controller when it connects; the command layer waits for it to
 //     answer, since after a lost connection it may still be retracting the tool
 //   - offers to resume when it finds a job that was cut short by a lost connection or
@@ -17,11 +18,12 @@ import { sendCmd } from './connection';
 import * as command from './command';
 import { lsGet, lsSet, esc } from './ui';
 import { streamLines, type SendLine } from './streaming';
+import { errorText } from './errors';
 import { on as onBus } from './bus';
 import { jobId, numberedLine, programLines, modalScan, resumePreamble, resumeStart, ResumeRefused } from './flight-recorder-resume';
 import { batch } from '@preact/signals';
 import * as flight from './stores/flight';
-import * as job from './stores/job';
+import * as messages from './stores/messages';
 
 export interface FlightRecord {
   state: string;      // Idle, Running, Stopped, Retracted, Completed
@@ -187,9 +189,14 @@ function parseRecord(line: string): FlightRecord | null {
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 
-/** The loaded file as sent with the recorder on: the job stamp, then every line numbered. */
+/** The job stamp, sent and answered before any line of the job (streaming.ts). */
+export function frJobStamp(): string {
+  return '$FLIGHT=' + jobId(state.gcodeLines) + (_undercut ? ',1' : '');
+}
+
+/** The loaded file as sent with the recorder on, after the stamp: every line numbered. */
 export function frJobLines(): SendLine[] {
-  const lines: SendLine[] = [{ text: '$FLIGHT=' + jobId(state.gcodeLines) + (_undercut ? ',1' : ''), line: 0 }];
+  const lines: SendLine[] = [];
   state.gcodeLines.forEach((raw, i) => {
     const text = numberedLine(raw, i + 1);
     if (text) lines.push({ text, line: i + 1 });
@@ -252,7 +259,9 @@ function buildPlan(record: FlightRecord): ResumePlan | string {
 
 function startResume(record: FlightRecord, plan: ResumePlan): void {
   const line = plan.index + 1;
-  const lines: SendLine[] = plan.preamble.map(text => ({ text, line }));
+  // The preamble starts with the job stamp, which goes on its own and must be accepted first.
+  const [stamp, ...moves] = plan.preamble;
+  const lines: SendLine[] = moves.map(text => ({ text, line }));
   lines.push({ text: plan.first, line });
   for (let i = plan.index + 1; i < state.gcodeLines.length; i++) {
     const text = numberedLine(state.gcodeLines[i], i + 1);
@@ -260,8 +269,27 @@ function startResume(record: FlightRecord, plan: ResumePlan): void {
   }
   log('info', `✈ Resuming job ${record.job} from line ${line}`);
   closeModal();
-  job.started(true, line);
-  streamLines(lines, true);
+  streamLines(lines, true, { stamp, resumedAt: line });
+}
+
+/** DISCARD RECORD: says so only once the controller has accepted $FLIGHTCLEAR. */
+async function discardRecord(fromDialog: boolean): Promise<void> {
+  let reply: command.Reply;
+  try { reply = await command.send('$FLIGHTCLEAR', { log: true, quiet: true }); }
+  catch (e) { ignoreFailed(e); return; }
+  if (reply.result === 'ok') {
+    if (fromDialog) closeModal();
+    log('info', '✈ Flight record discarded');
+    messages.push('job', 'Flight record discarded.');
+    return;
+  }
+  const text = `The controller refused to discard the flight record: error:${reply.code}${errorText(reply.code) ? ' (' + errorText(reply.code) + ')' : ''}. The record is unchanged.`;
+  log('err', text);
+  messages.push('error', text);
+  const body = document.getElementById('frModalBody');
+  if (fromDialog && body && !body.querySelector('.fr-refused-discard')) {
+    body.insertAdjacentHTML('afterbegin', `<div class="fr-refused fr-refused-discard">${esc(text)}</div>`);
+  }
 }
 
 function machineState(): string { return (state._prevMachineStateSl || '').toLowerCase(); }
@@ -329,7 +357,7 @@ function wireModal(record: FlightRecord, plan: ResumePlan | null): void {
     if (el) el.addEventListener(el.tagName === 'INPUT' ? 'change' : 'click', () => fn(el));
   };
   on('open', () => document.getElementById('fileInput')?.click());
-  on('discard', () => { sendCmd('$FLIGHTCLEAR'); closeModal(); });
+  on('discard', () => { discardRecord(true); });
   on('close', () => closeModal());
   on('unlock', () => sendCmd('$X'));
   on('home', () => sendCmd('$H'));
@@ -412,7 +440,7 @@ function renderRecord(): void {
     `<button class="tb-btn success" id="frResumeBtn" ${resumable(record) ? '' : 'disabled'}>▶ RESUME…</button>` +
     `<button class="tb-btn danger" id="frClearBtn">DISCARD</button></div>`;
   document.getElementById('frResumeBtn')?.addEventListener('click', () => { _promptedFor = recordKey(record); frOpenResume(); });
-  document.getElementById('frClearBtn')?.addEventListener('click', () => sendCmd('$FLIGHTCLEAR'));
+  document.getElementById('frClearBtn')?.addEventListener('click', () => { discardRecord(false); });
 }
 
 interface SettingRow { id: number; name: string; unit: string; help: string; kind: 'bool' | 'number'; }

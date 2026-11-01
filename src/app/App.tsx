@@ -11,9 +11,9 @@ import * as job from '../stores/job';
 import * as messages from '../stores/messages';
 import * as flight from '../stores/flight';
 import * as ui from './ui';
-import { mode, nextSection, awaitedSection, toolLabel } from './mode';
+import { mode, moving, nextSection, awaitedSection, toolLabel } from './mode';
 import { toggleConnect, rtSend, sendCmd } from '../connection';
-import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm } from '../streaming';
+import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm, resumeToolChange } from '../streaming';
 import { alarmText } from '../parser';
 import { Legacy } from './Legacy';
 import { JobScreen } from './JobScreen';
@@ -77,6 +77,7 @@ function stateView(): StateView {
   if (m === 'alarm') return { label: 'ALARM', sub: 'machine stopped', tone: 'stop', icon: <IconWarn /> };
   if (m === 'change') return { label: 'TOOL CHANGE', sub: 'waiting for you', tone: '', icon: <IconWrench /> };
   if (m === 'running') return { label: 'RUNNING', sub: 'no action needed', tone: 'go', icon: <IconPlay /> };
+  if (m === 'hold' && machine.stateName.value === 'door') return { label: 'DOOR OPEN', sub: 'close it, then Resume', tone: '', icon: <IconPause size={22} /> };
   if (m === 'hold') return { label: 'HOLD', sub: 'paused, press Resume', tone: '', icon: <IconPause size={22} /> };
   const ready = (label: string, sub: string): StateView => ({ label, sub, tone: '', icon: <IconReady /> });
   switch (machine.stateName.value) {
@@ -216,6 +217,7 @@ function homingOn(): boolean {
 function MessageLine() {
   const m = mode.value;
   const file = job.file.value;
+  const halt = job.halt.value;
   // The one next thing to do: connect, clear the alarm, home, load a program, then the job's own next step.
   if (m === 'alarm') {
     // After a lost link the ALARM: line came while FlexiSender was away; the flight record keeps the code.
@@ -263,10 +265,17 @@ function MessageLine() {
     text = next
       ? <>Next action: change to <strong>{toolLabel(next.tool)}</strong> at line {num(next.changeLine)}.</>
       : <>No action needed until the job ends.</>;
-  } else if (m === 'hold') text = <>Feed hold. Press <strong>Resume</strong> to carry on, or Stop to end the job.</>;
+  } else if (m === 'hold' && halt) {
+    text = <><strong>{halt.why}.</strong> Nothing more was sent and the machine is held. <strong>Resume</strong> finishes the lines it accepted before that one; <strong>Stop</strong> ends the job here.</>;
+  } else if (m === 'hold' && machine.stateName.value === 'door') text = <>The door is open. Close it, then press <strong>Resume</strong>; or Stop to end it.</>;
+  else if (m === 'hold') text = <>Feed hold. Press <strong>Resume</strong> to carry on, or Stop to end the job.</>;
+  else if (job.stopping.value) text = <>Stopping: the reset goes once the machine has stopped.</>;
+  else if (job.notice.value) text = <>{job.notice.value}</>;
   else if (!file) text = <>No job loaded. Press <strong>Load Job</strong> to open a G-code file.</>;
   else if (job.result.value === 'completed') text = <><strong>{file}</strong> completed in {job.fmtDuration(job.elapsedMs.value)}.</>;
-  else if (job.result.value) {
+  else if (job.result.value === 'error' && halt) {
+    text = <><strong>{file}</strong> halted after {job.fmtDuration(job.elapsedMs.value)}. {halt.why}. Fix the program, then press Start to run it again from the top.</>;
+  } else if (job.result.value) {
     const how: Record<string, string> = { stopped: 'was stopped', error: 'halted on an error', alarm: 'was stopped by an alarm', 'link lost': 'stopped when the connection was lost' };
     const at = job.executingLine.value;
     text = <><strong>{file}</strong> {how[job.result.value]}{at ? ' at line ' + num(at) : ''}, after {job.fmtDuration(job.elapsedMs.value)}. The record is in the Recorder panel; press Start to run it again from the top.</>;
@@ -307,10 +316,15 @@ function BottomBar() {
   const resume = m === 'hold' || m === 'change';
   const canStart = linked && (resume || (m === 'ready' && !!job.file.value && !job.running.value && machine.stateName.value === 'idle'));
   const start = () => {
-    // At a tool change, or a hold FlexiSender didn't ask for, the controller waits for cycle start.
-    if (m === 'change' || (m === 'hold' && !job.paused.value)) rtSend('~');
+    // At a tool change the cycle start goes once every reply is in (command.ts). At a hold BearSender
+    // didn't ask for (a door, the console, an error), the controller waits for the cycle start.
+    if (m === 'change') resumeToolChange();
+    else if (m === 'hold' && !job.paused.value) rtSend('~');
     else startJob();
   };
+  // Hold and Stop follow the machine, not the stream: the last ok can come long before the last move ends.
+  const canHold = linked && (m === 'running' || ['run', 'jog'].includes(machine.stateName.value));
+  const canStop = linked && !job.stopping.value && (job.running.value || moving.value);
   return (
     <footer class="fs-bottom">
       <div class="fs-row-gap">
@@ -327,8 +341,8 @@ function BottomBar() {
       <span class="fs-grow" />
       <div class="fs-run">
         <button type="button" class="fs-run-btn is-start" disabled={!canStart} onClick={start}><IconPlay size={18} />{resume ? 'RESUME' : 'START'}</button>
-        <button type="button" class="fs-run-btn is-hold" disabled={m !== 'running'} onClick={() => pauseJob()}><IconPause />HOLD</button>
-        <button type="button" class="fs-run-btn is-stop" disabled={!job.running.value} onClick={() => stopJob()}><IconStop />STOP</button>
+        <button type="button" class="fs-run-btn is-hold" disabled={!canHold} onClick={() => pauseJob()}><IconPause />HOLD</button>
+        <button type="button" class="fs-run-btn is-stop" disabled={!canStop} onClick={() => stopJob()}><IconStop />STOP</button>
       </div>
     </footer>
   );

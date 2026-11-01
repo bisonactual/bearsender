@@ -5,10 +5,12 @@
 import { signal, computed } from '@preact/signals';
 import { lsGet, lsSet } from '../ui';
 import { push } from './messages';
+import { jobId } from '../flight-recorder-resume';
 
 export type JobResult = 'completed' | 'stopped' | 'error' | 'alarm' | 'link lost';
 
-export interface LastJob { name: string; result: JobResult; endedAt: number; runtimeMs: number; }
+/** `id` is the file's contents (jobId), so an edited file of the same name isn't taken for it. */
+export interface LastJob { name: string; id?: string; result: JobResult; endedAt: number; runtimeMs: number; }
 
 const LAST_JOB_KEY = 'fs-last-job';
 
@@ -36,6 +38,18 @@ export const endedAt = signal<number | null>(null);
 /** How the last run ended; null while running and before the first run. */
 export const result = signal<JobResult | null>(null);
 export const lastJob = signal<LastJob | null>(lsGet<LastJob | null>(LAST_JOB_KEY, null));
+/** The line the controller refused, when the last run ended on an error. */
+export const halt = signal<{ line: number; code: number; why: string } | null>(null);
+/** Stop has sent the hold and waits for the machine to stop before the reset. */
+export const stopping = signal(false);
+/** Why Start sent nothing (the recorder refused the job stamp), until the next start or file. */
+export const notice = signal<string | null>(null);
+
+/** The last run, if it was of the loaded file as it is now. */
+export const lastOfThisFile = computed(() => {
+  const last = lastJob.value;
+  return last && last.name === file.value && last.id === jobId(lines.value) ? last : null;
+});
 
 /** Ticks once a second, for the elapsed time. */
 export const now = signal(Date.now());
@@ -59,10 +73,13 @@ export function loaded(name: string, fileLines: string[]): void {
   sentLine.value = 0;
   ackedLine.value = 0;
   reportedLine.value = 0;
+  halt.value = null;
+  notice.value = null;
 }
 
 export function started(isNumbered: boolean, resumedAt?: number): void {
   numbered.value = isNumbered;
+  notice.value = null;
   startedAt.value = Date.now();
   endedAt.value = null;
   result.value = null;
@@ -78,7 +95,7 @@ export function finished(how: JobResult): void {
   const end = Date.now();
   endedAt.value = end;
   result.value = how;
-  const last: LastJob = { name: file.value ?? '—', result: how, endedAt: end, runtimeMs: end - startedAt.value };
+  const last: LastJob = { name: file.value ?? '—', id: jobId(lines.value), result: how, endedAt: end, runtimeMs: end - startedAt.value };
   lastJob.value = last;
   lsSet(LAST_JOB_KEY, last);
   const words: Record<JobResult, string> = {
