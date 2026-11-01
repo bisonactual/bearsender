@@ -4,7 +4,7 @@
 
 import { render, h } from 'preact';
 import { state } from './state';
-import { lsGet, lsSet } from './ui';
+import { lsGet, lsSet, confirmTap } from './ui';
 import { log, clearConsole, sendManual, handleConInput, conAutoUpdate } from './console';
 import { sendCmd } from './connection';
 import { initViewport, setView, fitView, toggleToolhead, vpApply, setProjection, toggleWcsMarkers } from './viewport';
@@ -74,7 +74,7 @@ function initChunk3Events(): void {
   on('camMeasureBtn', 'click', () => measureOffset());
   on('camGoCameraBtn', 'click', () => goToCamera());
   on('camGoSpindleBtn', 'click', () => goToSpindle());
-  on('camZeroHereBtn', 'click', () => zeroAtCrosshair());
+  on('camZeroHereBtn', 'click', (e) => confirmTap(e.currentTarget as HTMLElement, 'CONFIRM ZERO HERE?', () => zeroAtCrosshair()));
   const camDrag = document.getElementById('camDragLayer');
   if (camDrag) {
     camDrag.addEventListener('mousedown', e => camMouseDown(e));

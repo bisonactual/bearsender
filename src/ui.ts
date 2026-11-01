@@ -46,3 +46,16 @@ export function lsSet(key: string, val: unknown): void {
 export function $(id: string): HTMLElement {
   return document.getElementById(id)!;
 }
+
+const _armed = new WeakMap<HTMLElement, { text: string; timer: ReturnType<typeof setTimeout> }>();
+
+/** A guard for one-click zeros: the first tap turns the button into the prompt for 3 s, the second runs it. */
+export function confirmTap(btn: HTMLElement, prompt: string, run: () => void): void {
+  const armed = _armed.get(btn);
+  const disarm = (text: string) => { btn.textContent = text; btn.classList.remove('is-arming'); _armed.delete(btn); };
+  if (armed) { clearTimeout(armed.timer); disarm(armed.text); run(); return; }
+  const text = btn.textContent || '';
+  btn.textContent = prompt;
+  btn.classList.add('is-arming');
+  _armed.set(btn, { text, timer: setTimeout(() => disarm(text), 3000) });
+}

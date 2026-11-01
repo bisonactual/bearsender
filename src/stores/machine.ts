@@ -41,6 +41,11 @@ export const toolTableError = signal<string | null>(null);
 /** $ settings values read so far. */
 export const settings = signal<Record<number, string>>({});
 
+/** The P word that selects each work offset in G10. */
+export const WCS_P: Record<string, number> = { G54: 1, G55: 2, G56: 3, G57: 4, G58: 5, G59: 6, 'G59.1': 7, 'G59.2': 8, 'G59.3': 9 };
+/** P for the active work offset, for every zero in the app. */
+export const activeP = computed(() => WCS_P[wcs.value] ?? 1);
+
 /** idle, run, hold, alarm, tool, door, home, jog, check, sleep, or '' before the first report. */
 export const stateName = computed(() => state.value.split(':')[0].toLowerCase());
 

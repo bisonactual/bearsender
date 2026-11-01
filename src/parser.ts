@@ -246,7 +246,11 @@ function noteOffsetWrite(command: string | undefined): void {
   const c = command.toUpperCase().replace(/\s+/g, '');
   const g10 = c.match(/G0*10L0*(20|2)(?!\d)(?:P0*(\d+))?/);
   const g92 = /G92(?![.\d])/.test(c);
-  if (!g10 && !g92 && !/G43\.1|G49(?!\d)/.test(c)) return;
+  if (!g10 && !g92 && !/G43\.1|G49(?!\d)/.test(c)) {
+    // A new active work offset: the full report carries WCS.
+    if (/G5[4-9](?:\.[1-3])?(?!\d)/.test(c)) rtSend('\x87');
+    return;
+  }
   if (g10 || g92) {
     const wcs = (g10 && g10[2] && WCS_BY_P[parseInt(g10[2])]) || machine.wcs.value;
     machine.offsetWrites.value = { ...machine.offsetWrites.value, [wcs]: g10 && g10[1] === '20' ? 'zeroed' : 'probed' };

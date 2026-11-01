@@ -6,6 +6,7 @@ import { state } from './state';
 import { lsGet, lsSet } from './ui';
 import { log } from './console';
 import { sendCmd } from './connection';
+import * as machine from './stores/machine';
 
 export async function initCameraTab(): Promise<void> {
   try {
@@ -222,7 +223,7 @@ export function goToSpindle(): void {
 
 export function zeroAtCrosshair(): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
-  sendCmd('G10 L20 P1 X' + state.camOffsetX.toFixed(4) + ' Y' + state.camOffsetY.toFixed(4));
+  sendCmd('G10 L20 P' + machine.activeP.value + ' X' + state.camOffsetX.toFixed(4) + ' Y' + state.camOffsetY.toFixed(4));
   log('info', 'WCS zeroed at camera position');
 }
 
