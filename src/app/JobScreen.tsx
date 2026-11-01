@@ -48,8 +48,8 @@ function jobNow(): string {
   if (m === 'alarm' || stoppedShort.value) return 'Stopped' + (where ? ' in ' + where : '');
   if (job.result.value === 'completed') return 'Completed in ' + job.fmtDuration(job.elapsedMs.value);
   const tools = new Set(sections.map(s => s.tool)).size;
-  const last = job.lastJob.value;
-  const lastRun = last && last.name === file && last.result === 'completed' ? ' · about ' + job.fmtDuration(last.runtimeMs).slice(0, -3) + ' from the last run' : '';
+  const last = job.lastOfThisFile.value;
+  const lastRun = last && last.result === 'completed' ? ' · about ' + job.fmtDuration(last.runtimeMs).slice(0, -3) + ' from the last run' : '';
   return 'Ready · ' + (tools ? tools + (tools === 1 ? ' tool' : ' tools') : 'no tool changes') + ' · ' + num(job.lines.value.length) + ' lines' + lastRun;
 }
 
@@ -131,7 +131,8 @@ function JobsList() {
   const open = ui.toolsOpen.value;
   const m = mode.value;
   const status = programStatus();
-  const lastSame = last && last.name === file && last.result === 'completed';
+  const same = job.lastOfThisFile.value;
+  const lastSame = same && same.result === 'completed';
   return (
     <div>
       <div class="fs-jobs-scroll">
@@ -163,7 +164,7 @@ function JobsList() {
               </span>
               <span class={'fs-c-status' + (status === 'Running' ? ' is-go' : '')}>{status}</span>
               <span class="fs-c-at fs-mono">{job.startedAt.value !== null && (m === 'running' || m === 'hold' || m === 'change') ? clock(job.startedAt.value) : job.startedAt.value === null ? 'start' : '—'}</span>
-              <span class="fs-c-run fs-mono" title={lastSame ? 'Measured on the last run of this file' : 'Measured once the file has run'}>{lastSame ? job.fmtDuration(last!.runtimeMs) : '—'}</span>
+              <span class="fs-c-run fs-mono" title={lastSame ? 'Measured on the last run of this file' : 'Measured once the file has run'}>{lastSame ? job.fmtDuration(same!.runtimeMs) : '—'}</span>
               <span class="fs-c-bell" />
             </div>
           )}
@@ -297,18 +298,30 @@ function travelCheck(): Check {
     return { key, tone: 'todo', text: 'Program fits the machine travel', detail: connection.connected.value ? 'reading the travel ($130–$132)…' : 'connect to read the travel', actions, tickWord };
   }
   if (!machine.offsetsRead.value) return { key, tone: 'todo', text: 'Program fits the machine travel', detail: 'reading the work offsets…', actions, tickWord };
-  // Machine travel taken as −$13x to 0, grblHAL's default with homing to the top of each axis.
+  // The travel as grblHAL sets it once homed (machine_limits.c): −$13x to 0; or, with "set machine origin
+  // to 0" ($22 bit 3), 0 to +$13x for an axis that homes negative ($23). With hard limits on ($21) the
+  // pull-off ($27) comes off both ends. Not known until those are read; until then −$13x to 0.
+  const setting = (id: number) => parseInt(machine.settings.value[id] ?? '');
+  const originAtHome = (setting(22) & 8) !== 0;
+  const pulloff = (setting(21) & 1) ? parseFloat(machine.settings.value[27] ?? '') || 0 : 0;
+  const ends = (bit: number, len: number): [number, number] =>
+    originAtHome ? ((setting(23) & bit) ? [0, len - pulloff] : [-len + pulloff, 0]) : [-len + pulloff, -pulloff];
+  // Machine position = work position + the offset + G92, and on Z the tool length offset.
+  const g92 = machine.offsets.value['G92'] ?? { x: 0, y: 0, z: 0 };
+  const tlo = machine.tlo.value ?? 0;
   const over: string[] = [];
   for (const code of limits.order) {
     const r = limits.perWcs[code], o = machine.offsets.value[code];
     if (!r || !o) continue;
-    const axes: [string, boolean, number, number, number][] = [
-      ['X', r.hasX, r.xMin + o.x, r.xMax + o.x, travel[0]], ['Y', r.hasY, r.yMin + o.y, r.yMax + o.y, travel[1]], ['Z', r.hasZ, r.zMin + o.z, r.zMax + o.z, travel[2]],
+    const axes: [string, boolean, number, number, [number, number]][] = [
+      ['X', r.hasX, r.xMin + o.x + g92.x, r.xMax + o.x + g92.x, ends(1, travel[0])],
+      ['Y', r.hasY, r.yMin + o.y + g92.y, r.yMax + o.y + g92.y, ends(2, travel[1])],
+      ['Z', r.hasZ, r.zMin + o.z + g92.z + tlo, r.zMax + o.z + g92.z + tlo, ends(4, travel[2])],
     ];
-    for (const [axis, has, lo, hi, len] of axes) {
+    for (const [axis, has, lo, hi, [min, max]] of axes) {
       if (!has) continue;
-      if (lo < -len - 0.001) over.push(`${axis} goes ${mm(-len - lo)} mm past the end of the travel (${code})`);
-      if (hi > 0.001) over.push(`${axis} goes ${mm(hi)} mm past machine zero (${code})`);
+      if (lo < min - 0.001) over.push(`${axis} goes ${mm(min - lo)} mm past the ${min < 0 ? 'end of the travel' : 'machine zero'} (${code})`);
+      if (hi > max + 0.001) over.push(`${axis} goes ${mm(hi - max)} mm past ${max > 0 ? 'the end of the travel' : 'machine zero'} (${code})`);
     }
   }
   const first = limits.order[0];

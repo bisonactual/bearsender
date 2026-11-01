@@ -22,7 +22,8 @@ export interface ToolScan {
   described: Record<number, string>;
 }
 
-const TOOL_CHANGE = /\bT0*(\d+)\b.*\bM0*6\b|\bM0*6\b.*\bT0*(\d+)\b/;
+// A G-code word ends where the next letter starts, so T1M6 is two words: no \b between them.
+const TOOL_CHANGE = /(?<![A-Z])T0*(\d+)(?![\d.]).*(?<![A-Z])M0*6(?![\d.])|(?<![A-Z])M0*6(?![\d.]).*(?<![A-Z])T0*(\d+)(?![\d.])/;
 const HEADER_TOOL = /^\(T(\d+)\s+(.*)\)$/i;
 
 function stripComments(line: string): string {

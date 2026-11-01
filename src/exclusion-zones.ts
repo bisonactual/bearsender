@@ -104,7 +104,8 @@ export function ezCheckPlugin(line: string): void {
     const notice = document.getElementById('ezPluginNotice');
     if (notice) notice.style.display = 'none';
   }
-  if (line.includes('[PLUGIN:ATCi') || line.includes('[PLUGIN:ATCI') || line.includes('[PLUGIN:Sienci ATCi')) {
+  // [PLUGIN:SIENCI ATCi plugin v0.5.0], and the other spellings seen: ATCi, ATCI, Sienci ATCi.
+  if (/^\[PLUGIN:(SIENCI\s+)?ATCI\b/i.test(line)) {
     _atciDetected = true;
     log('info', '🔧 ATCi plugin detected');
     const notice = document.getElementById('ezPluginNotice');
