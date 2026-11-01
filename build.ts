@@ -4,6 +4,17 @@ import { readFileSync, writeFileSync } from "fs";
 const rootDir = import.meta.dir;
 const srcDir = resolve(rootDir, "src");
 
+// Type check first; a type error fails the build.
+const check = Bun.spawnSync([process.execPath, resolve(rootDir, "node_modules/typescript/bin/tsc"), "-p", rootDir], {
+  stdout: "inherit",
+  stderr: "inherit",
+});
+if (check.exitCode !== 0) {
+  console.error("Type check failed");
+  process.exit(1);
+}
+console.log("Type check passed");
+
 const result = await Bun.build({
   entrypoints: [`${srcDir}/main.ts`],
   format: "esm",

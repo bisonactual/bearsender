@@ -1,3 +1,6 @@
+/** @jsxRuntime classic */
+/** @jsx h */
+/** @jsxFrag Fragment */
 // ═══════════════════════════════════════════════
 // Signals module — input pin indicators
 // ═══════════════════════════════════════════════

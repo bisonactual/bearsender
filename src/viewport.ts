@@ -6,7 +6,7 @@ import { state, VP_STORAGE_KEY } from './state';
 import { lsGet, lsSet } from './ui';
 import { ezUpdateSpriteScales } from './exclusion-zones';
 
-declare const THREE: any;
+import * as THREE from 'three';
 
 // Scene objects
 export let renderer: any;
@@ -64,8 +64,9 @@ export function initViewport(): void {
   camera.position.set(80, 60, 100);
   camera.lookAt(0, 0, 0);
 
-  scene.add(new THREE.AmbientLight(0x223355, 2.5));
-  const dlight = new THREE.DirectionalLight(0xffffff, 0.5);
+  // three.js lights are physically based since r155; × π keeps the r128 look.
+  scene.add(new THREE.AmbientLight(0x223355, 2.5 * Math.PI));
+  const dlight = new THREE.DirectionalLight(0xffffff, 0.5 * Math.PI);
   dlight.position.set(1, 2, 1);
   scene.add(dlight);
 
@@ -310,6 +311,7 @@ function makeTextSprite(text: string, gridStep: number): any {
   ctx.textBaseline = 'middle';
   ctx.fillText(text, sz / 2, sz / 2);
   const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(mat);
@@ -443,6 +445,7 @@ function buildWcsMarkers(): void {
     ctx.textBaseline = 'middle';
     ctx.fillText(wcs, 64, 32);
     const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.minFilter = THREE.LinearFilter;
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(mat);

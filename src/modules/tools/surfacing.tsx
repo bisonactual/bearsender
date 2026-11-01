@@ -1,3 +1,6 @@
+/** @jsxRuntime classic */
+/** @jsx h */
+/** @jsxFrag Fragment */
 // ═══════════════════════════════════════════════
 // Surfacing (Planer) tool — generates G-code for
 // fly-cutting / surface planing operations

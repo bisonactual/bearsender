@@ -21,8 +21,10 @@ watch(rootDir, (_, filename) => {
   }
 });
 
+const port = parseInt(process.env.PORT || "3000");
+
 Bun.serve({
-  port: 3000,
+  port,
   reusePort: true,
   async fetch(req, server) {
     const url = new URL(req.url);
@@ -83,4 +85,4 @@ Bun.serve({
   },
 });
 
-console.log("FlexiSender dev server → http://localhost:3000");
+console.log(`FlexiSender dev server → http://localhost:${port}`);

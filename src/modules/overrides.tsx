@@ -1,3 +1,6 @@
+/** @jsxRuntime classic */
+/** @jsx h */
+/** @jsxFrag Fragment */
 // ═══════════════════════════════════════════════
 // Overrides module — feed, rapid, spindle override sliders
 // ═══════════════════════════════════════════════

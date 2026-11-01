@@ -146,7 +146,7 @@ export function mount(parent: HTMLElement): void {
     h('div', { class: 'module-drag-handle' },
       h('span', { class: 'module-drag-dots' }, '⠿⠿'),
       h('span', { class: 'module-drag-title' }, 'Tool Length'),
-      h('button', { class: 'module-drag-close', onClick: () => { card.classList.add('mod-hidden'); } }, '✕')),
+      h('button', { class: 'module-drag-close', onClick: () => { (card as HTMLElement).classList.add('mod-hidden'); } }, '✕')),
     h('div', { class: 'module-body', style: 'gap:8px' },
       h('div', { class: 'tl-section' },
         h('div', { class: 'tl-section-label' }, 'Mode'),

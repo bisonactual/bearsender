@@ -1,3 +1,6 @@
+/** @jsxRuntime classic */
+/** @jsx h */
+/** @jsxFrag Fragment */
 // ═══════════════════════════════════════════════
 // Jog engine — click, hold, keyboard
 // ═══════════════════════════════════════════════
@@ -10,7 +13,7 @@ import { goToXY0 } from '../streaming';
 import { scene, toolGroup } from '../viewport';
 import { on as busOn, type StatusReport } from '../bus';
 
-declare const THREE: any;
+import * as THREE from 'three';
 
 // ── Element refs (set during mount) ───────────────────────────────────────────
 let _feedSlider: HTMLInputElement;

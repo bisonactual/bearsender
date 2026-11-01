@@ -1,3 +1,6 @@
+/** @jsxRuntime classic */
+/** @jsx h */
+/** @jsxFrag Fragment */
 // ═══════════════════════════════════════════════
 // Position module — DRO, state badge, WCS, feed/spindle/buf/line
 // ═══════════════════════════════════════════════

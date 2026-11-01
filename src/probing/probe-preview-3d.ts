@@ -6,7 +6,7 @@ import { state } from '../state';
 import { scene, cutLines, rapidLines, executedLine } from '../viewport';
 import type { Waypoint } from './preview';
 
-declare const THREE: any;
+import * as THREE from 'three';
 
 let _waypoints: Waypoint[] = [];
 let _step = 0;

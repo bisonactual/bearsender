@@ -2,8 +2,17 @@
   "name": "flexisender",
   "version": "5.0.0",
   "scripts": {
-    "sim": "bun run sim.ts",
     "dev": "bun run serve.ts",
+    "check": "bun node_modules/typescript/bin/tsc -p .",
     "build": "bun run build.ts"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.11.4",
+    "preact": "^11.1.1",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "^7.0.2"
   }
 }
