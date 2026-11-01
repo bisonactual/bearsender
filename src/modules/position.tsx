@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════
 
 import { h } from '../jsx';
-import { fmtPos, confirmTap } from '../ui';
+import { fmtPos } from '../ui';
 import { sendCmd } from '../connection';
 import { setWCS } from '../streaming';
 import { state } from '../state';
@@ -38,8 +38,7 @@ function AxisCard({ axis, refWpos, refMpos }: { axis: string; refWpos: (el: HTML
         <div class="dro-axis-mpos" ref={refMpos}>M: 0.000</div>
       </div>
       <div class="dro-axis-unit">MM</div>
-      <button class="dro-zero-btn" onClick={(e: MouseEvent) => confirmTap(e.currentTarget as HTMLElement, 'CONFIRM ' + axis + '0?',
-        () => sendCmd('G10 L20 P' + machine.activeP.value + ' ' + axis + '0'))}>ZERO</button>
+      <button class="dro-zero-btn" onClick={() => sendCmd('G10 L20 P' + machine.activeP.value + ' ' + axis + '0')}>ZERO</button>
     </div>
   ) as HTMLElement;
 }

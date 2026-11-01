@@ -312,7 +312,7 @@ export function frOpenResume(): void {
     `<div class="fr-step-text">${toolText}</div>` +
     `<label class="fr-toggle fr-check"><input type="checkbox" data-fr="tool"> Tool checked</label></div>` +
     `<div class="fr-step"><div class="fr-step-title">3. Resume ${esc(file)} from line ${record.ln}</div>` +
-    `<div class="fr-step-text">FlexiSender goes up to the retract height, over the start of the line, ` +
+    `<div class="fr-step-text">BearSender goes up to the retract height, over the start of the line, ` +
     `starts the spindle and comes straight down, then carries on with the file:</div>${planHtml}</div>` +
     `<div class="fr-modal-actions"><button class="tb-btn danger" data-fr="discard">DISCARD RECORD</button>` +
     `<div style="flex:1"></div><button class="tb-btn" data-fr="close">NOT NOW</button>` +

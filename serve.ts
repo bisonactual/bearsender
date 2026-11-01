@@ -85,4 +85,4 @@ Bun.serve({
   },
 });
 
-console.log(`FlexiSender dev server → http://localhost:${port}`);
+console.log(`BearSender dev server → http://localhost:${port}`);

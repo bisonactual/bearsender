@@ -6,7 +6,7 @@ import { state } from './state';
 import { log } from './console';
 import { sendCmd } from './connection';
 import * as command from './command';
-import { lsGet, lsSet, confirmTap } from './ui';
+import { lsGet, lsSet } from './ui';
 import { refreshWcsMarkers } from './viewport';
 import * as machine from './stores/machine';
 
@@ -159,7 +159,7 @@ function wireOffsetEvents(): void {
 
   // Zero button — zero all axes
   tbody.querySelectorAll<HTMLElement>('.wcs-btn-clear').forEach(btn => {
-    btn.addEventListener('click', () => confirmTap(btn, 'CONFIRM?', () => {
+    btn.addEventListener('click', () => {
       const code = btn.dataset.code!;
       if (code === 'TLO') {
         sendCmd('G49');
@@ -169,15 +169,15 @@ function wireOffsetEvents(): void {
       } else {
         zeroOffset(code);
       }
-    }));
+    });
   });
 
   // POS button — set to current machine position
   tbody.querySelectorAll<HTMLElement>('.wcs-btn-pos').forEach(btn => {
-    btn.addEventListener('click', () => confirmTap(btn, 'CONFIRM?', () => {
+    btn.addEventListener('click', () => {
       const code = btn.dataset.code!;
       setToCurrentPos(code);
-    }));
+    });
   });
 
   // Input change — mark row dirty

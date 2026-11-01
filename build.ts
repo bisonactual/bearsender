@@ -38,5 +38,5 @@ const out = html
   .replace(/<!-- DEV-RELOAD -->[\s\S]*?<!-- \/DEV-RELOAD -->/, '')
   .replace(/<!-- CSS extracted to style\.css[^>]*-->/, '');
 
-writeFileSync(resolve(rootDir, "dist", "flexisender.html"), out);
-console.log("Built → dist/flexisender.html");
+writeFileSync(resolve(rootDir, "dist", "bearsender.html"), out);
+console.log("Built → dist/bearsender.html");

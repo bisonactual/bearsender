@@ -4,7 +4,7 @@
 
 import { render, h } from 'preact';
 import { state } from './state';
-import { lsGet, lsSet, confirmTap } from './ui';
+import { lsGet, lsSet } from './ui';
 import { log, clearConsole, sendManual, handleConInput, conAutoUpdate } from './console';
 import { sendCmd } from './connection';
 import * as command from './command';
@@ -76,7 +76,7 @@ function initChunk3Events(): void {
   on('camMeasureBtn', 'click', () => measureOffset());
   on('camGoCameraBtn', 'click', () => goToCamera());
   on('camGoSpindleBtn', 'click', () => goToSpindle());
-  on('camZeroHereBtn', 'click', (e) => confirmTap(e.currentTarget as HTMLElement, 'CONFIRM ZERO HERE?', () => zeroAtCrosshair()));
+  on('camZeroHereBtn', 'click', () => zeroAtCrosshair());
   const camDrag = document.getElementById('camDragLayer');
   if (camDrag) {
     camDrag.addEventListener('mousedown', e => camMouseDown(e));
@@ -266,7 +266,7 @@ loadCamSettings();
 // The console keeps the line count chosen in the old MODULES tab.
 state.consoleMaxLines = lsGet<Record<string, any>>('fs-modules', {})._consoleLines || state.consoleMaxLines;
 
-log('info', 'FlexiSender ready — IOSender-compatible character-counting stream.');
+log('info', 'BearSender ready — IOSender-compatible character-counting stream.');
 log('info', 'Open a G-code file to preview the toolpath, then connect and run.');
 updateRunButtons();
 

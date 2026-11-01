@@ -2,7 +2,8 @@
 
 What lives where.
 
-Build: `bun run build` type-checks (`tsc --noEmit` via tsconfig) and then bundles into `dist/flexisender.html`. Preact with
+BearSender (formerly FlexiSender; the repo keeps its name). Build: `bun run build` type-checks (`tsc --noEmit` via tsconfig)
+and then bundles into `dist/bearsender.html`. Preact with
 `@preact/signals` for the shell; `three` from npm. The carried-over `.tsx` screens still use the home-made `h()`
 (`src/jsx.tsx`) through a per-file classic-JSX pragma.
 

@@ -4,7 +4,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { signal, type Signal } from '@preact/signals';
+import type { Signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
@@ -20,6 +20,7 @@ import { JobScreen } from './JobScreen';
 import { PopupHost } from './Popup';
 import { startCarriedScreens } from './carried';
 import { startAsks } from './asks';
+import { BEAR_MARK } from './brand';
 import { IconHome, IconReady, IconPlay, IconPause, IconStop, IconWrench, IconWarn, IconUnplugged } from './icons';
 
 const num = (v: number, digits = 0) => v.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -45,7 +46,7 @@ function TopBar() {
   const current = ui.screen.value;
   return (
     <header class="fs-top">
-      <div class="fs-logo"><span>FLEXI</span>SENDER</div>
+      <div class="fs-logo"><img class="fs-mark" src={BEAR_MARK} alt="" /><span><span class="fs-bear">BEAR</span>SENDER</span></div>
       <nav class="fs-nav" aria-label="Screens">
         {SCREENS.map(([id, label]) => (
           <button type="button" class={'fs-nav-btn' + (current === id ? ' is-on' : '')} aria-current={current === id ? 'page' : undefined}
@@ -91,22 +92,6 @@ function stateView(): StateView {
   }
 }
 
-// SET asks for a second tap: the first turns the button into "CONFIRM X0?" for 3 s. A guard against
-// accidents, not a gate.
-const armedAxis = signal<string | null>(null);
-let armTimer: ReturnType<typeof setTimeout> | undefined;
-
-function tapSet(axis: string): void {
-  clearTimeout(armTimer);
-  if (armedAxis.value === axis) {
-    armedAxis.value = null;
-    sendCmd(`G10 L20 P${machine.activeP.value} ${axis}0`);
-    return;
-  }
-  armedAxis.value = axis;
-  armTimer = setTimeout(() => { armedAxis.value = null; }, 3000);
-}
-
 // Input pins (Pn:) shown on the position line: pin letters, short label, name. E-stop lights on E (grblHAL) or R,
 // and the toolsetter on T, as the old Signals panel had it.
 const SIGNALS: [string, string, string][] = [
@@ -143,11 +128,8 @@ function PositionLine() {
         {(['x', 'y', 'z'] as const).map(a => (
           <div class="fs-axis">
             <span class="fs-axis-name">{a.toUpperCase()}</span><span class="fs-axis-value">{pos[a].toFixed(3)}</span>
-            {canSet && (armedAxis.value === a.toUpperCase()
-              ? <button type="button" class="fs-set is-arming" title={`Tap again to zero ${a.toUpperCase()} in ${wcs}`}
-                  onClick={() => tapSet(a.toUpperCase())}>CONFIRM {a.toUpperCase()}0?</button>
-              : <button type="button" class="fs-set" title={`Zero ${a.toUpperCase()} in ${wcs} here (G10 L20); tap twice`}
-                  onClick={() => tapSet(a.toUpperCase())}>SET {wcs}</button>)}
+            {canSet && <button type="button" class="fs-set" title={`Zero ${a.toUpperCase()} in ${wcs} here (G10 L20)`}
+              onClick={() => sendCmd(`G10 L20 P${machine.activeP.value} ${a.toUpperCase()}0`)}>SET {wcs}</button>}
           </div>
         ))}
         {ui.signalsShown.value && <Signals />}
