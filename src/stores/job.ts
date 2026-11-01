@@ -19,7 +19,7 @@ export interface ProgLimits { overall: AxisRange | null; perWcs: Record<string, 
 export const file = signal<string | null>(null);
 /** The loaded program's extents, from computeProgLimits(). */
 export const limits = signal<ProgLimits | null>(null);
-/** The file's lines as FlexiSender holds them (blank lines dropped). Line numbers count these, from 1. */
+/** The file's lines as BearSender holds them (blank lines dropped). Line numbers count these, from 1. */
 export const lines = signal<string[]>([]);
 export const running = signal(false);
 export const paused = signal(false);

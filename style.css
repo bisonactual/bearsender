@@ -1225,8 +1225,9 @@
 
   /* Top bar */
   .fs-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  .fs-logo { font-family: var(--cond); font-size: 24px; font-weight: 500; letter-spacing: 0.14em; }
-  .fs-logo span { color: var(--accent); font-weight: 600; }
+  .fs-logo { display: flex; align-items: center; gap: 8px; font-family: var(--cond); font-size: 24px; font-weight: 500; letter-spacing: 0.14em; }
+  .fs-mark { width: 28px; height: 28px; flex: none; }
+  .fs-logo .fs-bear { color: var(--accent); font-weight: 600; }
   .fs-nav { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 2px; }
   .fs-nav-btn { height: 44px; padding: 0 14px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text2); font-family: var(--cond) !important; font-size: 16px; font-weight: 600; letter-spacing: 0.12em; }
   .fs-nav-btn.is-on { border-bottom-color: var(--tab-active); color: var(--text); font-weight: 700; }

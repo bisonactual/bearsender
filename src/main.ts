@@ -260,7 +260,7 @@ loadCamSettings();
 // The console keeps the line count chosen in the old MODULES tab.
 state.consoleMaxLines = lsGet<Record<string, any>>('fs-modules', {})._consoleLines || state.consoleMaxLines;
 
-log('info', 'FlexiSender ready — IOSender-compatible character-counting stream.');
+log('info', 'BearSender ready — IOSender-compatible character-counting stream.');
 log('info', 'Open a G-code file to preview the toolpath, then connect and run.');
 updateRunButtons();
 

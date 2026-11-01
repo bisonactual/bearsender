@@ -5,7 +5,7 @@
 import { signal } from '@preact/signals';
 import type { FlightRecord } from '../flight-recorder';
 
-/** Switched on in FlexiSender (Settings, Flight recorder). */
+/** Switched on in BearSender (Settings, Flight recorder). */
 export const enabled = signal(false);
 /** The plugin the controller lists in $I, or null if it lists none. */
 export const plugin = signal<{ version: string; storage: boolean } | null>(null);

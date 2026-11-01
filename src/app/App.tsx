@@ -20,6 +20,7 @@ import { JobScreen } from './JobScreen';
 import { PopupHost } from './Popup';
 import { startCarriedScreens } from './carried';
 import { startAsks } from './asks';
+import { BEAR_MARK } from './brand';
 import { IconHome, IconReady, IconPlay, IconPause, IconStop, IconWrench, IconWarn, IconUnplugged } from './icons';
 
 const num = (v: number, digits = 0) => v.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -45,7 +46,7 @@ function TopBar() {
   const current = ui.screen.value;
   return (
     <header class="fs-top">
-      <div class="fs-logo"><span>FLEXI</span>SENDER</div>
+      <div class="fs-logo"><img class="fs-mark" src={BEAR_MARK} alt="" /><span><span class="fs-bear">BEAR</span>SENDER</span></div>
       <nav class="fs-nav" aria-label="Screens">
         {SCREENS.map(([id, label]) => (
           <button type="button" class={'fs-nav-btn' + (current === id ? ' is-on' : '')} aria-current={current === id ? 'page' : undefined}

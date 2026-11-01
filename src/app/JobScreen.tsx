@@ -490,7 +490,7 @@ function RecorderPanel() {
           <div class="fs-strong">Stopped at line {num(record!.ln)}{lineSection?.name ? ' in ' + lineSection.name : ''}, with T{record!.tool}.</div>
           <div class="fs-soft fs-small">
             {fileMatches
-              ? 'Resume plan: FlexiSender lifts to the retract height, moves over the start of the line, starts the spindle and comes straight down, then carries on with the file. The dialog shows each move.'
+              ? 'Resume plan: BearSender lifts to the retract height, moves over the start of the line, starts the spindle and comes straight down, then carries on with the file. The dialog shows each move.'
               : 'Load the file it was running to resume it.'}
           </div>
           <button type="button" class="fs-btn-light" onClick={() => frOpenResume()}>{fileMatches ? 'RESUME FROM LINE ' + num(record!.ln) : 'RESUME…'}</button>
