@@ -27,6 +27,20 @@ export const fullView = signal(false);
 /** The Recorder panel shows every event read, not just the last few. */
 export const allEvents = signal(false);
 
+export type Popup = 'jog' | 'offsets' | 'probe' | 'measure' | 'frame' | 'tools' | 'recorder';
+/** The popup panel open over the screen, if any. */
+export const popup = signal<Popup | null>(null);
+/** The input signals shown on the position line. */
+export const signalsShown = signal(lsGet('fs-signals-shown', false));
+/** Setup lines the operator has ticked, by line. Cleared when a file loads or the link drops. */
+export const ticks = signal<Record<string, boolean>>({});
+
+effect(() => lsSet('fs-signals-shown', signalsShown.value));
+
+export function toggleTick(key: string): void {
+  ticks.value = { ...ticks.value, [key]: !ticks.value[key] };
+}
+
 effect(() => lsSet('fs-screen', screen.value));
 effect(() => lsSet('fs-setup-tab', setupTab.value));
 effect(() => lsSet('fs-settings-tab', settingsTab.value));

@@ -12,12 +12,14 @@ import * as messages from '../stores/messages';
 import * as flight from '../stores/flight';
 import * as ui from './ui';
 import { mode, nextSection, awaitedSection, toolLabel } from './mode';
-import { toggleConnect, rtSend } from '../connection';
+import { toggleConnect, rtSend, sendCmd } from '../connection';
 import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm } from '../streaming';
 import { alarmText } from '../parser';
 import { Legacy } from './Legacy';
 import { JobScreen } from './JobScreen';
+import { PopupHost } from './Popup';
 import { startCarriedScreens } from './carried';
+import { startAsks } from './asks';
 import { IconHome, IconReady, IconPlay, IconPause, IconStop, IconWrench, IconWarn, IconUnplugged } from './icons';
 
 const num = (v: number, digits = 0) => v.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -56,7 +58,8 @@ function TopBar() {
           {link === 'connected' ? 'DISCONNECT' : 'CONNECT'}
         </button>
         <button type="button" class="fs-btn" disabled={link !== 'connected'} onClick={() => sendReset()}>RESET</button>
-        <button type="button" class="fs-home" disabled={link !== 'connected' || m === 'running' || m === 'hold' || m === 'change'}
+        <button type="button" class={'fs-home' + (machine.homed.value ? ' is-homed' : '')} title={machine.homed.value ? 'Homed' : 'Not homed'}
+          disabled={link !== 'connected' || m === 'running' || m === 'hold' || m === 'change'}
           onClick={() => sendHome()}><IconHome />HOME</button>
       </div>
     </header>
@@ -88,23 +91,54 @@ function stateView(): StateView {
   }
 }
 
+const WCS_P: Record<string, number> = { G54: 1, G55: 2, G56: 3, G57: 4, G58: 5, G59: 6, 'G59.1': 7, 'G59.2': 8, 'G59.3': 9 };
+
+// Input pins (Pn:) shown on the position line: pin letters, short label, name. E-stop lights on E (grblHAL) or R,
+// and the toolsetter on T, as the old Signals panel had it.
+const SIGNALS: [string, string, string][] = [
+  ['X', 'X', 'X limit'], ['Y', 'Y', 'Y limit'], ['Z', 'Z', 'Z limit'], ['P', 'PRB', 'Probe'],
+  ['T', 'TLS', 'Toolsetter'], ['D', 'DOOR', 'Door'], ['ER', 'ESTOP', 'E-stop'],
+];
+
+function Signals() {
+  const pins = machine.pins.value.toUpperCase();
+  return (
+    <div role="group" aria-label="Input signals" class="fs-sigs">
+      {SIGNALS.map(([letters, label, name]) => {
+        const on = [...letters].some(l => pins.includes(l));
+        return <span class={'fs-sig' + (on ? ' is-on' : '')} title={name + (on ? ': active' : ': off')} aria-label={name + (on ? ', active' : ', off')}>{label}</span>;
+      })}
+    </div>
+  );
+}
+
 function PositionLine() {
   const view = stateView();
   const ref = ui.posRef.value;
   const pos = ref === 'work' ? machine.wpos.value : machine.mpos.value;
+  const wcs = machine.wcs.value;
+  // Set zeroes an axis in the active work offset. Only offered when the machine is idle.
+  const canSet = connection.connected.value && machine.stateName.value === 'idle' && !job.running.value;
   return (
-    <div class="fs-posline">
+    <div class={'fs-posline' + (ui.signalsShown.value ? ' has-sigs' : '')}>
       <div class={'fs-state' + (view.tone ? ' is-' + view.tone : '')}>
         {view.icon}
         <div><div class="fs-state-label">{view.label}</div><div class="fs-state-sub">{view.sub}</div></div>
       </div>
       <div role="group" aria-label="Position" class="fs-axes">
         {(['x', 'y', 'z'] as const).map(a => (
-          <div class="fs-axis"><span class="fs-axis-name">{a.toUpperCase()}</span><span class="fs-axis-value">{pos[a].toFixed(3)}</span></div>
+          <div class="fs-axis">
+            <span class="fs-axis-name">{a.toUpperCase()}</span><span class="fs-axis-value">{pos[a].toFixed(3)}</span>
+            {canSet && <button type="button" class="fs-set" title={`Zero ${a.toUpperCase()} in ${wcs} here (G10 L20)`}
+              onClick={() => sendCmd(`G10 L20 P${WCS_P[wcs] ?? 1} ${a.toUpperCase()}0`)}>SET {wcs}</button>}
+          </div>
         ))}
+        {ui.signalsShown.value && <Signals />}
       </div>
       <div class="fs-posref">
-        <span class="fs-wcs">{machine.wcs.value}</span>
+        <button type="button" class={'fs-btn fs-btn-sm' + (ui.signalsShown.value ? ' is-on' : '')} aria-pressed={ui.signalsShown.value ? 'true' : 'false'}
+          onClick={() => { ui.signalsShown.value = !ui.signalsShown.value; }}>SIGNALS</button>
+        <button type="button" class="fs-wcs" title="Work offsets" onClick={() => { ui.popup.value = 'offsets'; }}>{wcs}</button>
         {/* TO GO needs the end point of the executing line. The old parser can't give it reliably
             (no G91, G20 or G53), so it waits for step 2's interpreter. */}
         <div role="group" aria-label="Position reference" class="fs-seg">
@@ -128,20 +162,54 @@ function MessagesButton() {
   );
 }
 
+/** What to press for each alarm: the words, and whether HOME is the first thing to offer. */
+function alarmAction(code: number | null): { words: string; home: boolean } {
+  if (code === 11) return { words: 'Press HOME.', home: true };
+  if (code === 80) return { words: 'Check the tool, then UNLOCK; the Recorder panel can resume the job.', home: false };
+  if (code === 81) return { words: 'Check the machine, then UNLOCK.', home: false };
+  if (code === 1 || code === 3 || code === 10) return { words: 'Clear the cause, UNLOCK, then HOME.', home: false };
+  if (code === 2) return { words: 'Press UNLOCK; the position is kept.', home: false };
+  if (code === 4 || code === 5 || code === 13) return { words: 'Check the probe, then UNLOCK.', home: false };
+  if (code !== null && [6, 7, 8, 9, 15, 17].includes(code)) return { words: 'Check the switches, then HOME again.', home: true };
+  if (code === 12) return { words: 'Clear the limit switch, then UNLOCK.', home: false };
+  if (code === 16) return { words: 'Check the drives, then UNLOCK.', home: false };
+  if (code === null) return { words: 'The controller hasn\'t said why. UNLOCK, or HOME if it needs homing.', home: false };
+  return { words: 'Check the machine, then UNLOCK.', home: false };
+}
+
+/** Homing is on in $22, or $22 isn't known yet. */
+function homingOn(): boolean {
+  const v = parseInt(machine.settings.value[22] ?? '');
+  return isNaN(v) || (v & 1) === 1;
+}
+
 function MessageLine() {
   const m = mode.value;
   const file = job.file.value;
+  // The one next thing to do: connect, clear the alarm, home, load a program, then the job's own next step.
   if (m === 'alarm') {
     // After a lost link the ALARM: line came while FlexiSender was away; the flight record keeps the code.
     const record = flight.record.value;
     const code = machine.alarm.value ?? (job.result.value === 'link lost' && record?.alarm ? record.alarm : null);
     const text = code !== null ? alarmText(String(code)) : 'ALARM';
     const detail = text.includes(': ') ? text.slice(text.indexOf(': ') + 2) : 'The controller is in alarm.';
+    const action = alarmAction(code);
     return (
       <div role="alert" class="fs-msgline is-alarm">
         <span class="fs-msg-tag"><IconWarn size={18} />{code !== null ? 'ALARM ' + code : 'ALARM'}</span>
-        <span class="fs-msg-text">{detail} Check the machine, then unlock{file && code !== null && code >= 80 ? ' and resume' : ''}.</span>
+        <span class="fs-msg-text">{detail} {action.words}</span>
+        {action.home && <button type="button" class="fs-btn fs-btn-alarm" onClick={() => sendHome()}>HOME</button>}
         <button type="button" class="fs-btn fs-btn-alarm" onClick={() => unlockAlarm()}>UNLOCK</button>
+      </div>
+    );
+  }
+  if (m === 'ready' && machine.stateName.value === 'idle' && !machine.homed.value && homingOn()) {
+    return (
+      <div role="status" class="fs-msgline is-todo">
+        <span class="fs-msg-tag"><IconWarn size={18} />NOT HOMED</span>
+        <span class="fs-msg-text">The machine hasn't been homed since it started. Press <strong>HOME</strong>.</span>
+        <button type="button" class="fs-btn" onClick={() => sendHome()}>HOME</button>
+        <MessagesButton />
       </div>
     );
   }
@@ -215,6 +283,10 @@ function BottomBar() {
   };
   return (
     <footer class="fs-bottom">
+      <div class="fs-row-gap">
+        <button type="button" class="fs-btn fs-btn-tall" onClick={() => { ui.popup.value = 'jog'; }}>JOG</button>
+        <button type="button" class="fs-btn fs-btn-tall" onClick={() => { ui.popup.value = 'offsets'; }}>OFFSETS</button>
+      </div>
       <Override label="FEED" name="Feed" value={machine.feed.value} unit="mm/min" pct={ov.feed} down={'\x92'} up={'\x91'} />
       <Override label="SPINDLE" name="Spindle" value={machine.spindle.value} unit="rpm" pct={ov.spindle} down={'\x9B'} up={'\x9A'} />
       <div class="fs-ovr">
@@ -254,7 +326,7 @@ function SetupScreen() {
     <section class="fs-screen" hidden={ui.screen.value !== 'setup'}>
       <SubTabs tabs={SETUP_TABS} value={ui.setupTab} />
       <div class="fs-sub fs-sub-scroll" hidden={tab !== 'machine'}>
-        <Legacy class="fs-cards" ids={['mod-position', 'mod-jogging', 'mod-spindle', 'mod-overrides', 'mod-macros', 'mod-signals', 'mod-limits', 'mod-surfacing', 'mod-sdcard']} />
+        <Legacy class="fs-cards" ids={['mod-position', 'mod-jogging', 'mod-spindle', 'mod-overrides', 'mod-macros', 'mod-limits', 'mod-surfacing', 'mod-sdcard']} />
       </div>
       <div class="fs-sub" hidden={tab !== 'offsets'}><Legacy class="fs-legacy" ids={['tabpanel-offsets']} /></div>
       <div class="fs-sub" hidden={tab !== 'camera'}><Legacy class="fs-legacy" ids={['tabpanel-camera']} /></div>
@@ -279,7 +351,7 @@ function SettingsScreen() {
 export function App() {
   const s = ui.screen.value;
   // After the first render, so the carried-over panels are in their screens.
-  useEffect(() => startCarriedScreens(), []);
+  useEffect(() => { startCarriedScreens(); startAsks(); }, []);
   return (
     <div class="fs-shell">
       <TopBar />
@@ -291,6 +363,7 @@ export function App() {
       <section class="fs-screen" hidden={s !== 'tools'}><Legacy class="fs-legacy" ids={['tabpanel-tooltable']} /></section>
       <SettingsScreen />
       <BottomBar />
+      <PopupHost />
     </div>
   );
 }

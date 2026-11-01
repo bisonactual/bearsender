@@ -16,7 +16,9 @@ Fed by parser.ts, connection.ts, streaming.ts, gcode.ts, offsets.ts, tooltable.t
 ## src/app/
 The shell (Preact). `App.tsx`: top bar, position line, message line, the five screens, bottom bar. `JobScreen.tsx`:
 Current Job strip, Jobs list, the switchable panel (Setup checks, Program, Recorder, Preview, Messages) with AUTO.
-`mode.ts`: what the job screen shows, worked out from the stores. `toolscan.ts`: TEMPORARY T…M6 scan until the G-code
+`Popup.tsx`: the popups (jog, offsets, probe, measure, frame, tool table, recorder settings), which borrow
+carried-over panels and put them back on close. `asks.ts`: what the shell reads by itself on connect ($22, $130-$132,
+$TTLIST) and when the operator's ticks reset. `mode.ts`: what the job screen shows, worked out from the stores. `toolscan.ts`: TEMPORARY T…M6 scan until the G-code
 interpreter. `Legacy.tsx`: moves a carried-over DOM panel from `#legacy` into a screen. `carried.ts`: the old screens'
 start-up (what switchTab did). `ui.ts`: which screen, sub-tab and panel are showing.
 

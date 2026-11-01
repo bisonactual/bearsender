@@ -1232,6 +1232,7 @@
   .fs-nav-btn.is-on { border-bottom-color: var(--tab-active); color: var(--text); font-weight: 700; }
   .fs-link { font-family: var(--mono); font-size: 13px; color: var(--text2); }
   .fs-top-actions { display: flex; gap: 8px; }
+  .fs-home.is-homed { border-color: var(--green); background: rgba(34, 197, 94, 0.15); color: var(--go-text); }
   .fs-home { height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 8px; border: 2px solid var(--accent2); background: #2a1a0e; color: var(--accent); font-family: var(--cond) !important; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; }
 
   /* Position line */
@@ -1247,7 +1248,19 @@
   .fs-axis-name { font-family: var(--cond); font-size: 18px; font-weight: 700; color: var(--text2); }
   .fs-axis-value { font-family: var(--mono); font-size: 36px; line-height: 1.1; }
   .fs-posref { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-  .fs-wcs { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px; background: var(--accent); color: #1a1208; font-family: var(--mono); font-size: 16px; font-weight: 700; }
+  .fs-wcs { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--accent); color: #1a1208; font-family: var(--mono) !important; font-size: 16px; font-weight: 700; }
+  .fs-set { align-self: center; height: 26px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--accent2); background: none; color: var(--accent); font-family: var(--cond) !important; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; white-space: nowrap; }
+  .fs-set:hover { background: #2a1a0e; }
+  .fs-btn.is-on { border-color: var(--text); }
+  .fs-btn-tall { height: 44px; }
+  /* Signals sit inline after Z, two rows high; the line tightens while they show. */
+  .fs-sigs { align-self: center; display: grid; grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 3px 4px; }
+  .fs-sig { padding: 1px 5px; border-radius: 5px; border: 1px solid var(--border2); color: var(--text2); font-family: var(--cond); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-align: center; }
+  .fs-posline.has-sigs { gap: 10px 16px; }
+  .fs-posline.has-sigs .fs-axes { gap: 6px 18px; }
+  .fs-posline.has-sigs .fs-axis { min-width: 0; gap: 6px; }
+  .fs-posline.has-sigs .fs-axis-value { font-size: 28px; }
+  .fs-sig.is-on { border-color: var(--warn-text); background: var(--warn-text); color: #1a1208; }
   .fs-seg { display: flex; border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
   .fs-seg button { height: 44px; padding: 0 14px; border: 0; background: var(--surface); color: var(--text-mid); font-family: var(--cond) !important; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; }
   .fs-seg button.is-on { background: var(--text); color: var(--bg); }
@@ -1259,6 +1272,8 @@
   .fs-msg-tag { display: flex; align-items: center; gap: 8px; font-family: var(--cond); font-size: 17px; font-weight: 700; letter-spacing: 0.12em; }
   .fs-msgline.is-action { background: var(--text); color: var(--bg); border-bottom: 0; }
   .fs-msgline.is-action .fs-msg-text, .fs-msgline.is-action strong { color: var(--bg); }
+  .fs-msgline.is-todo { background: rgba(251, 191, 36, 0.12); }
+  .fs-msgline.is-todo .fs-msg-tag { color: var(--warn-text); }
   .fs-msgline.is-alarm { background: #b91c1c; color: #fff; border-bottom: 0; }
   .fs-msgline.is-alarm .fs-msg-text { color: #fff; }
   .fs-btn-alarm { border: 2px solid #fff; background: #b91c1c; color: #fff; letter-spacing: 0.06em; }
@@ -1330,8 +1345,16 @@
   .fs-panel-title { font-size: 14px; color: var(--text2); }
   .fs-check { display: flex; align-items: center; gap: 10px; min-height: 40px; border-top: 1px solid var(--surface3); }
   .fs-check-icon { width: 18px; display: flex; justify-content: center; color: var(--text); flex: none; }
-  .fs-check.is-ok .fs-check-icon, .fs-check.is-ok .fs-check-main { color: var(--text-mid); }
-  .fs-check.is-unknown .fs-check-icon { color: var(--text2); }
+  /* Setup lines: green done or ticked, yellow to do, red failed; the icon says the same without colour. */
+  .fs-check { padding-left: 8px; border-left: 3px solid transparent; }
+  .fs-check.is-done { border-left-color: var(--green); }
+  .fs-check.is-done .fs-check-icon { color: var(--go-text); }
+  .fs-check.is-todo { border-left-color: var(--warn-text); }
+  .fs-check.is-todo .fs-check-icon { color: var(--warn-text); }
+  .fs-check.is-fail { border-left-color: var(--red); background: rgba(239, 68, 68, 0.08); }
+  .fs-check.is-fail .fs-check-icon, .fs-check.is-fail .fs-check-main { color: var(--stop-text); }
+  .fs-tick { flex: none; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 8px; border: 1px solid var(--border2); background: var(--bg); color: var(--go-text); }
+  .fs-tick.is-on { border-color: var(--green); background: rgba(34, 197, 94, 0.15); }
   .fs-check-text { flex: 1 1 auto; min-width: 0; }
   .fs-check-detail { font-size: 13px; color: var(--text2); }
   .fs-code { margin-top: 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); padding: 6px 0; font-family: var(--mono); font-size: 15px; }
@@ -1356,6 +1379,26 @@
   .fs-view-wrap .fs-view { flex: 1; min-width: 0; display: flex; font-size: 13px; line-height: normal; }
   .fs-view-wrap.is-full { position: fixed; inset: 0; height: auto; z-index: 900; border-radius: 0; border: 0; }
   .fs-view-close { position: absolute; top: 8px; right: 12px; z-index: 5; }
+
+  /* Popups: the carried-over setup tools over the screen */
+  .fs-popup-back { position: fixed; inset: 0; z-index: 800; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, 0.6); }
+  .fs-popup { max-width: min(1200px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border2); border-radius: 14px; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7); overflow: hidden; }
+  .fs-popup.is-tall { width: min(1200px, 100%); height: min(760px, 100%); }
+  .fs-popup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .fs-popup-cards { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; padding: 16px; overflow: auto; font-size: 13px; line-height: normal; }
+  .fs-popup-tall { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 13px; line-height: normal; }
+
+  /* Narrow screens: tighter position line, so the signals still fit on it */
+  @media (max-width: 1280px) {
+    .fs-posline { gap: 8px 16px; padding: 8px 12px; }
+    .fs-state { min-width: 150px; }
+    .fs-axes { flex-basis: 420px; gap: 4px 18px; }
+    .fs-axis { min-width: 0; gap: 6px; }
+    .fs-axis-value { font-size: 28px; }
+    .fs-posline.has-sigs .fs-axis-value { font-size: 24px; }
+    .fs-seg button { padding: 0 10px; font-size: 13px; }
+    .fs-posref .fs-btn-sm { padding: 0 8px; }
+  }
 
   /* Bottom bar */
   .fs-bottom { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }

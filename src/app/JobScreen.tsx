@@ -13,14 +13,9 @@ import * as ui from './ui';
 import { mode, panel, scan, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel } from './mode';
 import type { ToolSection } from './toolscan';
 import { Legacy } from './Legacy';
-import { sendCmd } from '../connection';
-import { sendHome } from '../streaming';
-import { frameProgram } from '../gcode';
-import { loadToolTable } from '../tooltable';
-import { loadOffsets } from '../offsets';
 import { frOpenResume, frLoadEvents, frClearEvents, frReadRecord } from '../flight-recorder';
 import { jobId } from '../flight-recorder-resume';
-import { IconChevron, IconBell, IconCheck, IconTodo, IconUnknown, IconWarn } from './icons';
+import { IconChevron, IconBell, IconCheck, IconTodo, IconWarn } from './icons';
 
 const num = (v: number) => v.toLocaleString('en-GB');
 const mm = (v: number) => (Math.round(v * 1000) / 1000).toLocaleString('en-GB', { maximumFractionDigits: 3 });
@@ -208,103 +203,187 @@ function JobsList() {
 }
 
 // ── Panel: Setup ──────────────────────────────────────────────────────────────
+//
+// The job's setup, and the way into the setup tools. Every line reads its own state, says what's done
+// and what's left, takes a tick from the operator, and opens the tool for it. Informational only:
+// nothing here stops Start or anything else.
 
-type CheckState = 'ok' | 'todo' | 'unknown';
-interface Check { state: CheckState; text: string; detail?: string; action?: string; onAction?: () => void; disabled?: boolean; }
+/** done = green, todo = yellow, fail = red. */
+type Tone = 'done' | 'todo' | 'fail';
+
+interface Check {
+  key: string;
+  tone: Tone;
+  text: string;
+  detail?: string;
+  actions?: [string, ui.Popup][];
+  /** What the tick means on this line, when it isn't just "confirmed". */
+  tickWord?: string;
+  noTick?: boolean;
+}
+
+const vec = (o: machine.Vec3) => `X ${mm(o.x)} Y ${mm(o.y)} Z ${mm(o.z)}`;
+const same = (a: machine.Vec3, b: machine.Vec3) => Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.y - b.y) < 1e-4 && Math.abs(a.z - b.z) < 1e-4;
+
+function offsetCheck(): Check {
+  const wcs = machine.wcs.value;
+  const key = 'offset:' + wcs;
+  const actions: [string, ui.Popup][] = [['PROBE', 'probe'], ['SET ZERO', 'jog']];
+  if (!connection.connected.value) return { key, tone: 'todo', text: `Work offset ${wcs}`, detail: 'read when the controller connects', actions };
+  if (!machine.offsetsRead.value) return { key, tone: 'todo', text: `Reading work offset ${wcs}…`, actions };
+  const off = machine.offsets.value[wcs] ?? { x: 0, y: 0, z: 0 };
+  const before = machine.offsetsAtConnect.value?.[wcs];
+  const how = machine.offsetWrites.value[wcs];
+  // Set this session: written by a command, or different from what the controller held when FlexiSender connected.
+  if (how || (before && !same(before, off))) {
+    return { key, tone: 'done', text: how === 'zeroed' ? `${wcs} set: zeroed this session.` : `${wcs} set, probed.`, detail: vec(off), actions };
+  }
+  // All zeros is taken as not set.
+  if (!off.x && !off.y && !off.z) return { key, tone: 'todo', text: `${wcs} is not set. Probe or set up the workpiece.`, detail: 'all zeros', actions };
+  return { key, tone: 'todo', text: `${wcs} set. Probe or set up the workpiece.`, detail: vec(off) + ', from before this session', actions };
+}
+
+function tloCheck(): Check {
+  const key = 'tlo';
+  const actions: [string, ui.Popup][] = [['MEASURE', 'measure']];
+  const tlo = machine.tlo.value;
+  if (!connection.connected.value) return { key, tone: 'todo', text: 'Tool length offset', detail: 'read when the controller connects', actions };
+  if (tlo === null) return { key, tone: 'todo', text: 'Reading the tool length offset…', actions };
+  if (tlo === 0) return { key, tone: 'todo', text: 'Set TLO: measure the tool.', detail: 'the offset is 0', actions };
+  const tool = machine.tool.value;
+  return { key, tone: 'done', text: `TLO set: ${tool ? 'T' + tool + ', ' : ''}${mm(tlo)} mm`, actions };
+}
+
+function toolCheck(): Check {
+  const key = 'tool';
+  const first = scan.value.sections[0];
+  if (!job.file.value) return { key, tone: 'todo', text: 'Tool in the spindle', detail: 'load a program to see its first tool' };
+  if (!first) return { key, tone: 'todo', text: 'Check the tool in the spindle', detail: 'the program names no tool' };
+  const label = toolLabel(first.tool);
+  const tool = machine.tool.value;
+  if (tool === first.tool) return { key, tone: 'done', text: label + ' is in the spindle' };
+  if (tool === null) return { key, tone: 'todo', text: 'Load ' + label, detail: connection.connected.value ? 'reading the tool in the spindle…' : 'connect to read the tool in the spindle' };
+  return { key, tone: 'todo', text: 'Load ' + label, detail: tool === 0 ? 'the controller reports no tool (T0)' : `the spindle has T${tool}` };
+}
+
+function toolTableCheck(): Check {
+  const key = 'tooltable';
+  const tools = [...new Set(scan.value.sections.map(s => s.tool))];
+  const table = machine.toolTable.value;
+  if (machine.toolTableError.value) {
+    return { key, tone: 'todo', text: 'No tool table on this controller', detail: `$TTLIST isn't supported (${machine.toolTableError.value}); check the tools by hand` };
+  }
+  const actions: [string, ui.Popup][] = [['TOOLS', 'tools']];
+  if (table === null) return { key, tone: 'todo', text: 'Tool table', detail: connection.connected.value ? 'reading it…' : 'read when the controller connects', actions };
+  if (!tools.length) return { key, tone: 'todo', text: 'Tool table read', detail: job.file.value ? 'the program names no tools' : 'load a program to check its tools', actions };
+  const missing = tools.filter(t => !table.some(e => e.tool === t));
+  return missing.length
+    ? { key, tone: 'fail', text: `${missing.length} of ${tools.length} tools are not in the tool table`, detail: missing.map(t => 'T' + t).join(', '), actions }
+    : { key, tone: 'done', text: `All ${tools.length} tools are in the tool table`, detail: tools.map(t => 'T' + t).join(', '), actions };
+}
 
 function travelCheck(): Check {
+  const key = 'travel';
+  const actions: [string, ui.Popup][] = [['FRAME', 'frame']];
+  const tickWord = 'framed';
   const limits = job.limits.value;
-  const settings = machine.settings.value;
-  const travel = [130, 131, 132].map(id => parseFloat(settings[id] ?? ''));
-  const text = 'Program fits the machine travel';
-  if (!job.file.value || !limits) return { state: 'unknown', text, detail: 'not checked yet: no program loaded' };
-  const first = limits.order[0];
-  const range = first ? limits.perWcs[first] : limits.overall;
-  const work = range ? `X ${mm(range.xMin)} to ${mm(range.xMax)}, Y ${mm(range.yMin)} to ${mm(range.yMax)}, Z ${mm(range.zMin)} to ${mm(range.zMax)}` : '';
+  const travel = [130, 131, 132].map(id => parseFloat(machine.settings.value[id] ?? ''));
+  if (!job.file.value || !limits) return { key, tone: 'todo', text: 'Program fits the machine travel', detail: 'load a program to check it', actions, tickWord };
   if (travel.some(isNaN)) {
-    return { state: 'unknown', text, detail: 'not checked yet: travel $130–$132 not read', action: 'READ', disabled: !connection.connected.value,
-      onAction: () => { for (const id of [130, 131, 132]) sendCmd('$' + id); } };
+    return { key, tone: 'todo', text: 'Program fits the machine travel', detail: connection.connected.value ? 'reading the travel ($130–$132)…' : 'connect to read the travel', actions, tickWord };
   }
-  if (!machine.offsetsRead.value) return { state: 'unknown', text, detail: 'not checked yet: offsets not read', action: 'READ', disabled: !connection.connected.value, onAction: () => loadOffsets() };
+  if (!machine.offsetsRead.value) return { key, tone: 'todo', text: 'Program fits the machine travel', detail: 'reading the work offsets…', actions, tickWord };
   // Machine travel taken as −$13x to 0, grblHAL's default with homing to the top of each axis.
   const over: string[] = [];
   for (const code of limits.order) {
     const r = limits.perWcs[code], o = machine.offsets.value[code];
     if (!r || !o) continue;
-    const axes: [string, boolean, number, number, number, number][] = [
-      ['X', r.hasX, r.xMin + o.x, r.xMax + o.x, travel[0], 0], ['Y', r.hasY, r.yMin + o.y, r.yMax + o.y, travel[1], 0], ['Z', r.hasZ, r.zMin + o.z, r.zMax + o.z, travel[2], 0],
+    const axes: [string, boolean, number, number, number][] = [
+      ['X', r.hasX, r.xMin + o.x, r.xMax + o.x, travel[0]], ['Y', r.hasY, r.yMin + o.y, r.yMax + o.y, travel[1]], ['Z', r.hasZ, r.zMin + o.z, r.zMax + o.z, travel[2]],
     ];
     for (const [axis, has, lo, hi, len] of axes) {
       if (!has) continue;
-      if (lo < -len - 0.001) over.push(`${axis} ${mm(-len - lo)} mm below the travel (${code})`);
-      if (hi > 0.001) over.push(`${axis} ${mm(hi)} mm above machine zero (${code})`);
+      if (lo < -len - 0.001) over.push(`${axis} goes ${mm(-len - lo)} mm past the end of the travel (${code})`);
+      if (hi > 0.001) over.push(`${axis} goes ${mm(hi)} mm past machine zero (${code})`);
     }
   }
-  return over.length ? { state: 'todo', text: 'Program does not fit the machine travel', detail: over.join(', ') } : { state: 'ok', text, detail: work };
+  const first = limits.order[0];
+  const range = first ? limits.perWcs[first] : limits.overall;
+  const work = range ? `X ${mm(range.xMin)} to ${mm(range.xMax)}, Y ${mm(range.yMin)} to ${mm(range.yMax)}, Z ${mm(range.zMin)} to ${mm(range.zMax)}` : '';
+  return over.length
+    ? { key, tone: 'fail', text: 'Program goes outside the machine travel', detail: over.join('; '), actions, tickWord }
+    : { key, tone: 'done', text: 'Program fits the machine travel', detail: work, actions, tickWord };
+}
+
+function recorderCheck(): Check {
+  const key = 'recorder';
+  const actions: [string, ui.Popup][] = [['SETTINGS', 'recorder']];
+  const fr = flight.plugin.value;
+  if (!connection.connected.value) return { key, tone: 'todo', text: 'Flight recorder', detail: 'checked when the controller connects', actions };
+  if (!fr) return { key, tone: 'todo', text: 'No flight recorder on this controller', detail: 'jobs run without a record', actions };
+  if (!fr.storage) return { key, tone: 'fail', text: 'Flight recorder has no FRAM', detail: `plugin v${fr.version} found, but no storage for the record`, actions };
+  if (!flight.enabled.value) return { key, tone: 'todo', text: 'Flight recorder is off', detail: `plugin v${fr.version} found; turn it on in its settings`, actions };
+  return { key, tone: 'done', text: 'Flight recorder ready', detail: `plugin v${fr.version}, FRAM found`, actions };
+}
+
+function changeChecks(): Check[] {
+  const s = awaitedSection.value;
+  const sections = scan.value.sections;
+  const entry = s && machine.toolTable.value?.find(e => e.tool === s.tool);
+  const key = 'change:' + (s ? s.tool + ':' + s.changeLine : '?') + ':';
+  const spinning = machine.spindle.value > 0;
+  const tlo = machine.tlo.value;
+  return [
+    { key: key + 'spindle', tone: spinning ? 'fail' : 'done', text: spinning ? `Spindle still turning at ${num(machine.spindle.value)} rpm` : 'Spindle stopped',
+      detail: 'tool at machine Z ' + machine.mpos.value.z.toFixed(3) },
+    { key: key + 'load', tone: 'todo', text: 'Load ' + (s ? toolLabel(s.tool) : 'the next tool'), detail: entry && entry.pocket ? 'pocket ' + entry.pocket : '' },
+    { key: key + 'measure', tone: 'todo', text: 'Measure the tool length', detail: tlo ? `TLO now ${mm(tlo)} mm` : '', actions: [['MEASURE', 'measure']] },
+    { key: key + 'resume', tone: 'todo', text: 'Press Resume', detail: s && sections[sections.indexOf(s)]?.name ? sections[sections.indexOf(s)].name + ' starts' : '', noTick: true },
+  ];
 }
 
 function setupChecks(): Check[] {
-  const linked = connection.connected.value;
-  const sections = scan.value.sections;
-  if (mode.value === 'change') {
-    const s = awaitedSection.value;
-    const entry = s && machine.toolTable.value?.find(e => e.tool === s.tool);
-    const next = s ? sections[sections.indexOf(s)] : null;
-    return [
-      { state: machine.spindle.value === 0 ? 'ok' : 'todo', text: machine.spindle.value === 0 ? 'Spindle stopped' : 'Spindle still turning', detail: 'tool at machine Z ' + machine.mpos.value.z.toFixed(3) },
-      { state: 'todo', text: 'Load ' + (s ? toolLabel(s.tool) : 'the next tool'), detail: entry && entry.pocket ? 'pocket ' + entry.pocket : '' },
-      { state: 'unknown', text: 'Measure the tool length', detail: 'not checked yet', action: 'MEASURE', onAction: () => { ui.screen.value = 'probing'; } },
-      { state: 'todo', text: 'Press Resume', detail: next?.name ? next.name + ' starts' : '' },
-    ];
-  }
-  const wcs = machine.wcs.value;
-  const off = machine.offsets.value[wcs];
-  const tools = [...new Set(sections.map(s => s.tool))];
-  const table = machine.toolTable.value;
-  const missing = table ? tools.filter(t => !table.some(e => e.tool === t)) : [];
-  const first = sections[0];
-  const fr = flight.plugin.value;
-  const checks: Check[] = [
-    { state: linked ? 'ok' : 'todo', text: linked ? 'Connected' : 'Not connected', detail: linked ? connection.address.value : 'press CONNECT in the top bar' },
-    machine.homed.value
-      ? { state: 'ok', text: 'Machine homed' }
-      : { state: 'todo', text: 'Machine homed', detail: linked ? 'not homed this session' : '', action: 'HOME', disabled: !linked || mode.value !== 'ready' && mode.value !== 'alarm', onAction: () => sendHome() },
-    !machine.offsetsRead.value
-      ? { state: 'unknown', text: `Work offset ${wcs} set`, detail: 'not checked yet: $# not read', action: 'READ', disabled: !linked, onAction: () => loadOffsets() }
-      : off && (off.x || off.y || off.z)
-        ? { state: 'ok', text: `Work offset ${wcs} set`, detail: `X ${mm(off.x)} Y ${mm(off.y)} Z ${mm(off.z)}`, action: 'PROBE', onAction: () => { ui.screen.value = 'probing'; } }
-        : { state: 'todo', text: `Work offset ${wcs} set`, detail: `${wcs} is all zeros`, action: 'PROBE', onAction: () => { ui.screen.value = 'probing'; } },
-    first
-      ? machine.tool.value === first.tool
-        ? { state: 'ok', text: toolLabel(first.tool) + ' in the spindle', detail: 'length not checked yet', action: 'MEASURE', onAction: () => { ui.screen.value = 'probing'; } }
-        : { state: 'todo', text: 'Load ' + toolLabel(first.tool), detail: machine.tool.value === null ? 'the controller has not said which tool is in' : 'T' + machine.tool.value + ' is in the spindle', action: 'MEASURE', onAction: () => { ui.screen.value = 'probing'; } }
-      : { state: 'unknown', text: 'Tool in the spindle', detail: 'not checked yet: no T…M6 in the program' },
-    table === null
-      ? { state: 'unknown', text: tools.length ? `All ${tools.length} tools are in the tool table` : 'Tools are in the tool table', detail: 'not checked yet: $TTLIST not answered', action: 'READ', disabled: !linked, onAction: () => loadToolTable() }
-      : missing.length
-        ? { state: 'todo', text: `${missing.length} of ${tools.length} tools missing from the tool table`, detail: missing.map(t => 'T' + t).join(', ') }
-        : { state: 'ok', text: `All ${tools.length} tools are in the tool table`, detail: tools.map(t => 'T' + t).join(', ') },
-    travelCheck(),
-    { state: 'todo', text: 'Frame the program', detail: 'optional, traces the outline at Safe Z (set on Setup, Program Limits)', action: 'FRAME', disabled: !linked || !job.file.value || mode.value !== 'ready', onAction: () => frameProgram() },
-    fr && fr.storage && flight.enabled.value
-      ? { state: 'ok', text: 'Flight recorder ready', detail: `plugin v${fr.version}, FRAM found` }
-      : { state: 'todo', text: 'Flight recorder ready', detail: !linked ? 'not connected' : !fr ? 'no Flight Recorder plugin on this controller' : !fr.storage ? 'the plugin found no FRAM' : 'switched off in Settings, Flight recorder' },
-  ];
-  return checks;
+  if (mode.value === 'change') return changeChecks();
+  return [offsetCheck(), tloCheck(), toolCheck(), toolTableCheck(), travelCheck(), recorderCheck()];
 }
+
+const TONE_WORD: Record<Tone, string> = { done: 'done', todo: 'to do', fail: 'failed' };
 
 function SetupPanel() {
   const checks = setupChecks();
+  const ticks = ui.ticks.value;
+  // A tick confirms a line: it turns green whatever the reading said, and keeps the reading's words.
+  const tones = checks.map(c => (!c.noTick && ticks[c.key]) ? 'done' as Tone : c.tone);
+  const count = (t: Tone) => tones.filter(x => x === t).length;
   return (
     <div>
-      <div class="fs-panel-title">{mode.value === 'change' ? 'Tool change' : 'Before you start'}</div>
-      {checks.map(c => (
-        <div class={'fs-check is-' + c.state}>
-          <span class="fs-check-icon">{c.state === 'ok' ? <IconCheck /> : c.state === 'todo' ? <IconTodo /> : <IconUnknown />}</span>
-          <span class="fs-check-text"><span class="fs-check-main">{c.text}</span> <span class="fs-check-detail">{c.detail}</span></span>
-          {c.action && <button type="button" class="fs-btn fs-btn-xs" disabled={c.disabled} onClick={c.onAction}>{c.action}</button>}
-        </div>
-      ))}
+      <div class="fs-panel-title">
+        {mode.value === 'change' ? 'Tool change' : 'Before you start'} · {count('done')} done, {count('todo')} to do{count('fail') ? ', ' + count('fail') + ' failed' : ''}
+      </div>
+      {checks.map((c, i) => {
+        const tone = tones[i];
+        const ticked = !c.noTick && !!ticks[c.key];
+        return (
+          <div class={'fs-check is-' + tone}>
+            <span class="fs-check-icon" role="img" aria-label={TONE_WORD[tone]} title={TONE_WORD[tone]}>
+              {tone === 'done' ? <IconCheck /> : tone === 'fail' ? <IconWarn size={15} /> : <IconTodo />}
+            </span>
+            <span class="fs-check-text">
+              <span class="fs-check-main">{c.text}</span>{' '}
+              <span class="fs-check-detail">{[c.detail, ticked ? (c.tickWord ?? 'confirmed') : ''].filter(Boolean).join(' · ')}</span>
+            </span>
+            {c.actions?.map(([label, popup]) => (
+              <button type="button" class="fs-btn fs-btn-xs" onClick={() => { ui.popup.value = popup; }}>{label}</button>
+            ))}
+            {!c.noTick && (
+              <button type="button" class={'fs-tick' + (ticked ? ' is-on' : '')} aria-pressed={ticked ? 'true' : 'false'}
+                title={ticked ? 'Ticked: ' + (c.tickWord ?? 'confirmed') : 'Tick to confirm this line'} aria-label={'Confirm: ' + c.text}
+                onClick={() => ui.toggleTick(c.key)}>{ticked ? <IconCheck /> : null}</button>
+            )}
+          </div>
+        );
+      })}
+      <div class="fs-note-sm">For your information: none of these stops Start. A tick is yours, and stays until a new file is loaded or the link drops.</div>
     </div>
   );
 }
