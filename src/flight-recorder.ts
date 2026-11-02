@@ -20,10 +20,14 @@ import { lsGet, lsSet, esc } from './ui';
 import { streamLines, type SendLine } from './streaming';
 import { errorText } from './errors';
 import { on as onBus } from './bus';
-import { jobId, numberedLine, programLines, modalScan, resumePreamble, resumeStart, ResumeRefused } from './flight-recorder-resume';
-import { batch } from '@preact/signals';
+import { jobId, numberedLine, resumeState, describeState, resumePreamble, resumeStart, ResumeRefused } from './flight-recorder-resume';
+import { batch, effect, untracked } from '@preact/signals';
 import * as flight from './stores/flight';
 import * as messages from './stores/messages';
+import * as job from './stores/job';
+import * as machine from './stores/machine';
+import { context, programText } from './stores/program';
+import { loadOffsets } from './offsets';
 
 export interface FlightRecord {
   state: string;      // Idle, Running, Stopped, Retracted, Completed
@@ -238,19 +242,40 @@ function maybeOfferResume(): void {
 
 // ── Resume ────────────────────────────────────────────────────────────────────
 
-interface ResumePlan { preamble: string[]; index: number; first: string; }
+interface ResumePlan { preamble: string[]; index: number; first: string; modes: string; }
 
 function retractZ(): number {
   const depth = parseFloat(state.settingsValues[792] ?? '');
   return isNaN(depth) ? -20 : -depth;
 }
 
-function buildPlan(record: FlightRecord): ResumePlan | string {
+// The moves back in go to machine positions, which take the work offsets and the tool length: the plan
+// waits for this connection's $# (the record can come first), and the dialog fills in when it has.
+let _planWaiting = false;
+effect(() => {
+  if (!machine.offsetsRead.value) return;
+  // offsets.ts flags the read before it copies the table into the store: rebuild once it has.
+  untracked(() => setTimeout(() => {
+    const modal = document.getElementById('frModal');
+    if (_planWaiting && modal && modal.style.display !== 'none') frOpenResume();
+    _planWaiting = false;
+  }, 0));
+});
+
+function buildPlan(record: FlightRecord): ResumePlan | null | string {
+  if (!machine.offsetsRead.value || !machine.offsets.value[record.wcs]) {
+    _planWaiting = true;
+    if (state.connected) loadOffsets();
+    return null;
+  }
   try {
-    const modes = modalScan(programLines(state.gcodeLines), record.ln);
-    const start = resumeStart(state.gcodeLines, record.ln, modes);
-    const preamble = resumePreamble(record.job, !!(record.flags & FLAG_NO_RETRACT), modes, retractZ());
-    return { preamble, index: start.index, first: start.first };
+    // The lines as they were sent, read with the controller as it is now, but not from where the
+    // machine is now: the job started from somewhere else, so the start stays unknown.
+    const s = resumeState(programText(state.gcodeLines), record.ln, context(false));
+    const start = resumeStart(state.gcodeLines, record.ln, s.motion);
+    const preamble = resumePreamble(record.job, !!(record.flags & FLAG_NO_RETRACT), s, retractZ());
+    log('info', `✈ Resume plan from line ${record.ln}: modal state from the interpreter: ${describeState(s)}; machine X${s.position.x!.toFixed(3)} Y${s.position.y!.toFixed(3)} Z${s.position.z!.toFixed(3)}`);
+    return { preamble, index: start.index, first: start.first, modes: describeState(s) };
   } catch (e: any) {
     if (e instanceof ResumeRefused) return e.message;
     throw e;
@@ -322,13 +347,16 @@ export function frOpenResume(): void {
   }
 
   const plan = buildPlan(record);
-  const file = document.getElementById('fileName')?.textContent || 'the loaded file';
+  const file = job.file.value || 'the loaded file';
   const toolText = record.tool
     ? `The job was using <b>T${record.tool}</b>. Check that tool is in the spindle, with its length offset set.`
     : 'Check the right tool is in the spindle, with its length offset set.';
-  const planHtml = typeof plan === 'string'
+  const planHtml = plan === null
+    ? '<div class="fr-step-text">Reading the work offsets and the tool length from the controller ($#); the moves back in show here once they are in.</div>'
+    : typeof plan === 'string'
     ? `<div class="fr-refused">This job can't be resumed automatically: ${esc(plan)}.</div>`
-    : `<pre class="fr-plan">${plan.preamble.map(esc).join('\n')}\n<span class="fr-plan-first">${esc(plan.first)}</span>   ← then on from here</pre>`;
+    : `<div class="fr-step-text">The program's state before line ${record.ln}, read by the interpreter: ${esc(plan.modes)}.</div>` +
+      `<pre class="fr-plan">${plan.preamble.map(esc).join('\n')}\n<span class="fr-plan-first">${esc(plan.first)}</span>   ← then on from here</pre>`;
 
   body.innerHTML = summary +
     `<div class="fr-step"><div class="fr-step-title">1. Clear the alarm</div>` +

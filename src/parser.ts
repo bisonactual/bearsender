@@ -10,12 +10,11 @@ import { log } from './console';
 import { _updateHomeBtnHomed, rtSend } from './connection';
 import { endRunOnAlarm } from './streaming';
 import { reportMm } from './units';
-import { updateExecutedPath, toolGroup } from './viewport';
+import { toolGroup } from './viewport';
 import { renderToolTable, renderModTT } from './tooltable';
 import { ezParseStatus } from './exclusion-zones';
 import { emit, type StatusReport } from './bus';
 import { loadOffsets } from './offsets';
-import { segmentsUpToLine } from './gcode';
 import * as command from './command';
 import { batch } from '@preact/signals';
 import * as machine from './stores/machine';
@@ -101,10 +100,8 @@ function parseStatusReport(s: string): void {
       const ln = parseInt(vals[0]);
       report.ln = ln;
       tags.add('ln');
+      // The Preview follows it (src/app/Preview.tsx).
       job.reportedLine.value = ln;
-      // A numbered job's Ln is a line of the file, otherwise it's taken as a segment count.
-      state.segmentIndex = state.jobNumbered ? segmentsUpToLine(ln) : ln;
-      updateExecutedPath(state.segmentIndex);
     }
     if (key === 'Bf') {
       report.bf = { blocks: vals[0], bytes: vals[1] };
@@ -182,6 +179,12 @@ export function setMachineState(s: string): void {
   // An alarm: not homed until the controller's H: says otherwise (the full report asked for on ALARM:).
   if (sl === 'alarm' && state._prevMachineStateSl !== 'alarm') { state.machineHomed = false; machine.homed.value = false; _updateHomeBtnHomed(); }
   if (sl === 'idle' && state._prevMachineStateSl === 'home') { state.machineHomed = true; _updateHomeBtnHomed(); }
+  // $# can be refused in the power-up alarm, so the offsets read on connect may not have come: read them
+  // once the machine is idle (homed or unlocked). The sim refused the first $ command after homing
+  // (error:71) and took the next, so a refusal gets one more try.
+  if (sl === 'idle' && state._prevMachineStateSl !== 'idle' && !machine.offsetsRead.value && state.connected) {
+    loadOffsets().then(() => { if (!machine.offsetsRead.value) setTimeout(() => { if (state.connected && !machine.offsetsRead.value) loadOffsets(); }, 1000); });
+  }
   state._prevMachineStateSl = sl;
 }
 

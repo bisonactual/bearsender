@@ -9,8 +9,9 @@ import * as job from '../stores/job';
 import * as messages from '../stores/messages';
 import * as flight from '../stores/flight';
 import * as camera from '../stores/camera';
+import * as program from '../stores/program';
+import type { ToolRow } from '../stores/program';
 import * as ui from './ui';
-import { scanTools, sectionAt } from './toolscan';
 
 /** The four states of the mockup (ready, running, change, alarm), plus hold and offline. */
 export type Mode = 'offline' | 'ready' | 'running' | 'hold' | 'change' | 'alarm';
@@ -70,32 +71,38 @@ export const leftPanel = computed<ui.LeftPanel>(() => {
   return m === 'running' || m === 'hold' ? 'program' : 'jobs';
 });
 
-export const scan = computed(() => scanTools(job.lines.value));
+/** The loaded program's tools, from the interpreter: one row per tool use. Empty until it has been read. */
+export const rows = computed<ToolRow[]>(() => program.view.value?.rows ?? []);
 
 /** The line the job is at, for progress: the executing line while running, the start before. */
 export const atLine = computed(() => job.executingLine.value || (job.running.value ? job.sentLine.value : 0));
 
-export const sectionIndex = computed(() => sectionAt(scan.value.sections, atLine.value));
+export const sectionIndex = computed(() => program.rowAt(rows.value, atLine.value));
 
-/** The tool section after the current one, for "next action". */
+/** The tool row after the current one, for "next action". */
 export const nextSection = computed(() => {
-  const s = scan.value.sections;
+  const s = rows.value;
   const k = sectionIndex.value;
   return atLine.value > 0 && k + 1 < s.length ? s[k + 1] : null;
 });
 
-/** The tool the controller is waiting for at a tool change: the section the executing line has reached. */
+/** The tool the controller is waiting for at a tool change: the row of the M6 it stopped at. */
 export const awaitedSection = computed(() => {
-  const s = scan.value.sections;
+  const s = rows.value;
   if (!s.length) return null;
+  const changes = job.changes.value;
+  const last = changes[changes.length - 1];
+  if (last && last.endedAt === null) return s.find(r => r.changeLine === last.line) ?? null;
   const line = Math.max(job.executingLine.value, job.ackedLine.value);
   for (let k = s.length - 1; k >= 0; k--) if (s[k].changeLine && s[k].changeLine <= line) return s[k];
   return s[0];
 });
 
-export function toolLabel(tool: number): string {
+/** "T2 · 10 mm flat end mill": the tool table's name, else the program's header comment. */
+export function toolLabel(tool: number | null): string {
+  if (tool === null) return 'the tool in the spindle';
   const entry = machine.toolTable.value?.find(e => e.tool === tool);
-  const desc = entry?.name || scan.value.described[tool];
+  const desc = entry?.name || program.view.value?.described[tool];
   return 'T' + tool + (desc ? ' · ' + desc : '');
 }
 

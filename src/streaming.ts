@@ -46,6 +46,7 @@ interface Run {
   ended: boolean;      // nothing more is pulled; replies still to come are only counted
   // An M6 went: 'sent' until the controller is at the tool change, 'change' until it has left it.
   atM6: 'no' | 'sent' | 'change';
+  m6Line: number;      // the line of that M6, for the job's tool change timeline
   lastSystem: boolean; // the line sent last was a $ or [ line
 }
 
@@ -58,7 +59,7 @@ const HOLD_AGAIN = 3_000;
 let holdUntilHeld = 0;   // a time, or 0
 
 function newRun(lines: SendLine[]): Run {
-  const r: Run = { lines, head: 0, inFlight: 0, ended: false, atM6: 'no', lastSystem: false, source: null! };
+  const r: Run = { lines, head: 0, inFlight: 0, ended: false, atM6: 'no', m6Line: 0, lastSystem: false, source: null! };
   r.source = {
     next(room) {
       if (r.ended || !state.running || state.paused || r.atM6 !== 'no' || r.head >= r.lines.length) return null;
@@ -74,7 +75,8 @@ function newRun(lines: SendLine[]): Run {
       r.inFlight++;
       if (next.line > 0) job.sentLine.value = next.line;
       updateProgress(next.line, state.gcodeLines.length);
-      if (TOOL_CHANGE.test(cleanLine(next.text))) r.atM6 = 'sent';
+      // The sending keeps its own M6 check, so the hold doesn't depend on the interpreter having read this far.
+      if (TOOL_CHANGE.test(cleanLine(next.text))) { r.atM6 = 'sent'; r.m6Line = next.line; }
       return next;
     },
     // One-offs wait from an M6 until the tool change is acknowledged: one sent before that would sit
@@ -142,6 +144,7 @@ command.on('status', line => {
   const r = run;
   if (!r || r.ended || r.atM6 === 'no') return;
   if (s === 'tool') {
+    if (r.atM6 === 'sent') job.changeStarted(r.m6Line, true);
     r.atM6 = 'change';
     // It goes once the M6's ok is in: by then grblHAL has stopped reading its input.
     command.acknowledgeToolChange();
@@ -149,6 +152,7 @@ command.on('status', line => {
     // Jogging at a tool change reports Jog; the tool change goes on.
   } else if (r.atM6 === 'change' || (r.inFlight === 0 && s === 'idle')) {
     // The tool change is over, or the M6 (answered, the machine idle) made none.
+    if (r.atM6 === 'change') job.changeEnded(); else job.changeStarted(r.m6Line, false);
     r.atM6 = 'no';
     command.pump();
   }

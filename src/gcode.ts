@@ -1,232 +1,73 @@
 // ═══════════════════════════════════════════════
-// G-CODE PARSER & TOOLPATH BUILDER
+// G-CODE FILES — loading, the SD upload, and the program limits module
 // ═══════════════════════════════════════════════
+//
+// What the program does comes from the G-code interpreter (src/gcode, through stores/program.ts);
+// this file loads files, and shows the interpreter's extents in the old limits module and frames them.
 
+import { effect } from '@preact/signals';
 import { state } from './state';
 import { log } from './console';
 import { sendCmd } from './connection';
-import { buildToolpathMesh, fitView } from './viewport';
 import { WCS_ENTRIES } from './offsets';
 import { frFileLoaded } from './flight-recorder';
-import * as THREE from 'three';
+import type { Bounds } from './gcode/index';
 import * as job from './stores/job';
-
-const WCS_CODES: Record<string, string> = {
-  '54': 'G54', '55': 'G55', '56': 'G56', '57': 'G57', '58': 'G58', '59': 'G59',
-  '59.1': 'G59.1', '59.2': 'G59.2', '59.3': 'G59.3',
-};
-
-export function parseGcodeToToolpath(lines: string[]): { segments: any[]; cutCount: number; rapidCount: number } {
-  const segments: any[] = [];
-  let x = 0, y = 0, z = 0;
-  let modal = { motion: 0 };
-  let cutCount = 0, rapidCount = 0;
-
-  // WCS tracking — map G-code work coords to machine coords
-  let activeWcs = state.activeWcs || 'G54';
-
-  function wcsOffset(): { x: number; y: number; z: number } {
-    const off = state.wcsOffsets[activeWcs];
-    return off || { x: 0, y: 0, z: 0 };
-  }
-
-  for (let index = 0; index < lines.length; index++) {
-    let line = lines[index].replace(/;.*/, '').replace(/\(.*?\)/g, '').trim().toUpperCase();
-    if (!line) continue;
-
-    const words: Record<string, number> = {};
-    const gWords: number[] = [];
-    const re = /([A-Z])([+-]?[\d.]+)/g;
-    let m;
-    while ((m = re.exec(line)) !== null) {
-      const code = m[1].toUpperCase();
-      const val = parseFloat(m[2]);
-      if (code === 'G') gWords.push(val);
-      else words[code] = val;
-    }
-
-    for (const g of gWords) {
-      if (g === 0 || g === 1 || g === 2 || g === 3) modal.motion = g;
-      const wcs = WCS_CODES[String(g)];
-      if (wcs) activeWcs = wcs;
-    }
-
-    const hasMove = 'X' in words || 'Y' in words || 'Z' in words;
-    if (!hasMove) continue;
-
-    // Work coordinates from G-code
-    const off = wcsOffset();
-    // Convert work coords to machine coords, then to THREE.js coords
-    // Machine = Work + WCS offset
-    // THREE: x = machineX, y = machineZ, z = -machineY
-    const mx = ('X' in words ? words['X'] + off.x : (x));
-    const my = ('Z' in words ? words['Z'] + off.z : (y));
-    const mz = ('Y' in words ? -(words['Y'] + off.y) : (z));
-
-    const from = new THREE.Vector3(x, y, z);
-    const to = new THREE.Vector3(mx, my, mz);
-
-    if (from.distanceTo(to) < 0.0001) { x = mx; y = my; z = mz; continue; }
-
-    const isRapid = (modal.motion === 0);
-    segments.push({ from: from.clone(), to: to.clone(), isRapid, line: index + 1 });
-    if (isRapid) rapidCount++; else cutCount++;
-
-    x = mx; y = my; z = mz;
-  }
-  return { segments, cutCount, rapidCount };
-}
-
-/** How many toolpath segments come from lines up to and including `line` (1-based, as in gcodeLines). */
-export function segmentsUpToLine(line: number): number {
-  const segments = state.toolpathSegments;
-  let low = 0, high = segments.length;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if (segments[mid].line <= line) low = mid + 1; else high = mid;
-  }
-  return low;
-}
+import * as program from './stores/program';
 
 export function processGcode(text: string, name: string): void {
   // CR, LF or CRLF: grblHAL ends a line at either, so a lone CR inside a line would split it there.
   state.gcodeLines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l.length > 0);
   state.lineHead = 0; state.segmentIndex = 0;
-  document.getElementById('fileName')!.textContent = name;
+  const label = document.getElementById('fileName');
+  if (label) label.textContent = name;
   job.loaded(name, state.gcodeLines);
   updateProgress(0, state.gcodeLines.length);
-
-  refreshLoadedProgramPreview();
-  log('info', 'Loaded: ' + name + ' (' + state.gcodeLines.length + ' lines, ' + state.totalMoves + ' cuts, ' + state.totalRapids + ' rapids)');
+  log('info', 'Loaded: ' + name + ' (' + state.gcodeLines.length + ' lines)');
   frFileLoaded(name);
 }
 
+/** The work offsets or the tool length changed (offsets.ts): read the program again with them. */
 export function refreshLoadedProgramPreview(): void {
-  if (!state.gcodeLines.length) {
-    state.toolpathSegments = [];
-    state.totalMoves = 0;
-    state.totalRapids = 0;
-    state.progLimits = null;
-    renderProgLimits();
-    return;
-  }
-
-  const result = parseGcodeToToolpath(state.gcodeLines);
-  state.toolpathSegments = result.segments;
-  state.totalMoves = result.cutCount;
-  state.totalRapids = result.rapidCount;
-
-  buildToolpathMesh(state.toolpathSegments);
-  fitView();
-
-  document.getElementById('vpStats')!.innerHTML =
-    `X: 0.000&nbsp;&nbsp;Y: 0.000&nbsp;&nbsp;Z: 0.000<br>CUTS: ${state.totalMoves}&nbsp;&nbsp;RAPIDS: ${state.totalRapids}`;
-
-  computeProgLimits(state.gcodeLines.join('\n'));
+  program.reread();
 }
 
 export function updateProgress(cur: number, total: number): void {
   const pct = total > 0 ? (cur / total * 100) : 0;
-  (document.getElementById('progressFill') as HTMLElement).style.width = pct.toFixed(1) + '%';
-  document.getElementById('progressText')!.textContent = cur + ' / ' + total + ' lines (' + pct.toFixed(0) + '%)';
+  const fill = document.getElementById('progressFill');
+  if (fill) fill.style.width = pct.toFixed(1) + '%';
+  const text = document.getElementById('progressText');
+  if (text) text.textContent = cur + ' / ' + total + ' lines (' + pct.toFixed(0) + '%)';
 }
 
 // ═══════════════════════════════════════════════
 // PROGRAM LIMITS
 // ═══════════════════════════════════════════════
 
-function makeAxisAcc() {
-  return { xMin: 0, xMax: 0, yMin: 0, yMax: 0, zMin: 0, zMax: 0, hasX: false, hasY: false, hasZ: false };
-}
-
-function updateAxisAcc(acc: any, axis: string, val: number): void {
-  if (axis === 'X') {
-    if (!acc.hasX) { acc.xMin = acc.xMax = val; acc.hasX = true; }
-    else { if (val < acc.xMin) acc.xMin = val; if (val > acc.xMax) acc.xMax = val; }
-  } else if (axis === 'Y') {
-    if (!acc.hasY) { acc.yMin = acc.yMax = val; acc.hasY = true; }
-    else { if (val < acc.yMin) acc.yMin = val; if (val > acc.yMax) acc.yMax = val; }
-  } else if (axis === 'Z') {
-    if (!acc.hasZ) { acc.zMin = acc.zMax = val; acc.hasZ = true; }
-    else { if (val < acc.zMin) acc.zMin = val; if (val > acc.zMax) acc.zMax = val; }
-  }
-}
-
-function finalizeAxisAcc(acc: any): any {
+/** The interpreter's bounds in the old module's shape (job.AxisRange). */
+function axisRange(b: Bounds): job.AxisRange {
+  const has = (a: 'x' | 'y' | 'z') => b.min[a] !== null;
   return {
-    xMin: acc.hasX ? acc.xMin : 0,
-    xMax: acc.hasX ? acc.xMax : 0,
-    yMin: acc.hasY ? acc.yMin : 0,
-    yMax: acc.hasY ? acc.yMax : 0,
-    zMin: acc.hasZ ? acc.zMin : 0,
-    zMax: acc.hasZ ? acc.zMax : 0,
-    hasX: acc.hasX,
-    hasY: acc.hasY,
-    hasZ: acc.hasZ,
+    xMin: b.min.x ?? 0, xMax: b.max.x ?? 0, yMin: b.min.y ?? 0, yMax: b.max.y ?? 0, zMin: b.min.z ?? 0, zMax: b.max.z ?? 0,
+    hasX: has('x'), hasY: has('y'), hasZ: has('z'),
   };
 }
 
-function collectOverallLimitsFromToolpath(): any | null {
-  if (!state.toolpathSegments.length) return null;
-  const acc = makeAxisAcc();
-  for (const seg of state.toolpathSegments) {
-    for (const pt of [seg.from, seg.to]) {
-      updateAxisAcc(acc, 'X', pt.x);
-      updateAxisAcc(acc, 'Y', -pt.z);
-      updateAxisAcc(acc, 'Z', pt.y);
-    }
+/** Overall in machine coordinates; per work offset in that offset's coordinates, in the order the program uses them. */
+function computeProgLimits(v: program.ProgramView | null): void {
+  if (!v || !v.program.moves.length) {
+    state.progLimits = null;
+  } else {
+    const per = v.program.bounds.perWorkOffset;
+    const order = Object.keys(per) as (keyof typeof per)[];
+    const perWcs: Record<string, job.AxisRange> = {};
+    for (const code of order) perWcs[code] = axisRange(per[code]!);
+    state.progLimits = { overall: axisRange(v.program.bounds.machine), perWcs, order };
   }
-  return finalizeAxisAcc(acc);
+  renderProgLimits();
 }
 
-function collectPerWcsLimits(rawText: string): { order: string[]; perWcs: Record<string, any> } {
-  const perWcsAcc: Record<string, any> = {};
-  const order: string[] = [];
-  let activeWcs = state.activeWcs || 'G54';
-
-  const ensureWcs = (code: string) => {
-    if (!perWcsAcc[code]) {
-      perWcsAcc[code] = makeAxisAcc();
-      order.push(code);
-    }
-    return perWcsAcc[code];
-  };
-
-  for (const raw of rawText.split('\n')) {
-    const line = raw.replace(/;.*/, '').replace(/\(.*?\)/g, '').trim().toUpperCase();
-    if (!line) continue;
-
-    const gWords: number[] = [];
-    const re = /([A-Z])([+-]?[\d.]+)/g;
-    let m;
-    while ((m = re.exec(line)) !== null) {
-      const code = m[1].toUpperCase();
-      const val = parseFloat(m[2]);
-      if (code === 'G') gWords.push(val);
-    }
-
-    for (const g of gWords) {
-      const wcs = WCS_CODES[String(g)];
-      if (wcs) activeWcs = wcs;
-    }
-
-    const axisRe = /([XYZ])([+-]?\.?\d+\.?\d*)/gi;
-    let sawAxis = false;
-    while ((m = axisRe.exec(line)) !== null) {
-      const axis = m[1].toUpperCase();
-      const val = parseFloat(m[2]);
-      if (isNaN(val)) continue;
-      updateAxisAcc(ensureWcs(activeWcs), axis, val);
-      sawAxis = true;
-    }
-
-    if (gWords.some(g => !!WCS_CODES[String(g)]) && !sawAxis) ensureWcs(activeWcs);
-  }
-
-  const perWcs: Record<string, any> = {};
-  for (const code of order) perWcs[code] = finalizeAxisAcc(perWcsAcc[code]);
-  return { order, perWcs };
-}
+effect(() => computeProgLimits(program.view.value));
 
 function getLimitsTabs(): { id: string; label: string; stats: any; frameable: boolean }[] {
   if (!state.progLimits) return [];
@@ -247,25 +88,6 @@ function getSelectedLimitsTab(): { id: string; label: string; stats: any; framea
     else state.progLimitsTab = tabs[0].id;
   }
   return tabs.find(t => t.id === state.progLimitsTab) || tabs[0];
-}
-
-export function computeProgLimits(rawText: string): void {
-  const { order, perWcs } = collectPerWcsLimits(rawText);
-  const overall = collectOverallLimitsFromToolpath();
-
-  if (!overall && !order.length) {
-    state.progLimits = null;
-    renderProgLimits();
-    return;
-  }
-
-  state.progLimits = {
-    overall: overall || (order[0] ? perWcs[order[0]] : null),
-    perWcs,
-    order,
-  };
-
-  renderProgLimits();
 }
 
 export function renderProgLimits(): void {

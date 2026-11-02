@@ -285,6 +285,10 @@ function MessageLine() {
     const at = job.executingLine.value;
     text = <><strong>{file}</strong> {how[job.result.value]}{at ? ' at line ' + num(at) : ''}, after {job.fmtDuration(job.elapsedMs.value)}. The record is in the Recorder panel; press Start to run it again from the top.</>;
   }
+  else if (job.fromQueueAfter.value) {
+    // The queue loaded the next job when the last completed; nothing moves until Start.
+    text = <>{job.fromQueueAfter.value} completed. Next from the queue: <strong>{file}</strong> is loaded. Work through the setup list, then press <strong>Start</strong>.</>;
+  }
   else text = <>Ready to start <strong>{file}</strong>. Work through the setup list, then press Start.</>;
   return (
     <div role="status" class="fs-msgline">

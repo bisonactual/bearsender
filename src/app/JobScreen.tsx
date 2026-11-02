@@ -3,36 +3,57 @@
 // ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
-import { useEffect } from 'preact/hooks';
-import type { Signal } from '@preact/signals';
+import { useEffect, useRef } from 'preact/hooks';
+import { computed, signal, type Signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
 import * as flight from '../stores/flight';
 import * as camera from '../stores/camera';
+import * as program from '../stores/program';
+import type { ToolRow } from '../stores/program';
+import * as queue from '../stores/queue';
+import * as runtimes from '../stores/runtimes';
 import * as ui from './ui';
-import { mode, panel, leftPanel, scan, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel, toolChangeMode } from './mode';
+import { mode, panel, leftPanel, rows, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel, toolChangeMode } from './mode';
+import { plan, rowStarts, queuedMs } from './plan';
+import { bellOn, toggleBell } from './sound';
 import { measureAtToolChange } from '../streaming';
-import type { ToolSection } from './toolscan';
 import { Legacy } from './Legacy';
+import { Preview } from './Preview';
 import { frOpenResume, frLoadEvents, frClearEvents, frReadRecord } from '../flight-recorder';
-import { jobId } from '../flight-recorder-resume';
-import { IconChevron, IconBell, IconCheck, IconTodo, IconWarn } from './icons';
+import { IconChevron, IconBell, IconCheck, IconTodo, IconWarn, IconArrow, IconClose } from './icons';
 
 const num = (v: number) => v.toLocaleString('en-GB');
 const mm = (v: number) => (Math.round(v * 1000) / 1000).toLocaleString('en-GB', { maximumFractionDigits: 3 });
 const clock = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 const pad = (n: number) => String(n).padStart(2, '0');
+/** h:mm:ss; an estimate gets a ~. */
+const dur = (ms: number, measured: boolean) => (measured ? '' : '~') + job.fmtDuration(ms);
+/** Time from the start: +40s, +12m, +1:05. */
+function rel(ms: number): string {
+  const m = Math.floor(ms / 60_000);
+  return ms < 60_000 ? '+' + Math.round(ms / 1000) + 's' : m < 60 ? '+' + m + 'm' : '+' + Math.floor(m / 60) + ':' + pad(m % 60);
+}
+/** Time from now: in 45s, in 12m, in 1:05. */
+function until(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return 'in ' + (s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm' : Math.floor(s / 3600) + ':' + pad(Math.floor(s / 60) % 60));
+}
 
-// One muted colour per tool, in the order the tools come up, shared with the progress bar.
+// One muted colour per tool, in the order the tools come up in the loaded job and then the queue,
+// shared with the progress bar.
 const TINTS = [
   { tint: '#5b7fa6', bar: '#26364a' }, { tint: '#a07c45', bar: '#42331f' }, { tint: '#5a9590', bar: '#29403e' },
   { tint: '#8a6aa0', bar: '#3a2d45' }, { tint: '#a0606c', bar: '#45282d' }, { tint: '#6f8f4e', bar: '#2e3a22' },
 ];
+const NO_TINT = { tint: '#475569', bar: '#2a271e' };
 
-function tintOf(tool: number): { tint: string; bar: string } {
-  const order = [...new Set(scan.value.sections.map(s => s.tool))];
-  return TINTS[Math.max(0, order.indexOf(tool)) % TINTS.length];
+const tintOrder = computed(() => [...new Set([...rows.value.map(r => r.tool), ...queue.entries.value.flatMap(e => e.summary.rows.map(r => r.tool))])]);
+
+function tintOf(tool: number | null): { tint: string; bar: string } {
+  if (tool === null) return NO_TINT;
+  return TINTS[Math.max(0, tintOrder.value.indexOf(tool)) % TINTS.length];
 }
 
 // ── Current Job strip ─────────────────────────────────────────────────────────
@@ -40,7 +61,8 @@ function tintOf(tool: number): { tint: string; bar: string } {
 function jobNow(): string {
   const file = job.file.value;
   if (!file) return 'No job loaded';
-  const sections = scan.value.sections;
+  if (!program.view.value) return program.reading.value ? 'Reading the program…' : 'Loaded';
+  const sections = rows.value;
   const section = sections[sectionIndex.value];
   const where = section ? [section.name, toolLabel(section.tool)].filter(Boolean).join(' · ') : '';
   const m = mode.value;
@@ -48,18 +70,19 @@ function jobNow(): string {
   if (m === 'change') { const s = awaitedSection.value; return 'Waiting for ' + (s ? toolLabel(s.tool) : 'the next tool'); }
   if (m === 'alarm' || stoppedShort.value) return 'Stopped' + (where ? ' in ' + where : '');
   if (job.result.value === 'completed') return 'Completed in ' + job.fmtDuration(job.elapsedMs.value);
-  const tools = new Set(sections.map(s => s.tool)).size;
-  const last = job.lastOfThisFile.value;
-  const lastRun = last && last.result === 'completed' ? ' · about ' + job.fmtDuration(last.runtimeMs).slice(0, -3) + ' from the last run' : '';
-  return 'Ready · ' + (tools ? tools + (tools === 1 ? ' tool' : ' tools') : 'no tool changes') + ' · ' + num(job.lines.value.length) + ' lines' + lastRun;
+  const tools = new Set(sections.map(s => s.tool).filter(t => t !== null)).size;
+  const p = plan.value;
+  const time = p.run ? ' · about ' + job.fmtDuration(p.totalMs) + ' from the last run' : p.totalMs ? ' · ~' + job.fmtDuration(p.totalMs) + ' estimated' : '';
+  return 'Ready · ' + (tools ? tools + (tools === 1 ? ' tool' : ' tools') : 'no tool named') + ' · ' + num(job.lines.value.length) + ' lines' + time;
 }
 
 function CurrentJob() {
-  const total = job.lines.value.length;
-  const sections = scan.value.sections;
+  const sections = rows.value;
+  const p = plan.value;
   const done = job.result.value === 'completed';
-  const at = done ? total : atLine.value;
-  const pct = total ? Math.min(100, at / total * 100) : 0;
+  const at = done ? job.lines.value.length : atLine.value;
+  const pct = p.rowsMs ? Math.min(100, p.doneMs / p.rowsMs * 100) : 0;
+  const run = p.run;
   return (
     <section aria-labelledby="fs-cur" class="fs-card fs-current">
       <div class="fs-current-name">
@@ -70,17 +93,24 @@ function CurrentJob() {
       <div class="fs-current-bar">
         <div class="fs-bar">
           <div class="fs-bar-sections">
-            {sections.length ? sections.map(s => (
-              <div style={{ flex: (s.end - s.start + 1) + ' 1 0', background: tintOf(s.tool).bar }}>T{s.tool}</div>
+            {sections.length ? sections.map((s, k) => (
+              <div style={{ flex: Math.max(1, Math.round(p.times[k].ms)) + ' 1 0', background: tintOf(s.tool).bar }}
+                title={toolLabel(s.tool) + ', ' + dur(p.times[k].ms, p.times[k].measured)}>{s.tool !== null ? 'T' + s.tool : ''}</div>
             )) : <div style={{ flex: '1 1 0' }} />}
           </div>
           <div class="fs-bar-done" style={{ width: pct.toFixed(1) + '%' }} />
         </div>
-        <div class="fs-note">Progress by line count. Tool sections from a quick scan for T…M6 (temporary, until the G-code interpreter).</div>
+        <div class="fs-note">
+          {!sections.length ? 'Progress by time, once a program is loaded.'
+            : p.allMeasured ? `Progress by time, measured on the last whole run of this file (${new Date(run!.at).toLocaleDateString('en-GB')}).`
+            : 'Progress by time, estimated from the G-code: a lower bound, with no acceleration.'}
+        </div>
       </div>
       <div class="fs-times">
         <div><div class="fs-cap">ELAPSED</div><div class="fs-time">{job.fmtDuration(job.elapsedMs.value)}</div></div>
-        <div title="Time estimates come with run history, in a later step"><div class="fs-cap">LEFT, EST.</div><div class="fs-time is-dim">—</div></div>
+        <div title={p.allMeasured ? 'The rest of this file\'s last whole run, tool changes not counted' : 'From the G-code: a lower bound'}>
+          <div class="fs-cap">LEFT, EST.</div><div class="fs-time is-dim">{p.rowsMs ? dur(p.leftMs, p.allMeasured) : '—'}</div>
+        </div>
         <div><div class="fs-cap">LINE</div><div class="fs-time is-dim">{at ? num(at) : '—'}</div></div>
       </div>
     </section>
@@ -101,39 +131,145 @@ function programStatus(): string {
   return 'Ready';
 }
 
-function toolStatus(k: number, s: ToolSection): { text: string; live: boolean; dim: boolean } {
+const live = () => mode.value === 'running' || mode.value === 'hold' || mode.value === 'change';
+
+function toolStatus(k: number, s: ToolRow): { text: string; live: boolean; dim: boolean } {
   const m = mode.value;
+  const p = plan.value;
   const current = sectionIndex.value;
+  const plain = { text: '', live: false, dim: false };
   if (m === 'change') {
-    const awaited = awaitedSection.value;
-    if (awaited === s) return { text: 'Load now', live: true, dim: false };
-    return k < scan.value.sections.indexOf(awaited!) ? { text: 'Done', live: false, dim: true } : { text: '', live: false, dim: false };
+    const awaited = p.waiting ?? rows.value.indexOf(awaitedSection.value!);
+    if (k === awaited) return { text: 'Load now', live: true, dim: false };
+    return k < awaited ? { text: 'Done', live: false, dim: true } : plain;
   }
   if (m === 'running' || m === 'hold') {
     if (k < current) return { text: 'Done', live: false, dim: true };
     if (k === current) return { text: 'Cutting', live: true, dim: false };
-    return { text: '', live: false, dim: false };
+    // The next tool change: how long until it is due.
+    if (k === current + 1 && job.running.value) return { text: until(rowStarts.value.rows[k]), live: false, dim: false };
+    return plain;
   }
   if (job.result.value === 'completed') return { text: 'Done', live: false, dim: true };
   if (job.result.value && atLine.value) {
     if (k < current) return { text: 'Done', live: false, dim: true };
     if (k === current) return { text: 'Stopped', live: true, dim: false };
-    return { text: '', live: false, dim: false };
+    return plain;
   }
-  if (k === 0 && machine.tool.value === s.tool) return { text: 'In spindle', live: false, dim: false };
-  return { text: '', live: false, dim: false };
+  if (k === 0 && s.tool !== null && machine.tool.value === s.tool) return { text: 'In spindle', live: false, dim: false };
+  return plain;
+}
+
+/** A tool's sound toggle: on every tool that comes in with an M6, where the job holds. */
+function Bell({ id, line, tool }: { id: string; line: number; tool: number | null }) {
+  if (!line) return <span class="fs-c-bell" />;
+  const on = bellOn(id, line);
+  const name = tool !== null ? 'T' + tool : 'this tool';
+  return (
+    <span class="fs-c-bell">
+      <button type="button" class={'fs-bell' + (on ? ' is-on' : '')} aria-pressed={on ? 'true' : 'false'} aria-label={'Sound when ' + name + ' is due'}
+        title={(on ? 'Sound on' : 'Sound off') + ' for the tool change at line ' + num(line)} onClick={() => toggleBell(id, line)}><IconBell on={on} /></button>
+    </span>
+  );
+}
+
+function ToolCells({ tool, desc, missing }: { tool: number | null; desc: string; missing: boolean }) {
+  return (
+    <span class="fs-c-name fs-tool-name">
+      <span class="fs-tint" style={{ background: tintOf(tool).tint }} />
+      <span class="fs-mono fs-tool-num">{tool !== null ? 'T' + tool : '—'}</span>
+      <span class="fs-ellipsis">{desc}</span>
+      {missing && <span class="fs-warn" aria-label="not in tool table" title="Not in the tool table"><IconWarn size={13} /></span>}
+    </span>
+  );
+}
+
+const inTable = (tool: number | null) => {
+  const table = machine.toolTable.value;
+  return tool === null || table === null || table.some(e => e.tool === tool);
+};
+
+/** Queued jobs shown with their tools. */
+const queueOpen = signal<Record<string, boolean>>({});
+
+function QueueRows({ startMs }: { startMs: number | null }) {
+  const list = queue.entries.value;
+  const open = queueOpen.value;
+  const now = job.now.value;
+  let at = startMs;
+  return (
+    <>
+      {list.map((e, k) => {
+        const time = queuedMs(e);
+        const ran = runtimes.forFile(e.summary.id);
+        const rowMs = ran && ran.rowMs.length === e.summary.rows.length ? ran.rowMs : null;
+        const begins = at;
+        if (at !== null) at += time.ms;
+        const isOpen = !!open[e.key];
+        const missing = e.summary.rows.filter(r => !inTable(r.tool));
+        const when = (ms: number | null) => ms === null ? '—' : live() ? clock(now + ms) : rel(ms);
+        let toolAt = begins;
+        return (
+          <>
+            <div class="fs-jobs-row is-program is-queued">
+              <span class="fs-c-name">
+                {e.summary.rows.length ? (
+                  <button type="button" class="fs-chev" aria-expanded={isOpen ? 'true' : 'false'} aria-label={(isOpen ? 'Hide tools for ' : 'Show tools for ') + e.name}
+                    onClick={() => { queueOpen.value = { ...open, [e.key]: !isOpen }; }}><IconChevron open={isOpen} /></button>
+                ) : <span class="fs-chev-gap" />}
+                <span class="fs-prog-name" title={e.summary.stopped ? 'Read up to ' + e.summary.stopped : `${num(e.summary.lines)} lines`}>{e.name}</span>
+                <span class="fs-q-acts">
+                  <button type="button" class="fs-q-btn" disabled={k === 0} aria-label={'Move ' + e.name + ' up the queue'} onClick={() => queue.move(e.key, -1)}><IconArrow up /></button>
+                  <button type="button" class="fs-q-btn" disabled={k === list.length - 1} aria-label={'Move ' + e.name + ' down the queue'} onClick={() => queue.move(e.key, 1)}><IconArrow up={false} /></button>
+                  <button type="button" class="fs-q-btn" aria-label={'Take ' + e.name + ' off the queue'} onClick={() => queue.remove(e.key)}><IconClose /></button>
+                </span>
+              </span>
+              <span class="fs-c-status">
+                {k === 0 ? 'Next' : 'Queued'}
+                {missing.length > 0 && <span class="fs-warn fs-warn-word" title="Not in the tool table"><IconWarn size={13} />{missing.map(r => 'T' + r.tool).join(' ')}</span>}
+              </span>
+              <span class="fs-c-at fs-mono">{when(begins)}</span>
+              <span class="fs-c-run fs-mono" title={time.measured ? 'Measured on the last whole run of this file' : 'Estimated from the G-code: a lower bound'}>{dur(time.ms, time.measured)}</span>
+              <span class="fs-c-bell" />
+            </div>
+            {isOpen && e.summary.rows.map((r, j) => {
+              const ms = rowMs?.[j] ?? null;
+              const starts = toolAt;
+              if (toolAt !== null) toolAt += ms ?? r.estSeconds * 1000;
+              const label = toolLabel(r.tool).replace(/^T\d+( · )?/, '') || r.desc;
+              return (
+                <div class="fs-jobs-row is-tool">
+                  <ToolCells tool={r.tool} desc={label} missing={!inTable(r.tool)} />
+                  <span class="fs-c-status">{!inTable(r.tool) ? 'Not in table' : ''}</span>
+                  <span class="fs-c-at fs-mono">{when(starts)}</span>
+                  <span class="fs-c-run fs-mono">{ms !== null ? dur(ms, true) : dur(r.estSeconds * 1000, false)}</span>
+                  <Bell id={e.summary.id} line={r.changeLine} tool={r.tool} />
+                </div>
+              );
+            })}
+          </>
+        );
+      })}
+    </>
+  );
 }
 
 function JobsList() {
   const file = job.file.value;
   const last = job.lastJob.value;
-  const sections = scan.value.sections;
-  const table = machine.toolTable.value;
+  const sections = rows.value;
   const open = ui.toolsOpen.value;
-  const m = mode.value;
   const status = programStatus();
-  const same = job.lastOfThisFile.value;
-  const lastSame = same && same.result === 'completed';
+  const p = plan.value;
+  const starts = rowStarts.value;
+  const now = job.now.value;
+  const isLive = live();
+  const ran = job.startedAt.value !== null;
+  const id = job.fileId.value;
+  const progRun = job.result.value === 'completed' ? job.fmtDuration(job.elapsedMs.value)
+    : p.times.length ? dur(p.totalMs, !!p.run) : program.reading.value ? '…' : '—';
+  // Where the queue starts: after the loaded job, from the start (ready) or from now (running).
+  const queueStart = !file ? 0 : isLive ? starts.endMs : ran ? null : p.totalMs;
   return (
     <div>
       <div class="fs-jobs-scroll">
@@ -164,46 +300,52 @@ function JobsList() {
                 <span class="fs-prog-name">{file}</span>
               </span>
               <span class={'fs-c-status' + (status === 'Running' ? ' is-go' : '')}>{status}</span>
-              <span class="fs-c-at fs-mono">{job.startedAt.value !== null && (m === 'running' || m === 'hold' || m === 'change') ? clock(job.startedAt.value) : job.startedAt.value === null ? 'start' : '—'}</span>
-              <span class="fs-c-run fs-mono" title={lastSame ? 'Measured on the last run of this file' : 'Measured once the file has run'}>{lastSame ? job.fmtDuration(same!.runtimeMs) : '—'}</span>
+              <span class="fs-c-at fs-mono">{ran ? clock(job.startedAt.value!) : 'start'}</span>
+              <span class="fs-c-run fs-mono" title={p.run ? `Measured on the last whole run of this file, tool changes included (${p.run.runs} run${p.run.runs === 1 ? '' : 's'})` : 'Estimated from the G-code: a lower bound'}>{progRun}</span>
               <span class="fs-c-bell" />
             </div>
           )}
           {file && open && sections.map((s, k) => {
             const st = toolStatus(k, s);
-            const missing = table !== null && !table.some(e => e.tool === s.tool);
+            const t = p.times[k];
+            const missing = !inTable(s.tool);
+            const at = isLive ? (k === p.waiting ? 'now' : t.start !== null ? clock(t.start) : k > p.current ? clock(now + starts.rows[k]) : '—')
+              : ran ? (t.start !== null ? clock(t.start) : '—')
+              : k === 0 ? 'start' : rel(starts.rows[k]);
+            // This run's time for a tool it has finished; otherwise the last whole run's, or the estimate.
+            const runtime = t.start !== null && t.end !== null ? job.fmtDuration(t.end - t.start) : dur(t.ms, t.measured);
             return (
               <div class={'fs-jobs-row is-tool' + (st.live ? ' is-live' : '') + (st.dim ? ' is-dim' : '')}>
-                <span class="fs-c-name fs-tool-name">
-                  <span class="fs-tint" style={{ background: tintOf(s.tool).tint }} />
-                  <span class="fs-mono fs-tool-num">T{s.tool}</span>
-                  <span class="fs-ellipsis">{toolLabel(s.tool).replace(/^T\d+( · )?/, '') || s.name}</span>
-                  {missing && <span class="fs-warn" aria-label="not in tool table" title="Not in the tool table"><IconWarn size={13} /></span>}
-                </span>
+                <ToolCells tool={s.tool} desc={toolLabel(s.tool).replace(/^T\d+( · )?/, '') || s.name} missing={missing} />
                 <span class={'fs-c-status' + (st.text === 'Cutting' ? ' is-go' : '')}>{missing && !st.text ? 'Not in table' : st.text}</span>
-                <span class="fs-c-at fs-mono" title={s.changeLine ? 'Tool change at line ' + num(s.changeLine) : ''}>{s.changeLine ? 'L' + num(s.changeLine) : 'start'}</span>
-                <span class="fs-c-run fs-mono">—</span>
-                <span class="fs-c-bell">
-                  {k > 0 && <button type="button" class="fs-bell" disabled title="Sounds at tool changes come in a later step" aria-label={'Sound when T' + s.tool + ' is due'}><IconBell on={false} /></button>}
-                </span>
+                <span class="fs-c-at fs-mono" title={s.changeLine ? 'Tool change at line ' + num(s.changeLine) : 'From the start of the program'}>{at}</span>
+                <span class="fs-c-run fs-mono">{runtime}</span>
+                <Bell id={id} line={s.changeLine} tool={s.tool} />
               </div>
             );
           })}
-          {!file && !last && <div class="fs-empty">No job loaded yet.</div>}
+          <QueueRows startMs={queueStart} />
+          {!file && !last && !queue.entries.value.length && <div class="fs-empty">No job loaded yet.</div>}
         </div>
       </div>
-      <div class="fs-note">AT is the line each tool starts on, for now. RUNTIME is measured from the last run of the file. Per-tool times, sounds and the queue come in a later step.</div>
+      <div class="fs-note">
+        AT: {isLive ? 'clock times; those still to come are projected, without the tool changes' : ran ? 'when each tool started' : 'time from the start'}.
+        {' '}~ marks an estimate from the G-code, a lower bound; a file's measured times come from its last whole run.
+      </div>
     </div>
   );
 }
 
 function JobsButtons() {
   const m = mode.value;
+  const input = useRef<HTMLInputElement>(null);
   return (
     <>
       <button type="button" class="fs-btn fs-btn-sm" disabled={m === 'running' || m === 'hold' || m === 'change'}
         onClick={() => document.getElementById('fileInput')?.click()}>LOAD JOB</button>
-      <button type="button" class="fs-btn fs-btn-sm fs-queue-btn" disabled title="The queue comes in a later step">ADD TO QUEUE</button>
+      <button type="button" class="fs-btn fs-btn-sm fs-queue-btn" onClick={() => input.current?.click()}>ADD TO QUEUE</button>
+      <input ref={input} type="file" multiple accept=".nc,.gcode,.g,.ngc,.tap,.txt" hidden
+        onChange={e => { const el = e.currentTarget; const files = [...(el.files ?? [])]; el.value = ''; queue.add(files); }} />
     </>
   );
 }
@@ -263,9 +405,10 @@ function tloCheck(): Check {
 
 function toolCheck(): Check {
   const key = 'tool';
-  const first = scan.value.sections[0];
+  const first = rows.value[0];
   if (!job.file.value) return { key, tone: 'todo', text: 'Tool in the spindle', detail: 'load a program to see its first tool' };
-  if (!first) return { key, tone: 'todo', text: 'Check the tool in the spindle', detail: 'the program names no tool' };
+  if (!program.view.value) return { key, tone: 'todo', text: 'Tool in the spindle', detail: 'reading the program…' };
+  if (!first || first.tool === null) return { key, tone: 'todo', text: 'Check the tool in the spindle', detail: 'the program names no tool' };
   const label = toolLabel(first.tool);
   const tool = machine.tool.value;
   if (tool === first.tool) return { key, tone: 'done', text: label + ' is in the spindle' };
@@ -275,7 +418,7 @@ function toolCheck(): Check {
 
 function toolTableCheck(): Check {
   const key = 'tooltable';
-  const tools = [...new Set(scan.value.sections.map(s => s.tool))];
+  const tools = [...new Set(rows.value.map(s => s.tool).filter((t): t is number => t !== null))];
   const table = machine.toolTable.value;
   if (machine.toolTableError.value) {
     return { key, tone: 'todo', text: 'No tool table on this controller', detail: `$TTLIST isn't supported (${machine.toolTableError.value}); check the tools by hand` };
@@ -293,13 +436,13 @@ function travelCheck(): Check {
   const key = 'travel';
   const actions: [string, ui.Popup][] = [['FRAME', 'frame']];
   const tickWord = 'framed';
-  const limits = job.limits.value;
+  const v = program.view.value;
   const travel = [130, 131, 132].map(id => parseFloat(machine.settings.value[id] ?? ''));
-  if (!job.file.value || !limits) return { key, tone: 'todo', text: 'Program fits the machine travel', detail: 'load a program to check it', actions, tickWord };
-  if (travel.some(isNaN)) {
-    return { key, tone: 'todo', text: 'Program fits the machine travel', detail: connection.connected.value ? 'reading the travel ($130–$132)…' : 'connect to read the travel', actions, tickWord };
-  }
-  if (!machine.offsetsRead.value) return { key, tone: 'todo', text: 'Program fits the machine travel', detail: 'reading the work offsets…', actions, tickWord };
+  const todo = (detail: string): Check => ({ key, tone: 'todo', text: 'Program fits the machine travel', detail, actions, tickWord });
+  if (!job.file.value) return todo('load a program to check it');
+  if (!v) return todo('reading the program…');
+  if (travel.some(isNaN)) return todo(connection.connected.value ? 'reading the travel ($130–$132)…' : 'connect to read the travel');
+  if (!machine.offsetsRead.value) return todo('reading the work offsets…');
   // The travel as grblHAL sets it once homed (machine_limits.c): −$13x to 0; or, with "set machine origin
   // to 0" ($22 bit 3), 0 to +$13x for an axis that homes negative ($23). With hard limits on ($21) the
   // pull-off ($27) comes off both ends. Not known until those are read; until then −$13x to 0.
@@ -308,30 +451,35 @@ function travelCheck(): Check {
   const pulloff = (setting(21) & 1) ? parseFloat(machine.settings.value[27] ?? '') || 0 : 0;
   const ends = (bit: number, len: number): [number, number] =>
     originAtHome ? ((setting(23) & bit) ? [0, len - pulloff] : [-len + pulloff, 0]) : [-len + pulloff, -pulloff];
-  // Machine position = work position + the offset + G92, and on Z the tool length offset.
-  const g92 = machine.offsets.value['G92'] ?? { x: 0, y: 0, z: 0 };
-  const tlo = machine.tlo.value ?? 0;
+  // The interpreter's machine bounds: every move, rapids, G53 and stored returns included, arcs at their
+  // extremes, with the controller's offsets, G92 and tool length offset.
+  const b = v.program.bounds.machine;
   const over: string[] = [];
-  for (const code of limits.order) {
-    const r = limits.perWcs[code], o = machine.offsets.value[code];
-    if (!r || !o) continue;
-    const axes: [string, boolean, number, number, [number, number]][] = [
-      ['X', r.hasX, r.xMin + o.x + g92.x, r.xMax + o.x + g92.x, ends(1, travel[0])],
-      ['Y', r.hasY, r.yMin + o.y + g92.y, r.yMax + o.y + g92.y, ends(2, travel[1])],
-      ['Z', r.hasZ, r.zMin + o.z + g92.z + tlo, r.zMax + o.z + g92.z + tlo, ends(4, travel[2])],
-    ];
-    for (const [axis, has, lo, hi, [min, max]] of axes) {
-      if (!has) continue;
-      if (lo < min - 0.001) over.push(`${axis} goes ${mm(min - lo)} mm past the ${min < 0 ? 'end of the travel' : 'machine zero'} (${code})`);
-      if (hi > max + 0.001) over.push(`${axis} goes ${mm(hi - max)} mm past ${max > 0 ? 'the end of the travel' : 'machine zero'} (${code})`);
-    }
+  (['x', 'y', 'z'] as const).forEach((a, i) => {
+    const [min, max] = ends(1 << i, travel[i]), lo = b.min[a], hi = b.max[a], axis = a.toUpperCase();
+    if (lo !== null && lo < min - 0.001) over.push(`${axis} goes ${mm(min - lo)} mm past the ${min < 0 ? 'end of the travel' : 'machine zero'} (machine ${axis} ${mm(lo)})`);
+    if (hi !== null && hi > max + 0.001) over.push(`${axis} goes ${mm(hi - max)} mm past ${max > 0 ? 'the end of the travel' : 'machine zero'} (machine ${axis} ${mm(hi)})`);
+  });
+  const wcs = Object.keys(v.program.bounds.perWorkOffset)[0] as keyof typeof v.program.bounds.perWorkOffset | undefined;
+  const w = wcs ? v.program.bounds.perWorkOffset[wcs]! : v.program.bounds.work;
+  const span = (a: 'x' | 'y' | 'z') => w.min[a] === null ? '' : `${a.toUpperCase()} ${mm(w.min[a]!)} to ${mm(w.max[a]!)}`;
+  const work = [span('x'), span('y'), span('z')].filter(Boolean).join(', ') + (wcs ? ' in ' + wcs : '');
+  if (over.length) return { key, tone: 'fail', text: 'Program goes outside the machine travel', detail: over.join('; ') + (b.complete ? '' : '; and some moves aren\'t known'), actions, tickWord };
+  if (v.stopped) return todo(`checked up to line ${num(v.stopped.line)}, where BearSender stops reading the program`);
+  if (!b.complete) {
+    const why = v.program.issues.find(i => i.code.startsWith('unknown-'));
+    return todo('some moves aren\'t known' + (why ? ` (line ${num(why.line)}: ${why.message})` : '') + '; ' + work);
   }
-  const first = limits.order[0];
-  const range = first ? limits.perWcs[first] : limits.overall;
-  const work = range ? `X ${mm(range.xMin)} to ${mm(range.xMax)}, Y ${mm(range.yMin)} to ${mm(range.yMax)}, Z ${mm(range.zMin)} to ${mm(range.zMax)}` : '';
-  return over.length
-    ? { key, tone: 'fail', text: 'Program goes outside the machine travel', detail: over.join('; '), actions, tickWord }
-    : { key, tone: 'done', text: 'Program fits the machine travel', detail: work, actions, tickWord };
+  return { key, tone: 'done', text: 'Program fits the machine travel', detail: work, actions, tickWord };
+}
+
+/** Shown only when the interpreter stops part way: the times, tools, preview and travel are of the part before. */
+function programCheck(): Check | null {
+  const v = program.view.value;
+  if (!job.file.value || !v?.stopped) return null;
+  const s = v.stopped;
+  return { key: 'program:' + s.line, tone: 'todo', text: `BearSender reads the program only up to line ${num(s.line)}`,
+    detail: `${s.message.replace(/ Interpretation stops here.*$/, '')} Times, tools, preview and travel are of the lines before it; the job still sends whole.` };
 }
 
 function recorderCheck(): Check {
@@ -358,7 +506,7 @@ function measureCheck(key: string, tlo: number | null): Check {
 
 function changeChecks(): Check[] {
   const s = awaitedSection.value;
-  const sections = scan.value.sections;
+  const sections = rows.value;
   const entry = s && machine.toolTable.value?.find(e => e.tool === s.tool);
   const key = 'change:' + (s ? s.tool + ':' + s.changeLine : '?') + ':';
   const spinning = machine.spindle.value > 0;
@@ -374,7 +522,8 @@ function changeChecks(): Check[] {
 
 function setupChecks(): Check[] {
   if (mode.value === 'change') return changeChecks();
-  return [offsetCheck(), tloCheck(), toolCheck(), toolTableCheck(), travelCheck(), recorderCheck()];
+  const read = programCheck();
+  return [offsetCheck(), tloCheck(), toolCheck(), toolTableCheck(), travelCheck(), ...(read ? [read] : []), recorderCheck()];
 }
 
 const TONE_WORD: Record<Tone, string> = { done: 'done', todo: 'to do', fail: 'failed' };
@@ -424,9 +573,9 @@ function ProgramPanel() {
   const lines = job.lines.value;
   const m = mode.value;
   const at = atLine.value;
-  const sections = scan.value.sections;
+  const sections = rows.value;
   const section = sections[sectionIndex.value];
-  const where = section ? [section.name, 'T' + section.tool].filter(Boolean).join(' · ') : (job.file.value ?? 'No job loaded');
+  const where = section ? [section.name, section.tool !== null ? 'T' + section.tool : ''].filter(Boolean).join(' · ') || (job.file.value ?? '') : (job.file.value ?? 'No job loaded');
   const title = m === 'change' ? `${awaitedSection.value?.name || 'T' + (awaitedSection.value?.tool ?? '?')}, waiting at the tool change`
     : (m === 'alarm' || stoppedShort.value) && at ? where + ', stopped' : where;
   const centre = at || 1;
@@ -496,8 +645,8 @@ function RecorderPanel() {
   useEffect(() => { if (canRead) { frReadRecord(); frLoadEvents(); } }, [canRead]);
 
   const resumable = record && (record.state === 'Stopped' || record.state === 'Retracted') && record.ln > 0 && flight.enabled.value;
-  const fileMatches = record && job.lines.value.length > 0 && jobId(job.lines.value) === record.job;
-  const lineSection = record ? scan.value.sections.find(s => record.ln >= s.start && record.ln <= s.end) : undefined;
+  const fileMatches = record && job.lines.value.length > 0 && job.fileId.value === record.job;
+  const lineSection = record ? rows.value.find(s => record.ln >= s.start && record.ln <= s.end) : undefined;
 
   const recordText = !flight.enabled.value ? 'the flight recorder is off (Settings, Flight recorder)'
     : !connection.connected.value ? 'connect to read it'
@@ -569,11 +718,10 @@ function PreviewPanel({ hidden }: { hidden: boolean }) {
   return (
     <div class="fs-fill" hidden={hidden && !full}>
       <div class={'fs-view-wrap' + (full ? ' is-full' : '')}>
-        <Legacy class="fs-view" ids={['vpPanel']} />
+        <Preview />
         {full && <button type="button" class="fs-btn fs-view-close" onClick={() => { ui.fullView.value = false; }}>CLOSE FULL VIEW</button>}
       </div>
-      <button type="button" class="fs-btn fs-btn-sm fs-mt8 fs-self-start" onClick={() => { ui.fullView.value = true; }}>OPEN FULL 3D VIEW</button>
-      <div class="fs-note-sm">The 3D view from before the rework. Arcs still draw as straight lines until the G-code interpreter lands.</div>
+      {!full && <button type="button" class="fs-btn fs-btn-sm fs-mt8 fs-self-start" onClick={() => { ui.fullView.value = true; }}>OPEN FULL 3D VIEW</button>}
     </div>
   );
 }
