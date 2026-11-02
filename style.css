@@ -1496,3 +1496,98 @@
     .fs-jobs { flex: 2 1 0; }
     .fs-panel { flex: 3 1 0; }
   }
+
+  /* ── The Setup screen (src/app/SetupScreen.tsx): cards in columns that scroll on their own ── */
+  .fs-setup { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; padding: 12px 16px; overflow: hidden; }
+  .fs-col { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .fs-pad { padding: 12px 16px; }
+  .fs-mcard { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px; }
+  .fs-mcard-tall { flex: 1 0 auto; min-height: 260px; }
+  .fs-mcard-scroll { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+  .fs-inline { display: flex; align-items: center; gap: 8px; }
+  .fs-in { height: 36px; min-width: 0; box-sizing: border-box; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border2); background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 15px; }
+  .fs-in:focus { outline: none; border-color: var(--accent); }
+  .fs-in[type="number"] { width: 96px; }
+  .fs-in.is-wide { width: 140px; }
+  select.fs-in { font-family: var(--sans); padding-right: 4px; }
+  .fs-note.is-warn { color: var(--warn-text); }
+  .fs-empty-sm { padding: 6px 0; font-size: 14px; color: var(--text2); }
+  .fs-btn.is-go { border-color: var(--green); background: rgba(34, 197, 94, 0.15); color: var(--go-text); }
+  .fs-btn.is-accent { border-color: var(--accent2); color: var(--accent); }
+  .fs-btn-go { border-color: var(--green2); color: var(--go-text); }
+  .fs-seg-sm button { height: 34px; padding: 0 10px; font-size: 14px; }
+  .fs-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .fs-grid2b { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .fs-range { flex: 1 1 auto; min-width: 60px; accent-color: var(--accent); }
+
+  /* Position */
+  .fs-badge { align-self: flex-start; padding: 2px 10px; border-radius: 6px; border: 1px solid var(--border2); font-family: var(--cond); font-size: 15px; font-weight: 700; letter-spacing: 0.1em; color: var(--text-mid); }
+  .fs-badge.is-go { border-color: var(--green); color: var(--go-text); }
+  .fs-badge.is-stop { border-color: var(--red); background: rgba(239, 68, 68, 0.15); color: var(--stop-text); }
+  .fs-badge.is-warn { border-color: var(--orange); color: var(--orange); }
+  .fs-dro { display: flex; flex-direction: column; gap: 4px; }
+  .fs-dro-row { display: flex; align-items: baseline; gap: 10px; }
+  .fs-dro-w { flex: 1 1 auto; text-align: right; font-size: 26px; line-height: 1.15; }
+  .fs-dro-m { width: 110px; text-align: right; font-size: 13px; color: var(--text2); }
+  .fs-dro-row .fs-btn-xs { align-self: center; }
+  .fs-minis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; font-size: 14px; }
+
+  /* Jogging: X red, Y green, Z blue, diagonals amber, as in the 3D preview */
+  .fs-jog-row { display: flex; gap: 10px; justify-content: center; }
+  .fs-jog-pad { display: grid; grid-template-columns: repeat(3, 60px); grid-auto-rows: 60px; gap: 6px; }
+  .fs-jog-z { display: grid; grid-template-columns: 60px; grid-auto-rows: 60px; gap: 6px; }
+  .fs-jog { border-radius: 10px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); font-family: var(--cond) !important; font-size: 20px; font-weight: 700; letter-spacing: 0.04em; touch-action: none; user-select: none; }
+  .fs-jog:hover:not(:disabled) { background: var(--surface3); }
+  .fs-jog.is-x { color: #ff6b6b; }
+  .fs-jog.is-y { color: #5ee67a; }
+  .fs-jog.is-z { color: #7c9cff; background: rgba(55, 88, 255, 0.14); }
+  .fs-jog.is-diag { color: #ffaa44; font-size: 24px; }
+  .fs-jog.is-stop { border-color: var(--red); color: var(--stop-text); font-size: 15px; letter-spacing: 0.08em; }
+  .fs-jog.is-lit, .fs-jog:active:not(:disabled) { background: var(--accent); color: #1a1208; }
+  .fs-feedrow { display: flex; align-items: center; gap: 8px; }
+  .fs-steps { display: flex; align-items: center; gap: 8px; }
+  .fs-steps > .fs-cap { width: 22px; flex: none; }
+  .fs-steps .fs-seg { flex: 1 1 auto; }
+  .fs-steps .fs-seg button { flex: 1 1 0; min-width: 0; padding: 0 4px; font-family: var(--mono) !important; font-weight: 400; letter-spacing: 0; }
+  .fs-step-unit { display: none; margin-left: 2px; font-size: 11px; }
+  .jog-show-units .fs-step-unit { display: inline; }
+
+  /* Overrides */
+  .fs-ovrrow { display: flex; align-items: center; gap: 10px; }
+  .fs-ovrname { width: 84px; }
+  .fs-ovrpct { width: 52px; text-align: right; font-size: 16px; }
+
+  /* Tables: program limits, work offsets */
+  .fs-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .fs-table th { padding: 4px 8px; font-family: var(--cond); font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: var(--text2); text-align: right; }
+  .fs-table td { padding: 3px 8px; text-align: right; border-top: 1px solid var(--surface3); vertical-align: middle; }
+  .fs-table th { vertical-align: middle; }
+  .fs-table tbody th { border-top: 1px solid var(--surface3); text-align: left; }
+  .fs-table thead th:first-child { text-align: left; }
+
+  /* Surfacing */
+  .fs-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 4px 10px; }
+  .fs-field { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--text2); }
+  .fs-field .fs-in { width: 100%; }
+
+  /* SD card */
+  .fs-sdlist { flex: 1 1 auto; min-height: 120px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  .fs-sdlist .fs-empty-sm { padding: 8px 10px; }
+  .fs-sdrow { width: 100%; display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--surface3); background: none; color: var(--text-mid); text-align: left; font-size: 14px; }
+  .fs-sdrow.is-on { background: var(--text); color: var(--bg); }
+  .fs-sdrow.is-on .fs-dim { color: var(--bg); }
+
+  /* Work offsets: the active one wears its chip; typed but not written is marked */
+  .fs-offsets { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .fs-offsets-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+  .fs-offtable td .fs-in { width: 120px; text-align: right; }
+  .fs-offtable tbody tr.is-dirty td .fs-in { border-color: var(--accent2); }
+  .fs-offtable tbody tr.is-home td { color: var(--text2); }
+  .fs-offname { white-space: nowrap; }
+  .fs-offname > span:first-child { display: inline-block; min-width: 64px; font-family: var(--mono); font-size: 15px; color: var(--text); }
+  .fs-offname .fs-small { margin-left: 8px; font-family: var(--sans); font-weight: 400; letter-spacing: 0; }
+  .fs-offact { white-space: nowrap; }
+  .fs-offact .fs-btn { margin-left: 6px; }
+  .fs-wcs-sm { height: 26px; padding: 0 8px; font-size: 14px; }
+  .fs-popup-cards .fs-mcard { width: 420px; max-width: 100%; }
+  .fs-popup-body { width: min(1100px, 92vw); flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px; box-sizing: border-box; }

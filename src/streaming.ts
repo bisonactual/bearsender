@@ -336,7 +336,7 @@ export function sendReset(): void {
 export function unlockAlarm(): void { import('./connection').then(c => c.sendCmd('$X')); }
 export function sendHome(): void { import('./connection').then(c => c.sendCmd('$H')); }
 // Absolute and in millimetres whatever the modal state (a probe can leave G91, a job G20).
-export function goToXY0(): void { import('./modules/jog').then(j => j.clearWaypoints()); import('./connection').then(c => c.sendCmd('G21G90G0X0Y0')); }
+export function goToXY0(): void { import('./jog').then(j => j.goToXY0()); }
 
 export function setWCS(code: string): void {
   state.activeWcs = code;

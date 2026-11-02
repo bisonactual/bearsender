@@ -70,6 +70,8 @@ function parseStatusReport(s: string): void {
   const vec = (vals: string[]): machine.Vec3 => ({ x: reportMm(parseFloat(vals[0]) || 0), y: reportMm(parseFloat(vals[1]) || 0), z: reportMm(parseFloat(vals[2]) || 0) });
   let mpos: machine.Vec3 | null = null;
   let wpos: machine.Vec3 | null = null;
+  // A: comes with the overrides (Ov:), and only while something is on.
+  let accessories: string | null = null;
   for (let i = 1; i < parts.length; i++) {
     const colon = parts[i].indexOf(':');
     if (colon === -1) continue;
@@ -109,7 +111,9 @@ function parseStatusReport(s: string): void {
     if (key === 'Bf') {
       report.bf = { blocks: vals[0], bytes: vals[1] };
       tags.add('bf');
+      machine.buffer.value = { blocks: parseInt(vals[0]) || 0, bytes: parseInt(vals[1]) || 0 };
     }
+    if (key === 'A') accessories = vals[0] ?? '';
     if (key === 'Ov') {
       const feed = parseInt(vals[0]), rapid = parseInt(vals[1]), spin = parseInt(vals[2]);
       if (!isNaN(feed) && !isNaN(rapid) && !isNaN(spin)) {
@@ -149,6 +153,8 @@ function parseStatusReport(s: string): void {
     }
   }
   if (!hasPn) { report.pins = ''; tags.add('pins'); }
+  if (accessories !== null) machine.accessories.value = accessories;
+  else if (tags.has('ov')) machine.accessories.value = '';
   machine.pins.value = report.pins ?? '';
   // A report in WPos: the machine position is the work position plus the offset in force (WCO, which
   // has G92 and the tool length offset in it). Until a WCO has come it isn't known: ask for one.

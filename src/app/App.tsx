@@ -17,6 +17,7 @@ import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm, resumeTo
 import { alarmText } from '../parser';
 import { Legacy } from './Legacy';
 import { JobScreen } from './JobScreen';
+import { SetupScreen } from './SetupScreen';
 import { PopupHost } from './Popup';
 import { startCarriedScreens } from './carried';
 import { startAsks } from './asks';
@@ -367,21 +368,7 @@ function SubTabs<T extends string>({ tabs, value }: { tabs: [T, string][]; value
 }
 
 // Camera, Console and Macros are tabs of the job screen's right panel.
-const SETUP_TABS: [ui.SetupTab, string][] = [['machine', 'MACHINE'], ['offsets', 'OFFSETS']];
 const SETTINGS_TABS: [ui.SettingsTab, string][] = [['grbl', 'GRBL SETTINGS'], ['zones', 'EXCLUSION ZONES'], ['options', 'OPTIONS'], ['flight', 'FLIGHT RECORDER']];
-
-function SetupScreen() {
-  const tab = ui.setupTab.value;
-  return (
-    <section class="fs-screen" hidden={ui.screen.value !== 'setup'}>
-      <SubTabs tabs={SETUP_TABS} value={ui.setupTab} />
-      <div class="fs-sub fs-sub-scroll" hidden={tab !== 'machine'}>
-        <Legacy class="fs-cards" ids={['mod-position', 'mod-jogging', 'mod-spindle', 'mod-overrides', 'mod-limits', 'mod-surfacing', 'mod-sdcard']} />
-      </div>
-      <div class="fs-sub" hidden={tab !== 'offsets'}><Legacy class="fs-legacy" ids={['tabpanel-offsets']} /></div>
-    </section>
-  );
-}
 
 function SettingsScreen() {
   const tab = ui.settingsTab.value;

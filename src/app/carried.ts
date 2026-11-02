@@ -11,7 +11,6 @@ import { loadSettings } from '../settings';
 import { showCamera, hideCamera } from '../camera';
 import { initProbingTab } from '../probing/probing-tab';
 import { loadToolTable } from '../tooltable';
-import { loadOffsets } from '../offsets';
 import { renderEzTab } from '../exclusion-zones';
 import { renderFlightTab } from '../flight-recorder';
 import { panel } from './mode';
@@ -34,7 +33,6 @@ export function startCarriedScreens(): void {
     if (tab === 'settings' && !state.settingsLoaded && state.connected) loadSettings();
     if (tab === 'probing' && !state._probingTabInited) { state._probingTabInited = true; initProbingTab(); }
     if (tab === 'tooltable') loadToolTable();
-    if (tab === 'offsets') loadOffsets();
     if (tab === 'exclusions') renderEzTab();
     if (tab === 'flight') renderFlightTab();
   });

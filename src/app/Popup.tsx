@@ -7,12 +7,11 @@ import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
 import { state } from '../state';
 import { initProbingTab } from '../probing/probing-tab';
-import { loadOffsets } from '../offsets';
 import { loadToolTable } from '../tooltable';
 import { renderFlightTab } from '../flight-recorder';
-import * as connection from '../stores/connection';
 import * as messages from '../stores/messages';
 import * as ui from './ui';
+import { JogCard, PositionCard, LimitsCard, OffsetsTable } from './SetupScreen';
 
 /** Lends carried-over panels to a popup, and puts each back where it came from on close. */
 class Borrow extends Component<{ ids: string[]; class?: string }> {
@@ -63,11 +62,11 @@ function MessagesList() {
 }
 
 const POPUPS: Record<ui.Popup, PopupDef> = {
-  jog: { title: 'JOG', ids: ['mod-jogging', 'mod-position'], tall: false },
-  offsets: { title: 'WORK OFFSETS', ids: ['tabpanel-offsets'], tall: true, open: () => { if (connection.connected.value) loadOffsets(); } },
+  jog: { title: 'JOG', body: () => <div class="fs-popup-cards"><JogCard /><PositionCard /></div>, tall: false },
+  offsets: { title: 'WORK OFFSETS', body: () => <div class="fs-popup-body"><OffsetsTable /></div>, tall: true },
   probe: { title: 'PROBE', ids: ['tabpanel-probing'], tall: true, open: () => openProbing('edgefinder') },
   measure: { title: 'MEASURE THE TOOL', ids: ['tabpanel-probing'], tall: true, open: () => openProbing('toollength') },
-  frame: { title: 'FRAME THE PROGRAM', ids: ['mod-limits'], tall: false },
+  frame: { title: 'FRAME THE PROGRAM', body: () => <div class="fs-popup-cards"><LimitsCard /></div>, tall: false },
   tools: { title: 'TOOL TABLE', ids: ['tabpanel-tooltable'], tall: true, open: () => loadToolTable() },
   recorder: { title: 'FLIGHT RECORDER SETTINGS', ids: ['tabpanel-flight'], tall: true, open: () => renderFlightTab() },
   messages: { title: 'MESSAGES', body: () => <MessagesList />, tall: false },

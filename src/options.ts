@@ -5,7 +5,7 @@
 import { state, OPT_COLOR_DEFAULTS, OPT_COLOR_CSS_VARS } from './state';
 import { lsGet, lsSet } from './ui';
 import { log } from './console';
-import { rebuildSteps, updateFeedSliderMax } from './modules/jog';
+import { rebuildSteps, setMaxSpeeds } from './jog';
 import { vpRefreshColors } from './viewport';
 
 // ── Connection mode ───────────────────────────────────────────────────────────
@@ -132,10 +132,8 @@ export function optApplyJogSteps(): void {
   if (xySteps.length === 0 || zSteps.length === 0) return;
   const maxXY = parseInt((document.getElementById('optJogMaxXY') as HTMLInputElement).value) || 3000;
   const maxZ  = parseInt((document.getElementById('optJogMaxZ')  as HTMLInputElement).value) || 500;
-  state.jogMaxSpeedXY = Math.max(1, maxXY);
-  state.jogMaxSpeedZ  = Math.max(1, maxZ);
+  setMaxSpeeds(maxXY, maxZ);
   rebuildSteps(xySteps, zSteps);
-  updateFeedSliderMax();
   optSaveJogSteps();
 }
 

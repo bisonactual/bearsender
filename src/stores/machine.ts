@@ -27,6 +27,10 @@ export const tlo = signal<number | null>(null);
 export const overrides = signal<Overrides>({ feed: 100, rapid: 100, spindle: 100 });
 export const feed = signal(0);
 export const spindle = signal(0);
+/** The planner blocks and input bytes free (Bf:), null until reported. */
+export const buffer = signal<{ blocks: number; bytes: number } | null>(null);
+/** Spindle and coolant as reported (A:): S clockwise, C counter-clockwise, F flood, M mist. Null until reported. */
+export const accessories = signal<string | null>(null);
 /** Input pins that are active, as letters (Pn:). */
 export const pins = signal('');
 /** The code of the last alarm, cleared when the alarm is. */

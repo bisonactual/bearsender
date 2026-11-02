@@ -10,15 +10,11 @@ import { sendCmd } from './connection';
 import * as command from './command';
 import { initParser } from './parser';
 import { initViewport, setView, fitView, toggleToolhead, vpApply, setProjection, toggleWcsMarkers } from './viewport';
-import { loadFile, uploadAndOpenFile, frameProgram } from './gcode';
+import { loadFile } from './gcode';
 import { updateRunButtons } from './streaming';
-import { mount as mountJog, initKeyboardJog } from './modules/jog';
-import { mount as mountPosition } from './modules/position';
-import { mount as mountOverrides } from './modules/overrides';
-import { mount as mountSpindle } from './modules/spindle';
+import { initKeyboardJog, jogStats } from './jog';
 import { mount as mountMacros } from './modules/macros';
 import { mount as mountSignals } from './modules/signals';
-import { mount as mountSurfacing } from './modules/tools/surfacing';
 import { mount as mountToolLength } from './probing/tool-length';
 import { mount as mountEdgeFinder } from './probing/edge-finder-module';
 import { mount as mountCenterFinder } from './probing/center-finder-module';
@@ -26,14 +22,13 @@ import { mount as mountRotation } from './probing/rotation-module';
 import { loadPreview3D, clearPreview3D, stepPreview3D, playPreview3D } from './probing/probe-preview-3d';
 import { loadSettings, filterSettings, writeAllDirty } from './settings';
 import { loadToolTable } from './tooltable';
-import { loadOffsets } from './offsets';
-import { toggleSdPanel, closeSdPanel, sdRefreshFiles, sdRunSelected, initSdClickOutside } from './sd';
 import { selectCamera, startCamera, stopCamera, measureOffset, goToCamera, goToSpindle, zeroAtCrosshair, camMouseDown, camMouseMove, camMouseUp, setCrosshairStyle, setCrosshairColor, loadCamSettings, drawOverlay, initCameraListeners } from './camera';
 import { kbdPress, kbdBackspace, kbdClear, kbdSend, toggleTouchKeyboard } from './keyboard';
 import { optSetConnMode, optSaveConnSettings, optLoadConnSettings, optLoadColors, optApplyColor, optHexChange, optResetColor, optResetAllColors, optSaveJogSteps, optLoadJogSteps, optApplyJogSteps, optApplyJogShowUnits, optLoadJogShowUnits, optSaveBearColors, optLoadBearColors } from './options';
 import { initExclusionZonesTab, rebuildZoneMeshes } from './exclusion-zones';
 import { initFlightRecorderTab } from './flight-recorder';
 import { App } from './app/App';
+import * as machine from './stores/machine';
 
 // ── Expose to window for HTML onclick handlers ────────────────────────────────
 const w = window as any;
@@ -146,9 +141,6 @@ function initChunk2Events(): void {
   on('conInput', 'input', () => conAutoUpdate());
   on('btnConSend', 'click', () => sendManual());
 
-  // Limits
-  on('limitsFrameBtn', 'click', () => frameProgram());
-
   // Tool table
   on('modTTRefresh', 'click', () => loadToolTable());
   on('btnTTRefresh', 'click', () => loadToolTable());
@@ -186,16 +178,7 @@ function initChunk2Events(): void {
 function initChunk1Events(): void {
 
   // Files
-  on('sdCardBtn', 'click', () => toggleSdPanel());
-  on('tbBtn-uploadOpen', 'click', () => document.getElementById('uploadFileInput')!.click());
-  on('uploadFileInput', 'change', (e) => uploadAndOpenFile(e.target as HTMLInputElement));
   on('fileInput', 'change', (e) => { loadFile(e.target as HTMLInputElement); (e.target as HTMLInputElement).value = ''; });
-
-  // SD panel
-  on('sdRefreshBtn', 'click', () => sdRefreshFiles());
-  on('sdCloseBtn', 'click', () => closeSdPanel());
-  on('sdRunBtn', 'click', () => sdRunSelected());
-  on('btnWcsRefresh', 'click', () => loadOffsets());
 
   // Viewport header
   document.querySelectorAll<HTMLElement>('.view-btn[data-view]').forEach(btn => {
@@ -224,8 +207,8 @@ function copyDebugStats(): void {
     pos: { x: state.machineX, y: state.machineY, z: state.machineZ },
     commands: command.stats(),
     job: { running: state.running, paused: state.paused, lineHead: state.lineHead, totalLines: state.gcodeLines.length },
-    jog: { isJogging: state._isJogging, holdMode: state.jogHoldMode, stepXY: state.jogStepXY, stepZ: state.jogStepZ },
-    overrides: state.ovrCurrent,
+    jog: { isJogging: state._isJogging, ...jogStats() },
+    overrides: machine.overrides.value,
     axes: state.controllerAxes,
   };
   navigator.clipboard.writeText(JSON.stringify(snap, null, 2)).then(() => {
@@ -246,20 +229,14 @@ initChunk2Events();
 initChunk3Events();
 initViewport();
 const legacyEl = document.getElementById('legacy') as HTMLElement;
-mountPosition(legacyEl);
-mountOverrides(legacyEl);
-mountSpindle(legacyEl);
 mountMacros(legacyEl);
-mountJog(legacyEl);
 mountSignals(legacyEl);
-mountSurfacing(legacyEl);
 mountToolLength(legacyEl);
 mountEdgeFinder(legacyEl);
 mountCenterFinder(legacyEl);
 mountRotation(legacyEl);
 initKeyboardJog();
 
-initSdClickOutside();
 initCameraListeners();
 loadCamSettings();
 

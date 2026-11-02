@@ -16,27 +16,6 @@
 <div id="app"></div>
 
 <input type="file" id="fileInput" accept=".nc,.gcode,.g,.ngc,.tap" />
-<input type="file" id="uploadFileInput" accept=".nc,.gcode,.g,.ngc,.tap" />
-
-<!-- SD CARD DROPDOWN PANEL -->
-<div class="sd-panel" id="sdPanel">
-  <div class="sd-panel-header">
-    <span class="sd-panel-title">💾 SD CARD FILES</span>
-    <button class="sd-refresh-btn" id="sdRefreshBtn" title="Fetch file list from controller">⟳ REFRESH</button>
-    <button class="sd-close-btn" id="sdCloseBtn">✕</button>
-  </div>
-  <div class="sd-panel-body">
-    <div class="sd-select-wrap">
-      <select class="sd-select" id="sdFileSelect" size="6">
-        <option value="" disabled selected style="color:var(--text3)">— click Refresh to load files —</option>
-      </select>
-    </div>
-    <div class="sd-panel-actions">
-      <span class="sd-file-info" id="sdFileInfo"></span>
-      <button class="tb-btn success sd-run-btn" id="sdRunBtn" disabled>▶ RUN FROM SD</button>
-    </div>
-  </div>
-</div>
 
 <!-- FLIGHT RECORDER: resume dialog -->
 <div class="fr-modal-backdrop" id="frModal" style="display:none">
@@ -72,62 +51,6 @@
           <input class="con-input" id="conInput" placeholder="Send G-code command..." autocomplete="off" />
           <button class="con-send" id="btnConSend">SEND</button>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ MODULE: PROGRAM LIMITS ═══ -->
-  <div class="module-card mod-hidden" id="mod-limits" data-mod-size="normal" style="top:10px;left:302px">
-    <div class="module-drag-handle"
-        
-        >
-      <span class="module-drag-dots">⠿⠿</span>
-      <span class="module-drag-title">Program Limits</span>
-      <button class="module-drag-close">✕</button>
-    </div>
-    <div class="module-body">
-      <div id="limitsEmpty" class="limits-empty">No program loaded</div>
-      <div id="limitsContent" style="display:none">
-        <div id="limitsTabs" class="limits-tabs" style="display:none"></div>
-        <table class="limits-table">
-          <thead>
-            <tr>
-              <td></td>
-              <th class="limits-col-hdr">MIN</th>
-              <th class="limits-col-hdr">MAX</th>
-              <th class="limits-col-hdr">SPAN</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr class="limits-row" id="limitsRowX">
-              <td class="limits-axis-label">X</td>
-              <td class="limits-val min" id="limXMin">—</td>
-              <td class="limits-val max" id="limXMax">—</td>
-              <td class="limits-val span" id="limXSpan">—</td>
-            </tr>
-            <tr class="limits-row" id="limitsRowY">
-              <td class="limits-axis-label">Y</td>
-              <td class="limits-val min" id="limYMin">—</td>
-              <td class="limits-val max" id="limYMax">—</td>
-              <td class="limits-val span" id="limYSpan">—</td>
-            </tr>
-            <tr class="limits-row" id="limitsRowZ">
-              <td class="limits-axis-label">Z</td>
-              <td class="limits-val min" id="limZMin">—</td>
-              <td class="limits-val max" id="limZMax">—</td>
-              <td class="limits-val span" id="limZSpan">—</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="limits-divider"></div>
-        <div class="limits-safe-row">
-          <span class="limits-safe-label">Safe Z</span>
-          <input type="number" class="limits-safe-input" id="limitsSafeZ" value="5" step="1" title="Z height to lift to before framing" />
-          <select class="limits-safe-select" id="limitsSafeZRef" title="Safe Z reference frame">
-            <option value="absolute">ABS</option>
-          </select>
-        </div>
-        <button class="limits-frame-btn" id="limitsFrameBtn" disabled>⬛ FRAME PROGRAM</button>
       </div>
     </div>
   </div>
@@ -282,19 +205,6 @@
       </div><!-- /kbd-numpad -->
 
   </div><!-- /touch-kbd-overlay -->
-
-  <!-- ═══ SD CARD (from the old toolbar) ═══ -->
-  <div class="module-card mod-hidden" id="mod-sdcard" data-mod-size="normal">
-    <div class="module-drag-handle">
-      <span class="module-drag-title">SD Card</span>
-    </div>
-    <div class="module-body" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px">
-      <div class="sd-btn-wrap" id="sdBtnWrap">
-        <button class="tb-btn sd-card-btn" id="sdCardBtn">💾 SD CARD</button>
-      </div>
-      <button class="tb-btn upload-open-btn" id="tbBtn-uploadOpen" title="Load file into sender AND upload to SD card">📤 UPLOAD &amp; OPEN</button>
-    </div>
-  </div>
 
   <!-- ═══ MODULE: TOOL TABLE ═══ -->
   <div class="module-card mod-hidden" id="mod-tooltable" data-mod-size="normal" style="top:10px;left:302px">
@@ -991,32 +901,6 @@
 </div><!-- /tab-panel-tooltable -->
 
 <!-- TAB: OFFSETS -->
-<div class="tab-panel" id="tabpanel-offsets" style="flex-direction:column;overflow:hidden;background:var(--bg);">
-  <div class="wcs-toolbar">
-    <span class="wcs-toolbar-title">Coordinate Offsets</span>
-    <span id="wcsStatus" style="font-family:var(--mono);font-size:11px;color:var(--text3);flex:1"></span>
-    <button class="tb-btn" id="btnWcsRefresh">↻ REFRESH</button>
-  </div>
-  <div class="wcs-table-wrap">
-    <table id="wcsTable" style="display:none;">
-      <thead>
-        <tr style="background:var(--surface2);">
-          <th class="wcs-th">SYSTEM</th>
-          <th class="wcs-th wcs-th-num">X</th>
-          <th class="wcs-th wcs-th-num">Y</th>
-          <th class="wcs-th wcs-th-num">Z</th>
-          <th class="wcs-th wcs-th-num">ACTIONS</th>
-        </tr>
-      </thead>
-      <tbody id="wcsTableBody"></tbody>
-    </table>
-    <div id="wcsEmpty" style="display:flex;">
-      <div class="wcs-empty-icon">⊕</div>
-      <div class="wcs-empty-text">Connect and the offsets will load automatically</div>
-    </div>
-  </div>
-</div><!-- /tab-panel-offsets -->
-
 <!-- TAB: PROBING -->
 <div class="tab-panel" id="tabpanel-probing" style="flex-direction:column;overflow:hidden;background:var(--bg);">
   <div class="prob-subtab-bar">
