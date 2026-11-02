@@ -8,8 +8,9 @@
 // and the tool table.
 
 import { signal, computed, effect } from '@preact/signals';
-import { interpretGcode, lexLine } from '../gcode/index';
-import type { InterpreterContext, Issue, Point, Program, WorkSystem } from '../gcode/index';
+import { interpretGcode, lexLine, moveExtrema } from '../gcode/index';
+import { emptyBounds, includePoint, subtract } from '../gcode/geometry';
+import type { Bounds, InterpreterContext, Issue, Point, Position, Program, WorkSystem } from '../gcode/index';
 import { log } from '../console';
 import * as job from './job';
 import * as machine from './machine';
@@ -42,6 +43,8 @@ export interface ProgramView {
   estSeconds: number;
   /** The first block the interpreter couldn't read: everything after it is unknown. */
   stopped: Issue | null;
+  /** Where the program itself moves, for the limits module and Frame (programExtent). */
+  extent: { machine: Bounds; perWorkOffset: Partial<Record<WorkSystem, Bounds>> };
   /** How long the reading took, in ms. */
   readMs: number;
 }
@@ -133,6 +136,23 @@ function toolRows(p: Program, cum: Float64Array): ToolRow[] {
   return rows;
 }
 
+/** The program's own motion: the end of every move and the extremes of every arc, in machine
+ *  coordinates and per work offset in that offset's coordinates. Unlike the interpreter's bounds it
+ *  leaves out where the machine starts from, G53 moves and G28/G30, so Frame traces the work, not
+ *  the way to it. The travel check uses the interpreter's bounds, which have all of them. */
+function programExtent(p: Program): ProgramView['extent'] {
+  const machine = emptyBounds(), perWorkOffset: ProgramView['extent']['perWorkOffset'] = {};
+  for (const m of p.moves) {
+    if (/^G(53|28|30)\b/.test(m.source)) continue;
+    const wb = perWorkOffset[m.workOffset] ??= emptyBounds();
+    for (const pt of m.arc ? moveExtrema(m).slice(1) : [m.end]) {
+      includePoint(machine, pt);
+      includePoint(wb, { x: subtract(pt.x, m.frameOffset.x), y: subtract(pt.y, m.frameOffset.y), z: subtract(pt.z, m.frameOffset.z) } as Position);
+    }
+  }
+  return { machine, perWorkOffset };
+}
+
 /** Read the lines of a program with the controller as it is now. */
 export function read(lines: string[], ctx: InterpreterContext = context()): ProgramView {
   const t0 = performance.now();
@@ -144,7 +164,7 @@ export function read(lines: string[], ctx: InterpreterContext = context()): Prog
   for (let i = 1; i < cum.length; i++) cum[i] = cum[i - 1] + per[i];
   return {
     program, rows: toolRows(program, cum), described: describedTools(program), cum, estSeconds: cum[cum.length - 1],
-    stopped: program.issues.find(i => i.severity === 'error') ?? null, readMs: performance.now() - t0,
+    stopped: program.issues.find(i => i.severity === 'error') ?? null, extent: programExtent(program), readMs: performance.now() - t0,
   };
 }
 

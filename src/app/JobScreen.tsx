@@ -460,8 +460,9 @@ function travelCheck(): Check {
     if (lo !== null && lo < min - 0.001) over.push(`${axis} goes ${mm(min - lo)} mm past the ${min < 0 ? 'end of the travel' : 'machine zero'} (machine ${axis} ${mm(lo)})`);
     if (hi !== null && hi > max + 0.001) over.push(`${axis} goes ${mm(hi - max)} mm past ${max > 0 ? 'the end of the travel' : 'machine zero'} (machine ${axis} ${mm(hi)})`);
   });
-  const wcs = Object.keys(v.program.bounds.perWorkOffset)[0] as keyof typeof v.program.bounds.perWorkOffset | undefined;
-  const w = wcs ? v.program.bounds.perWorkOffset[wcs]! : v.program.bounds.work;
+  // The words say where the program itself works; the check above takes all its motion.
+  const wcs = Object.keys(v.extent.perWorkOffset)[0] as keyof typeof v.extent.perWorkOffset | undefined;
+  const w = wcs ? v.extent.perWorkOffset[wcs]! : v.program.bounds.work;
   const span = (a: 'x' | 'y' | 'z') => w.min[a] === null ? '' : `${a.toUpperCase()} ${mm(w.min[a]!)} to ${mm(w.max[a]!)}`;
   const work = [span('x'), span('y'), span('z')].filter(Boolean).join(', ') + (wcs ? ' in ' + wcs : '');
   if (over.length) return { key, tone: 'fail', text: 'Program goes outside the machine travel', detail: over.join('; ') + (b.complete ? '' : '; and some moves aren\'t known'), actions, tickWord };

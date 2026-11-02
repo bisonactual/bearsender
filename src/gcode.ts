@@ -53,16 +53,17 @@ function axisRange(b: Bounds): job.AxisRange {
   };
 }
 
-/** Overall in machine coordinates; per work offset in that offset's coordinates, in the order the program uses them. */
+/** The program's own motion (program.ts programExtent): overall in machine coordinates; per work offset in
+ *  that offset's coordinates, in the order the program uses them. */
 function computeProgLimits(v: program.ProgramView | null): void {
   if (!v || !v.program.moves.length) {
     state.progLimits = null;
   } else {
-    const per = v.program.bounds.perWorkOffset;
+    const per = v.extent.perWorkOffset;
     const order = Object.keys(per) as (keyof typeof per)[];
     const perWcs: Record<string, job.AxisRange> = {};
     for (const code of order) perWcs[code] = axisRange(per[code]!);
-    state.progLimits = { overall: axisRange(v.program.bounds.machine), perWcs, order };
+    state.progLimits = { overall: axisRange(v.extent.machine), perWcs, order };
   }
   renderProgLimits();
 }
