@@ -18,11 +18,17 @@ for (const move of program.moves) {
 }
 ```
 
-Import `gcode/index` explicitly: the existing `src/gcode.ts` still exists and is
-intentionally unchanged. The module has no DOM, three.js, Bun APIs, dependencies,
-or mutable global state. Re-run it with the original text and fresh context when
-offsets, machine position, tool lengths or rapid rates change. UI integration and
-replacement of the old preview/resume callers belong to step 4.
+Import `gcode/index` explicitly: `src/gcode.ts` is the file loader, not this
+module. The module has no DOM, three.js, Bun APIs, dependencies, or mutable global
+state. Re-run it with the original text and fresh context when offsets, machine
+position, tool lengths or rapid rates change.
+
+In BearSender (step 4) everything that reads the program goes through here:
+`src/stores/program.ts` reads the loaded file with the controller's context and
+gives the Preview, the Jobs list, the Setup list's travel and tools; the flight
+recorder resume (`src/flight-recorder-resume.ts`) takes its modal state and
+position from `stateAfterLine`. BearSender passes `$` and `[` lines in as
+comments, since grblHAL takes them and they move nothing (`$H` aside).
 
 ## Coordinates, missing context and bounds
 
@@ -30,6 +36,8 @@ Inputs: offsets, stored positions and tool lengths in mm; rapid rates in mm/min
 (`$110`..`$112`, normalized to mm by the caller). A numeric tool-table value is a
 Z length; a vector permits grblHAL XYZ tool offsets. `initialG92` is the active
 controller G92 offset. `initialTool` supplies an already loaded tool.
+`initialLengthOffset` is a tool length offset already in force on the controller
+(G43.1, `$TPW`): the program starts in G43 with it, until its own G49 or G43.
 
 Machine = work + selected work offset + G92 + tool length offset. G53 bypasses
 these translations and distance mode for that block. G28/G30 first visit any

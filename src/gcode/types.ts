@@ -19,6 +19,8 @@ export interface InterpreterContext {
   toolLengthOffsets?: Record<number, number | Point>;
   initialTool?: number;
   initialG92?: Point;
+  /** A tool length offset already in force on the controller (G43.1, $TPW), until the program's G49 or G43. */
+  initialLengthOffset?: Point;
   /** The controller's g73_retract setting, in mm. Required for G73. */
   g73RetractMm?: number;
   /** Resource guard for erroneous L/Q values; exceeding it stops interpretation. */

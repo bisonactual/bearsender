@@ -10,6 +10,13 @@ const CYCLES = new Set([73, 81, 82, 83, 85, 89]);
 const SUPPORTED_G = new Set([0, 1, 2, 3, 4, 17, 18, 19, 20, 21, 28, 30, 40, 43, 49, 53, ...WCS, ...CYCLES, 80, 90, 91, 90.1, 91.1, 92, 93, 94, 98, 99]);
 const SUPPORTED_M = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30]);
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
+const copy = (p: Position): Position => ({ x: p.x, y: p.y, z: p.z });
+/** The same independent snapshot as clone(), field by field: each line takes two, and JSON was most of the run time. */
+const cloneState = (s: ModalState): ModalState => ({
+  ...s, workOffsetValue: copy(s.workOffsetValue), lengthOffset: { ...s.lengthOffset, value: copy(s.lengthOffset.value) },
+  g92: copy(s.g92), coolant: { ...s.coolant }, position: copy(s.position),
+  cycle: s.cycle && { ...s.cycle, frameOffset: copy(s.cycle.frameOffset) },
+});
 const finitePosition = (v: Position): boolean => AXES.every(k => v[k] === null || Number.isFinite(v[k]));
 
 /** Reinterpret the original text whenever machine context changes. No global state or UI imports. */
@@ -56,7 +63,7 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
     motion: 'G0', plane: 'G17', units: 'G21', distance: 'G90', arcDistance: 'G91.1', feedMode: 'G94',
     workOffset: active, workOffsetValue: offsets[active] ? { ...offsets[active]! } : unknown(),
     tool: context.initialTool ?? null, selectedTool: context.initialTool ?? null,
-    lengthOffset: { mode: 'G49', h: null, value: zero() }, g92: { ...(context.initialG92 ?? zero()) },
+    lengthOffset: context.initialLengthOffset ? { mode: 'G43', h: null, value: { ...context.initialLengthOffset } } : { mode: 'G49', h: null, value: zero() }, g92: { ...(context.initialG92 ?? zero()) },
     spindle: 'M5', spindleSpeed: null, coolant: { mist: false, flood: false }, feed: null, programmedFeed: null,
     retract: 'G98', position: { ...(context.initialPosition ?? unknown()) }, cycle: null,
     operation: null, programEnd: null, reliable: true,
@@ -265,7 +272,7 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
     const raw = rawLines[index], line = index + 1, block = blocks[index], moveStart = moves.length;
     fileToLoader.push(raw.trim() ? loaderToFile.length : null);
     if (raw.trim()) loaderToFile.push(line);
-    const finish = () => lines.push({ line, raw, code: block.code, loaderLine: fileToLoader[line], stateAfter: clone(state), moveRange: [moveStart, moves.length] });
+    const finish = () => lines.push({ line, raw, code: block.code, loaderLine: fileToLoader[line], stateAfter: cloneState(state), moveRange: [moveStart, moves.length] });
     if (state.programEnd) {
       if (block.code && block.code !== '%') issue(line, 'after-program-end', 'Executable text after program end ignored.');
       finish(); continue;
@@ -304,7 +311,7 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
       stop(line, 'modal-conflict', 'Multiple commands in one modal group.'); conflict = true;
     }
     if (conflict) { finish(); continue; }
-    const before = clone(state);
+    const before = cloneState(state);
     for (const g of gs) {
       if ([0, 1, 2, 3, 80].includes(g) || CYCLES.has(g)) {
         state.motion = `G${g}` as Motion;
@@ -426,7 +433,7 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
     lines, initialState, moves, events, tools, operations, bounds, estimatedSeconds, timeComplete, issues, fileToLoader, loaderToFile,
     stateAfterLine(line: number): ModalState {
       if (!Number.isInteger(line) || line < 0 || line > lines.length) throw new RangeError('Physical file line out of range');
-      return clone(line === 0 ? initialState : lines[line - 1].stateAfter);
+      return cloneState(line === 0 ? initialState : lines[line - 1].stateAfter);
     },
   };
 }
