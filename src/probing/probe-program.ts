@@ -44,8 +44,9 @@ interface ProbeResult {
   success: boolean;
 }
 
+/** The work offset in use, from the status report (a program or the console may have changed it). */
 export function getActiveWcs(): string {
-  return (state as any).activeWcs || 'G54';
+  return machine.wcs.value || (state as any).activeWcs || 'G54';
 }
 
 export function applyXYResult(x: number, y: number, axes: string, opts: { mode?: string; wcs?: string; xOffset?: number; yOffset?: number }): void {
@@ -81,15 +82,20 @@ export function isProbingRunning(): boolean {
   return _running;
 }
 
+/** Why a probing routine wouldn't start now, or null if it would. */
+export function probingRefusal(): string | null {
+  if (!state.connected) return 'Not connected';
+  if (_running) return 'Probing already in progress';
+  // Sent now, a probe would wait unread in the controller and run after the Resume, in the job.
+  if (machine.stateName.value === 'tool' && !command.toolChangeAcknowledged())
+    return 'The controller is at a tool change and reads no commands until Resume, so nothing was sent.';
+  return null;
+}
+
 /** Runs a probing sequence: one at a time, and Cancel ends it. */
 export async function runProbing<T>(sequence: () => Promise<T>): Promise<T | null> {
-  if (!state.connected) { log('err', 'Not connected'); return null; }
-  if (_running) { log('err', 'Probing already in progress'); return null; }
-  // Sent now, a probe would wait unread in the controller and run after the Resume, in the job.
-  if (machine.stateName.value === 'tool' && !command.toolChangeAcknowledged()) {
-    log('err', 'The controller is at a tool change and reads no commands until Resume, so nothing was sent.');
-    return null;
-  }
+  const refusal = probingRefusal();
+  if (refusal) { log('err', refusal); return null; }
   _running = true;
   _cancelled = false;
   const modes = await readModes();

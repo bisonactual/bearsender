@@ -2,10 +2,15 @@
 // Console logging
 // ═══════════════════════════════════════════════
 
+import { signal } from '@preact/signals';
 import { state } from './state';
 import { esc } from './ui';
 
+/** The last error logged, so a screen can say why something it started failed. */
+export const lastError = signal<{ at: number; text: string } | null>(null);
+
 export function log(type: string, msg: string): void {
+  if (type === 'err') lastError.value = { at: Date.now(), text: msg };
   const out = document.getElementById('consoleOut')!;
   const cls: Record<string, string> = { tx: 'con-tx', rx: 'con-rx', ok: 'con-ok', err: 'con-err', info: 'con-info', alarm: 'con-alarm' };
   const pre: Record<string, string> = { tx: '→', rx: '←', ok: '✓', err: '✗', info: 'ℹ', alarm: '⚠' };

@@ -35,7 +35,7 @@ export function Card({ title, end, class: cls, children }: { title: string; end?
 }
 
 /** A number field that takes the value on Enter or leaving it, so typing "0." isn't rewritten as it goes. */
-function NumIn({ value, set, step, min, max, label, wide }: { value: number; set: (v: number) => void; step?: number; min?: number; max?: number; label: string; wide?: boolean }) {
+export function NumIn({ value, set, step, min, max, label, wide }: { value: number; set: (v: number) => void; step?: number; min?: number; max?: number; label: string; wide?: boolean }) {
   return (
     <input type="number" class={'fs-in' + (wide ? ' is-wide' : '')} aria-label={label} value={String(value)} step={step} min={min} max={max}
       onChange={e => { const v = parseFloat((e.target as HTMLInputElement).value); if (Number.isFinite(v)) set(v); else (e.target as HTMLInputElement).value = String(value); }} />
@@ -389,7 +389,7 @@ function SdCard() {
             class={'fs-sdrow' + (f.name === sd.selected.value ? ' is-on' : '')} onClick={() => { sd.selected.value = f.name; }}>
             <span class="fs-ellipsis">{f.name}</span><span class="fs-dim fs-mono">{f.size !== null ? fmtBytes(f.size) : ''}</span>
           </button>
-        )) : <div class="fs-empty-sm">{list ? 'No G-code files on the card.' : linked ? 'Not listed yet: press REFRESH.' : 'Connect to list the card.'}</div>}
+        )) : <div class="fs-empty-sm">{list ? 'No G-code files on the card.' : sd.listing.value ? 'Listing…' : linked ? 'Not listed yet: press REFRESH.' : 'Connect to list the card.'}</div>}
       </div>
       {sd.note.value && <div class="fs-note">{sd.note.value}</div>}
       <div class="fs-grid2b">
@@ -487,7 +487,7 @@ export function OffsetsTable() {
 // ── The screen ────────────────────────────────────────────────────────────────
 
 /** The window's width, for the number of columns. */
-const width = signal(window.innerWidth);
+export const width = signal(window.innerWidth);
 window.addEventListener('resize', () => { width.value = window.innerWidth; });
 
 const SETUP_TABS: [ui.SetupTab, string][] = [['machine', 'MACHINE'], ['offsets', 'OFFSETS']];

@@ -14,7 +14,7 @@ import { runRotation, applyRotationToGcode } from './rotation';
 import {
   waypointsTouchplate, waypointsToolsetter, waypointsEdgeSingle,
   waypointsEdgeCorner, waypointsCenter, waypointsRotation,
-  stepPreview, playPreview, renderPreview,
+  stepPreview, playPreview,
 } from './preview';
 
 const SAVE_KEY = 'fs-probing-tab';

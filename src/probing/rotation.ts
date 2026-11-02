@@ -4,6 +4,8 @@
 
 import { state } from '../state';
 import { log } from '../console';
+import { processGcode } from '../gcode';
+import * as job from '../stores/job';
 import { probeAxis, rapidToMPos, isProbingRunning, runProbing } from './probe-program';
 
 function startPos() {
@@ -89,6 +91,7 @@ export function applyRotationToGcode(angleDeg: number): void {
     curY = oy;
     rotated.push(newLine);
   }
-  (state as any).gcodeLines = rotated;
-  log('info', `G-code rotated by ${angleDeg.toFixed(3)}° (${(state as any).gcodeLines.length} lines)`);
+  // Loaded again, so the 3D view, the limits and the frame show the program as it will now run.
+  processGcode(rotated.join('\n'), job.file.value ?? 'rotated.nc');
+  log('info', `G-code rotated by ${angleDeg.toFixed(3)}° (${rotated.length} lines)`);
 }

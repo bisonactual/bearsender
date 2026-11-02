@@ -9,7 +9,6 @@ import { effect, untracked } from '@preact/signals';
 import { state } from '../state';
 import { loadSettings } from '../settings';
 import { showCamera, hideCamera } from '../camera';
-import { initProbingTab } from '../probing/probing-tab';
 import { loadToolTable } from '../tooltable';
 import { renderEzTab } from '../exclusion-zones';
 import { renderFlightTab } from '../flight-recorder';
@@ -20,7 +19,6 @@ import * as ui from './ui';
 function showing(): string {
   switch (ui.screen.value) {
     case 'setup': return ui.setupTab.value === 'machine' ? 'run' : ui.setupTab.value;
-    case 'probing': return 'probing';
     case 'tools': return 'tooltable';
     case 'settings': return ({ grbl: 'settings', zones: 'exclusions', options: 'options', flight: 'flight' } as const)[ui.settingsTab.value];
     default: return 'run';
@@ -31,7 +29,6 @@ export function startCarriedScreens(): void {
   effect(() => {
     const tab = showing();
     if (tab === 'settings' && !state.settingsLoaded && state.connected) loadSettings();
-    if (tab === 'probing' && !state._probingTabInited) { state._probingTabInited = true; initProbingTab(); }
     if (tab === 'tooltable') loadToolTable();
     if (tab === 'exclusions') renderEzTab();
     if (tab === 'flight') renderFlightTab();

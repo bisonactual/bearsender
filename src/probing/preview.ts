@@ -1,6 +1,8 @@
 // ═══════════════════════════════════════════════
-// 2D canvas preview of probe waypoints
+// The probe routines as moves (waypoints), and the 2D preview of them
 // ═══════════════════════════════════════════════
+
+import { signal } from '@preact/signals';
 
 export interface Waypoint {
   x: number;
@@ -10,20 +12,13 @@ export interface Waypoint {
   label: string;
 }
 
-const TYPE_COLOR: Record<string, string> = {
+export const TYPE_COLOR: Record<string, string> = {
   start: '#64748b',
   rapid: '#3b82f6',
   probe: '#f97316',
   retract: '#6366f1',
   contact: '#22c55e',
   result: '#f43f5e',
-};
-
-const _ps = {
-  waypoints: [] as Waypoint[],
-  currentStep: 0,
-  animTimer: null as ReturnType<typeof setInterval> | null,
-  playing: false,
 };
 
 export function waypointsTouchplate(cfg: { probeDistance: number; latchDistance: number; touchPlateHeight?: number }): Waypoint[] {
@@ -215,162 +210,134 @@ export function waypointsRotation(cfg: { edge: string; xyClr: number; depth: num
   ];
 }
 
+// ── The player: the Probing screen's preview card steps through the moves ─────
+
+/** The routine being previewed, as moves from where the probe starts. */
+export const waypoints = signal<Waypoint[]>([]);
+export const step = signal(0);
+export const playing = signal(false);
+let _timer: ReturnType<typeof setInterval> | null = null;
+
+/** Shows a routine's moves and plays them through once. */
+export function loadPreview(wps: Waypoint[]): void {
+  stopPlay();
+  waypoints.value = wps;
+  step.value = 0;
+  if (wps.length) playPreview();
+}
+
 export function stepPreview(delta: number): void {
-  _ps.currentStep = Math.max(0, Math.min(_ps.waypoints.length - 1, _ps.currentStep + delta));
-  renderPreview();
-  updatePreviewDRO();
-  updatePreviewControls();
+  stopPlay();
+  step.value = Math.max(0, Math.min(waypoints.value.length - 1, step.value + delta));
 }
 
 export function playPreview(): void {
-  if (_ps.playing) { stopPreviewAnim(); return; }
-  if (_ps.currentStep >= _ps.waypoints.length - 1) _ps.currentStep = 0;
-  _ps.playing = true;
-  updatePreviewControls();
-  _ps.animTimer = setInterval(() => {
-    if (_ps.currentStep >= _ps.waypoints.length - 1) { stopPreviewAnim(); return; }
-    _ps.currentStep++;
-    renderPreview();
-    updatePreviewDRO();
-    updatePreviewControls();
+  if (playing.value) { stopPlay(); return; }
+  if (!waypoints.value.length) return;
+  if (step.value >= waypoints.value.length - 1) step.value = 0;
+  playing.value = true;
+  _timer = setInterval(() => {
+    if (step.value >= waypoints.value.length - 1) { stopPlay(); return; }
+    step.value++;
   }, 300);
 }
 
-function stopPreviewAnim(): void {
-  if (_ps.animTimer) { clearInterval(_ps.animTimer); _ps.animTimer = null; }
-  _ps.playing = false;
-  updatePreviewControls();
+function stopPlay(): void {
+  if (_timer) { clearInterval(_timer); _timer = null; }
+  playing.value = false;
 }
 
-function updatePreviewControls(): void {
-  const playBtn = document.getElementById('previewPlayBtn') as HTMLButtonElement | null;
-  const stepFwd = document.getElementById('previewStepFwd') as HTMLButtonElement | null;
-  const stepBck = document.getElementById('previewStepBck') as HTMLButtonElement | null;
-  const counter = document.getElementById('previewCounter');
-  if (playBtn) playBtn.textContent = _ps.playing ? '⏸' : '▶';
-  if (stepFwd) stepFwd.disabled = _ps.currentStep >= _ps.waypoints.length - 1;
-  if (stepBck) stepBck.disabled = _ps.currentStep <= 0;
-  if (counter) counter.textContent = _ps.waypoints.length > 0 ? `${_ps.currentStep + 1} / ${_ps.waypoints.length}` : '—';
-}
-
-function updatePreviewDRO(): void {
-  const wp = _ps.waypoints[_ps.currentStep];
-  if (!wp) return;
-  const dx = document.getElementById('previewDroX');
-  const dy = document.getElementById('previewDroY');
-  const dz = document.getElementById('previewDroZ');
-  const dl = document.getElementById('previewDroLabel');
-  if (dx) dx.textContent = wp.x.toFixed(3);
-  if (dy) dy.textContent = wp.y.toFixed(3);
-  if (dz) dz.textContent = wp.z.toFixed(3);
-  if (dl) dl.textContent = wp.label || '';
-}
-
-export function renderPreview(): void {
-  const xyCanvas = document.getElementById('previewXY') as HTMLCanvasElement | null;
-  const xzCanvas = document.getElementById('previewXZ') as HTMLCanvasElement | null;
-  if (!xyCanvas || !xzCanvas || _ps.waypoints.length === 0) return;
-  drawView(xyCanvas, 'XY');
-  drawView(xzCanvas, 'XZ');
-}
-
-function drawView(canvas: HTMLCanvasElement, view: 'XY' | 'XZ'): void {
+/** Draws one view of the moves up to step `cur`, sized to the canvas as laid out. Lines and text take the canvas's CSS colour. */
+export function drawView(canvas: HTMLCanvasElement, view: 'XY' | 'XZ', wps: Waypoint[], cur: number): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  const W = canvas.width;
-  const H = canvas.height;
-  const wps = _ps.waypoints;
-  const cur = _ps.currentStep;
-  const xs = wps.map((w) => w.x);
-  const ys = wps.map((w) => view === 'XY' ? w.y : w.z);
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const fg = getComputedStyle(canvas).color;
+
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = fg;
+  ctx.font = '12px monospace';
+  ctx.fillText(view, 8, 16);
+  ctx.globalAlpha = 1;
+  if (!wps.length || W < 10 || H < 10) return;
+
+  const xs = wps.map(w => w.x);
+  const ys = wps.map(w => view === 'XY' ? w.y : w.z);
   let minX = Math.min(...xs), maxX = Math.max(...xs);
   let minY = Math.min(...ys), maxY = Math.max(...ys);
   const padX = Math.max((maxX - minX) * 0.2, 5);
   const padY = Math.max((maxY - minY) * 0.2, 5);
   minX -= padX; maxX += padX;
   minY -= padY; maxY += padY;
-  const scaleX = W / (maxX - minX || 1);
-  const scaleY = H / (maxY - minY || 1);
-  const scale = Math.min(scaleX, scaleY) * 0.85;
+  const scale = Math.min(W / (maxX - minX || 1), H / (maxY - minY || 1)) * 0.85;
   const offX = W / 2 - (maxX + minX) / 2 * scale;
   const offY = H / 2 + (maxY + minY) / 2 * scale;
   const tx = (x: number) => x * scale + offX;
   const ty = (y: number) => -y * scale + offY;
+  const vy = (w: Waypoint) => view === 'XY' ? w.y : w.z;
 
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#0f0e0c';
-  ctx.fillRect(0, 0, W, H);
-
-  // Grid axes
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  // Axes through the start
+  ctx.globalAlpha = 0.15;
+  ctx.strokeStyle = fg;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(tx(0), 0); ctx.lineTo(tx(0), H);
   ctx.moveTo(0, ty(0)); ctx.lineTo(W, ty(0));
   ctx.stroke();
 
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.font = '10px monospace';
-  ctx.fillText(view, 6, 14);
+  // Moves still to come
+  ctx.globalAlpha = 0.3;
+  ctx.setLineDash([2, 4]);
+  for (let i = Math.max(1, cur + 1); i < wps.length; i++) {
+    ctx.beginPath();
+    ctx.moveTo(tx(wps[i - 1].x), ty(vy(wps[i - 1])));
+    ctx.lineTo(tx(wps[i].x), ty(vy(wps[i])));
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 
-  // Past segments
+  // Moves made
   for (let i = 1; i <= Math.min(cur, wps.length - 1); i++) {
     const a = wps[i - 1], b = wps[i];
-    const ay2 = view === 'XY' ? a.y : a.z;
-    const by = view === 'XY' ? b.y : b.z;
     ctx.beginPath();
-    ctx.moveTo(tx(a.x), ty(ay2));
-    ctx.lineTo(tx(b.x), ty(by));
+    ctx.moveTo(tx(a.x), ty(vy(a)));
+    ctx.lineTo(tx(b.x), ty(vy(b)));
     ctx.strokeStyle = TYPE_COLOR[b.type] || '#888';
-    ctx.lineWidth = b.type === 'probe' ? 2 : 1.5;
-    ctx.setLineDash((b.type === 'rapid' || b.type === 'retract') ? [4, 3] : []);
+    ctx.lineWidth = b.type === 'probe' ? 2.5 : 1.5;
+    ctx.setLineDash((b.type === 'rapid' || b.type === 'retract') ? [5, 3] : []);
     ctx.stroke();
-    ctx.setLineDash([]);
   }
+  ctx.setLineDash([]);
 
-  // Future segments
-  for (let i = Math.max(1, cur + 1); i < wps.length; i++) {
-    const a = wps[i - 1], b = wps[i];
-    const ay2 = view === 'XY' ? a.y : a.z;
-    const by = view === 'XY' ? b.y : b.z;
-    ctx.beginPath();
-    ctx.moveTo(tx(a.x), ty(ay2));
-    ctx.lineTo(tx(b.x), ty(by));
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([2, 4]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Contact/result dots
+  // Contacts and results
   for (let i = 0; i <= Math.min(cur, wps.length - 1); i++) {
     const wp = wps[i];
     if (wp.type !== 'contact' && wp.type !== 'result') continue;
-    const wy = view === 'XY' ? wp.y : wp.z;
     ctx.beginPath();
-    ctx.arc(tx(wp.x), ty(wy), 3.5, 0, Math.PI * 2);
+    ctx.arc(tx(wp.x), ty(vy(wp)), 4, 0, Math.PI * 2);
     ctx.fillStyle = TYPE_COLOR[wp.type];
     ctx.fill();
   }
 
-  // Current position crosshair
-  if (wps[cur]) {
-    const wp = wps[cur];
-    const cy = view === 'XY' ? wp.y : wp.z;
-    const px = tx(wp.x);
-    const py = ty(cy);
-    const sz = 6;
-    ctx.strokeStyle = '#ffffff';
+  // Where the probe is at this step
+  const wp = wps[cur];
+  if (wp) {
+    const px = tx(wp.x), py = ty(vy(wp)), sz = 7;
+    ctx.strokeStyle = fg;
     ctx.lineWidth = 1.5;
-    ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(px - sz, py); ctx.lineTo(px + sz, py);
     ctx.moveTo(px, py - sz); ctx.lineTo(px, py + sz);
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(px, py, 3, 0, Math.PI * 2);
-    ctx.strokeStyle = '#ffffff';
     ctx.stroke();
   }
 }

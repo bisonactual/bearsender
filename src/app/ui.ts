@@ -12,6 +12,8 @@ export type Panel = 'setup' | 'recorder' | 'preview' | 'camera' | 'console' | 'm
 export type LeftPanel = 'jobs' | 'program';
 export type SetupTab = 'machine' | 'offsets';
 export type SettingsTab = 'grbl' | 'zones' | 'options' | 'flight';
+/** The Probing screen's routine: tool length, edge finder, centre finder, rotation. */
+export type ProbingTab = 'tl' | 'ef' | 'cf' | 'rot';
 
 /** A saved choice, if it is still one of the choices (tabs move between versions). */
 function saved<T extends string>(key: string, choices: readonly T[], fallback: T): T {
@@ -22,6 +24,7 @@ function saved<T extends string>(key: string, choices: readonly T[], fallback: T
 export const screen = signal<Screen>(saved<Screen>('fs-screen', ['job', 'setup', 'probing', 'tools', 'settings'], 'job'));
 export const setupTab = signal<SetupTab>(saved<SetupTab>('fs-setup-tab', ['machine', 'offsets'], 'machine'));
 export const settingsTab = signal<SettingsTab>(saved<SettingsTab>('fs-settings-tab', ['grbl', 'zones', 'options', 'flight'], 'options'));
+export const probingTab = signal<ProbingTab>(saved<ProbingTab>('fs-probing-sub', ['tl', 'ef', 'cf', 'rot'], 'tl'));
 
 /** The right panel follows the job while auto is on; picking a tab turns it off. */
 export const auto = signal(lsGet('fs-panel-auto', true));
@@ -56,6 +59,7 @@ export function toggleTick(key: string): void {
 effect(() => lsSet('fs-screen', screen.value));
 effect(() => lsSet('fs-setup-tab', setupTab.value));
 effect(() => lsSet('fs-settings-tab', settingsTab.value));
+effect(() => lsSet('fs-probing-sub', probingTab.value));
 effect(() => lsSet('fs-panel-auto', auto.value));
 effect(() => lsSet('fs-panel', pickedPanel.value));
 effect(() => lsSet('fs-left-auto', leftAuto.value));

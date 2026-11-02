@@ -5,13 +5,12 @@
 import { Component, createRef } from 'preact';
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { state } from '../state';
-import { initProbingTab } from '../probing/probing-tab';
 import { loadToolTable } from '../tooltable';
 import { renderFlightTab } from '../flight-recorder';
 import * as messages from '../stores/messages';
 import * as ui from './ui';
 import { JogCard, PositionCard, LimitsCard, OffsetsTable } from './SetupScreen';
+import { ProbingPopupBody } from './ProbingScreen';
 
 /** Lends carried-over panels to a popup, and puts each back where it came from on close. */
 class Borrow extends Component<{ ids: string[]; class?: string }> {
@@ -64,19 +63,13 @@ function MessagesList() {
 const POPUPS: Record<ui.Popup, PopupDef> = {
   jog: { title: 'JOG', body: () => <div class="fs-popup-cards"><JogCard /><PositionCard /></div>, tall: false },
   offsets: { title: 'WORK OFFSETS', body: () => <div class="fs-popup-body"><OffsetsTable /></div>, tall: true },
-  probe: { title: 'PROBE', ids: ['tabpanel-probing'], tall: true, open: () => openProbing('edgefinder') },
-  measure: { title: 'MEASURE THE TOOL', ids: ['tabpanel-probing'], tall: true, open: () => openProbing('toollength') },
+  probe: { title: 'PROBE', body: () => <ProbingPopupBody />, tall: true, open: () => { ui.probingTab.value = 'ef'; } },
+  measure: { title: 'MEASURE THE TOOL', body: () => <ProbingPopupBody />, tall: true, open: () => { ui.probingTab.value = 'tl'; } },
   frame: { title: 'FRAME THE PROGRAM', body: () => <div class="fs-popup-cards"><LimitsCard /></div>, tall: false },
   tools: { title: 'TOOL TABLE', ids: ['tabpanel-tooltable'], tall: true, open: () => loadToolTable() },
   recorder: { title: 'FLIGHT RECORDER SETTINGS', ids: ['tabpanel-flight'], tall: true, open: () => renderFlightTab() },
   messages: { title: 'MESSAGES', body: () => <MessagesList />, tall: false },
 };
-
-/** The probing panels are built on first use, as the old tab did; then the wanted sub-tab is picked. */
-function openProbing(subtab: string): void {
-  if (!state._probingTabInited) { state._probingTabInited = true; initProbingTab(); }
-  document.querySelector<HTMLElement>(`#tabpanel-probing .prob-subtab-btn[data-subtab="${subtab}"]`)?.click();
-}
 
 function PopupPanel({ id }: { id: ui.Popup }) {
   const def = POPUPS[id];

@@ -18,6 +18,7 @@ import { alarmText } from '../parser';
 import { Legacy } from './Legacy';
 import { JobScreen } from './JobScreen';
 import { SetupScreen } from './SetupScreen';
+import { ProbingScreen } from './ProbingScreen';
 import { PopupHost } from './Popup';
 import { startCarriedScreens } from './carried';
 import { startAsks } from './asks';
@@ -394,7 +395,7 @@ export function App() {
       <MessageLine />
       <JobScreen hidden={s !== 'job'} />
       <SetupScreen />
-      <section class="fs-screen" hidden={s !== 'probing'}><Legacy class="fs-legacy" ids={['tabpanel-probing']} /></section>
+      <ProbingScreen />
       <section class="fs-screen" hidden={s !== 'tools'}><Legacy class="fs-legacy" ids={['tabpanel-tooltable']} /></section>
       <SettingsScreen />
       <BottomBar />
