@@ -183,24 +183,37 @@ export function WarmupStrip() {
 
 const HOLD_MS = 5000;
 
-/** MACHINE WARMUP: held for 5 s it starts the warmup; let go sooner, nothing happens. */
+/** MACHINE WARMUP: held for 5 s it starts the warmup; let go sooner, nothing happens. The hold lasts only
+ *  while the press does: letting go, the button losing focus, the window losing focus or the page being
+ *  hidden all end it (a key let go elsewhere never reaches the button). */
 export function WarmupButton() {
   const [holding, setHolding] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef(false);
   const why = wu.whyNot();
   const isCold = wu.fromCold.value;
   const release = () => {
+    held.current = false;
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     setHolding(false);
   };
   const press = () => {
     if (why || timer.current) return;
+    held.current = true;
     setHolding(true);
-    timer.current = setTimeout(() => { timer.current = null; setHolding(false); wu.start(); }, HOLD_MS);
+    timer.current = setTimeout(() => { timer.current = null; setHolding(false); if (held.current) { held.current = false; wu.start(); } }, HOLD_MS);
   };
   useEffect(() => release, []);
   // A reason coming up while it's held (a job started, the link dropped) lets go of it.
   useEffect(() => { if (why) release(); }, [why]);
+  // The window losing focus or the page hidden while held lets go of it too.
+  useEffect(() => {
+    if (!holding) return;
+    const hidden = () => { if (document.hidden) release(); };
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', hidden);
+    return () => { window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', hidden); };
+  }, [holding]);
   const sub = why ? why.toUpperCase() : isCold ? '· COLD' : '· NORMAL';
   return (
     <button type="button" class={'fs-run-btn is-warmup' + (holding ? ' is-holding' : '')} disabled={!!why}
@@ -210,6 +223,7 @@ export function WarmupButton() {
       onPointerUp={release} onPointerCancel={release} onLostPointerCapture={release}
       onKeyDown={e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); press(); } }}
       onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') release(); }}
+      onBlur={release}
       onContextMenu={e => e.preventDefault()}>
       <span class="fs-warm-fill" aria-hidden="true" />
       {holding
