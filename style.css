@@ -1422,13 +1422,19 @@
   .fs-run-btn.is-hold { background: var(--orange); color: #1a1208; }
   .fs-run-btn.is-stop { background: var(--red); color: #1a0505; }
   @media (max-width: 1440px) {
-    .fs-bottom { column-gap: 20px; }
+    .fs-bottom { column-gap: 16px; }
+    .fs-run { gap: 8px; }
+    .fs-run-btn { width: 104px; }
   }
   @media (max-width: 1280px) {
-    .fs-bottom { column-gap: 12px; }
-    .fs-ovr-read { min-width: 90px; }
+    .fs-bottom { column-gap: 8px; }
+    .fs-ovr-read { min-width: 80px; }
+    .fs-ovr-pct { width: 48px; }
     .fs-step { width: 40px; }
-    .fs-run-btn { width: 104px; }
+    .fs-run { gap: 6px; }
+    .fs-run-btn { width: 96px; gap: 6px; font-size: 17px; }
+    /* The readings keep their width with five-figure values */
+    .fs-bottom .fs-unit { display: none; }
   }
   @media (max-width: 1100px) {
     .fs-bottom { column-gap: 10px; padding-left: 10px; padding-right: 10px; }
@@ -1586,3 +1592,36 @@
   .fs-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text2); }
   .fs-legend i { display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
   .fs-probe-popup { flex: 1 1 auto; min-height: 0; width: min(1200px, 94vw); display: flex; flex-direction: column; }
+  /* ── Machine warmup (src/app/Warmup.tsx): the Setup tab, and the bottom bar's hold button ── */
+  .fs-warm-est { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; }
+  .fs-warm-tag { font-family: var(--cond); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--teal); }
+  .fs-mcard.is-picked { border-color: var(--teal); }
+  .fs-run-btn.is-warmup { position: relative; overflow: hidden; width: 150px; flex-direction: column; gap: 0; padding: 0 8px; background: var(--surface2); border: 2px solid var(--teal); color: var(--text); font-size: 15px; line-height: 1.15; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .fs-run-btn.is-warmup small { display: block; margin-top: 2px; font-size: 12px; color: var(--teal); letter-spacing: 0.06em; }
+  .fs-shell .fs-run-btn.is-warmup:disabled { opacity: 0.6; border-color: var(--border2); }
+  .fs-run-btn.is-warmup:disabled small { color: var(--text2); }
+  .fs-warm-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: rgba(20, 184, 166, 0.45); }
+  .fs-run-btn.is-warmup.is-holding .fs-warm-fill { width: 100%; transition: width 5s linear; }
+  .fs-warm-text { position: relative; }
+  .fs-warm-text.is-hint { font-family: var(--sans) !important; font-size: 13px; font-weight: 600; letter-spacing: 0; }
+  .fs-bar-sections > div.is-now { font-weight: 700; color: #fff; }
+  /* Narrower: MACHINE WARMUP takes three lines. Portrait: the run buttons get a row of their own. */
+  @media (max-width: 1440px) {
+    .fs-run-btn.is-warmup { width: 112px; font-size: 14px; }
+  }
+  @media (max-width: 1280px) {
+    .fs-run-btn.is-warmup { width: 96px; font-size: 13px; }
+    .fs-run-btn.is-warmup small { font-size: 11px; }
+    .fs-warm-text.is-hint { font-size: 12px; }
+  }
+  @media (max-width: 1100px) {
+    .fs-run-btn.is-warmup { width: 84px; padding: 0 4px; font-size: 12px; letter-spacing: 0.02em; }
+    .fs-warm-text.is-hint { font-size: 11px; }
+  }
+  @media (max-width: 900px) {
+    .fs-bottom { flex-wrap: wrap; row-gap: 8px; }
+    .fs-bottom > .fs-grow { display: none; }
+    .fs-bottom > .fs-run { flex: 1 1 100%; }
+    .fs-run-btn, .fs-run-btn.is-warmup { flex: 1 1 0; width: auto; }
+    .fs-run-btn.is-warmup { font-size: 14px; }
+  }

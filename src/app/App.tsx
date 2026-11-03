@@ -19,6 +19,8 @@ import { Legacy } from './Legacy';
 import { JobScreen } from './JobScreen';
 import { SetupScreen } from './SetupScreen';
 import { ProbingScreen } from './ProbingScreen';
+import { WarmupButton } from './Warmup';
+import * as warmup from '../warmup';
 import { PopupHost } from './Popup';
 import { startCarriedScreens } from './carried';
 import { startAsks } from './asks';
@@ -62,7 +64,7 @@ function TopBar() {
         </button>
         <button type="button" class="fs-btn" disabled={link !== 'connected'} onClick={() => sendReset()}>RESET</button>
         <button type="button" class={'fs-home' + (machine.homed.value ? ' is-homed' : '')} title={machine.homed.value ? 'Homed' : 'Not homed'}
-          disabled={link !== 'connected' || m === 'running' || m === 'hold' || m === 'change'}
+          disabled={link !== 'connected' || m === 'running' || m === 'hold' || m === 'change' || !!warmup.progress.value}
           onClick={() => sendHome()}><IconHome />HOME</button>
       </div>
     </header>
@@ -81,6 +83,8 @@ function stateView(): StateView {
   if (m === 'running') return { label: 'RUNNING', sub: 'no action needed', tone: 'go', icon: <IconPlay /> };
   if (m === 'hold' && machine.stateName.value === 'door') return { label: 'DOOR OPEN', sub: 'close it, then Resume', tone: '', icon: <IconPause size={22} /> };
   if (m === 'hold') return { label: 'HOLD', sub: 'paused, press Resume', tone: '', icon: <IconPause size={22} /> };
+  const w = warmup.progress.value;
+  if (w) return { label: 'WARMUP', sub: w.step < 0 ? 'to the start point' : 'step ' + (w.step + 1) + ' of ' + w.steps.length, tone: 'go', icon: <IconPlay /> };
   const ready = (label: string, sub: string): StateView => ({ label, sub, tone: '', icon: <IconReady /> });
   switch (machine.stateName.value) {
     case 'idle': return ready('READY', machine.homed.value ? 'homed, idle' : 'idle, not homed');
@@ -277,8 +281,12 @@ function MessageLine() {
   } else if (m === 'hold' && halt) {
     text = <><strong>{halt.why}.</strong> Nothing more was sent and the machine is held. <strong>Resume</strong> finishes the lines it accepted before that one; <strong>Stop</strong> ends the job here.</>;
   } else if (m === 'hold' && machine.stateName.value === 'door') text = <>The door is open. Close it, then press <strong>Resume</strong>; or Stop to end it.</>;
-  else if (m === 'hold') text = <>Feed hold. Press <strong>Resume</strong> to carry on, or Stop to end the job.</>;
+  else if (m === 'hold') text = <>Feed hold. Press <strong>Resume</strong> to carry on, or Stop to end the {warmup.progress.value ? 'warmup' : 'job'}.</>;
   else if (job.stopping.value) text = <>Stopping: the reset goes once the machine has stopped.</>;
+  else if (warmup.progress.value) {
+    const w = warmup.progress.value;
+    text = <>Machine warmup, {w.cold ? 'from cold' : 'normal'}: {w.step < 0 ? 'going to the start point' : <>step {w.step + 1} of {w.steps.length} at <strong>{num(w.steps[w.step].rpm)} rpm</strong></>}, {job.fmtDuration(w.leftMs)} left. Hold and Stop act on it; Stop stops the spindle.</>;
+  }
   else if (job.notice.value) text = <>{job.notice.value}</>;
   else if (!file) text = <>No job loaded. Press <strong>Load Job</strong> to open a G-code file.</>;
   else if (job.result.value === 'completed') text = <><strong>{file}</strong> completed in {job.fmtDuration(job.elapsedMs.value)}.</>;
@@ -327,7 +335,9 @@ function BottomBar() {
   const ov = machine.overrides.value;
   const linked = connection.connected.value;
   const resume = m === 'hold' || m === 'change';
-  const canStart = linked && (resume || (m === 'ready' && !!job.file.value && !job.running.value && machine.stateName.value === 'idle'));
+  // The warmup streams on its own: no job starts over it (Resume after a hold of it is the cycle start).
+  const warming = !!warmup.progress.value;
+  const canStart = linked && (resume || (m === 'ready' && !!job.file.value && !job.running.value && !warming && machine.stateName.value === 'idle'));
   const start = () => {
     // At a tool change the cycle start goes once every reply is in (command.ts). At a hold BearSender
     // didn't ask for (a door, the console, an error), the controller waits for the cycle start.
@@ -336,8 +346,9 @@ function BottomBar() {
     else startJob();
   };
   // Hold and Stop follow the machine, not the stream: the last ok can come long before the last move ends.
-  const canHold = linked && (m === 'running' || ['run', 'jog'].includes(machine.stateName.value));
-  const canStop = linked && !job.stopping.value && (job.running.value || moving.value);
+  // The warmup is held and stopped as a job is, in its dwells too (the controller is idle then).
+  const canHold = linked && (m === 'running' || ['run', 'jog'].includes(machine.stateName.value) || (warming && m !== 'hold'));
+  const canStop = linked && !job.stopping.value && (job.running.value || moving.value || warming);
   return (
     <footer class="fs-bottom">
       <div class="fs-row-gap">
@@ -353,9 +364,10 @@ function BottomBar() {
       </div>
       <span class="fs-grow" />
       <div class="fs-run">
+        <WarmupButton />
         <button type="button" class="fs-run-btn is-start" disabled={!canStart} onClick={start}><IconPlay size={18} />{resume ? 'RESUME' : 'START'}</button>
         <button type="button" class="fs-run-btn is-hold" disabled={!canHold} onClick={() => pauseJob()}><IconPause />HOLD</button>
-        <button type="button" class="fs-run-btn is-stop" disabled={!canStop} onClick={() => stopJob()}><IconStop />STOP</button>
+        <button type="button" class="fs-run-btn is-stop" disabled={!canStop} onClick={() => warming ? warmup.stop() : stopJob()}><IconStop />STOP</button>
       </div>
     </footer>
   );

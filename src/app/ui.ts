@@ -10,7 +10,7 @@ export type Screen = 'job' | 'setup' | 'probing' | 'tools' | 'settings';
 export type Panel = 'setup' | 'recorder' | 'preview' | 'camera' | 'console' | 'macros';
 /** The job screen's left panel. */
 export type LeftPanel = 'jobs' | 'program';
-export type SetupTab = 'machine' | 'offsets';
+export type SetupTab = 'machine' | 'offsets' | 'warmup';
 export type SettingsTab = 'grbl' | 'zones' | 'options' | 'flight';
 /** The Probing screen's routine: tool length, edge finder, centre finder, rotation. */
 export type ProbingTab = 'tl' | 'ef' | 'cf' | 'rot';
@@ -22,7 +22,7 @@ function saved<T extends string>(key: string, choices: readonly T[], fallback: T
 }
 
 export const screen = signal<Screen>(saved<Screen>('fs-screen', ['job', 'setup', 'probing', 'tools', 'settings'], 'job'));
-export const setupTab = signal<SetupTab>(saved<SetupTab>('fs-setup-tab', ['machine', 'offsets'], 'machine'));
+export const setupTab = signal<SetupTab>(saved<SetupTab>('fs-setup-tab', ['machine', 'offsets', 'warmup'], 'machine'));
 export const settingsTab = signal<SettingsTab>(saved<SettingsTab>('fs-settings-tab', ['grbl', 'zones', 'options', 'flight'], 'options'));
 export const probingTab = signal<ProbingTab>(saved<ProbingTab>('fs-probing-sub', ['tl', 'ef', 'cf', 'rot'], 'tl'));
 

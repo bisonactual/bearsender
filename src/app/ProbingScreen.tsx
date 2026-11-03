@@ -21,7 +21,7 @@ const WCS9 = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'G59.1', 'G59.2', 'G59.3
 
 const PROBING_TABS: [ui.ProbingTab, string][] = [['tl', 'TOOL LENGTH'], ['ef', 'EDGE FINDER'], ['cf', 'CENTRE FINDER'], ['rot', 'ROTATION']];
 
-function Seg<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
+export function Seg<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
   return (
     <div role="radiogroup" aria-label={label} class="fs-seg fs-seg-sm fs-self-start">
       {opts.map(([v, t]) => <button type="button" role="radio" aria-checked={v === value ? 'true' : 'false'} class={v === value ? 'is-on' : ''} onClick={() => set(v)}>{t}</button>)}

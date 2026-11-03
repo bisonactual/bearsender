@@ -238,6 +238,8 @@ export function startJob(): void {
  *  With a recorder stamp ($FLIGHT=<job>) it goes first, and the lines only if the recorder accepts it. */
 export function streamLines(lines: SendLine[], numbered: boolean, opts: { stamp?: string; resumedAt?: number }): void {
   if (starting) return;
+  // The machine warmup streams on its own (warmup.ts): a job doesn't start over it.
+  if (command.streaming() && !(run && !run.ended)) { log('err', 'Nothing was started: the machine warmup is running. Stop it, or let it end.'); return; }
   if (!opts.stamp) { begin(lines, numbered, opts.resumedAt); return; }
   const stamp = opts.stamp;
   starting = true;

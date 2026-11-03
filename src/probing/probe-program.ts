@@ -23,6 +23,7 @@ import { stopMachine, isStopping } from '../streaming';
 import { reportMm } from '../units';
 import * as command from '../command';
 import * as machine from '../stores/machine';
+import { progress as warmupProgress } from '../warmup';
 
 export const WCS_P: Record<string, number> = {
   G54: 1,
@@ -90,6 +91,7 @@ export function isProbingRunning(): boolean {
 export function probingRefusal(): string | null {
   if (!state.connected) return 'Not connected';
   if (_running) return 'Probing already in progress';
+  if (warmupProgress.value) return 'The machine warmup is running, so nothing was sent. Stop it, or let it end.';
   // Sent now, a probe would wait unread in the controller and run after the Resume, in the job.
   if (machine.stateName.value === 'tool' && !command.toolChangeAcknowledged())
     return 'The controller is at a tool change and reads no commands until Resume, so nothing was sent.';

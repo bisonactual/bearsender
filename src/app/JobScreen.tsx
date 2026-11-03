@@ -22,6 +22,8 @@ import { bellOn, toggleBell } from './sound';
 import { measureAtToolChange } from '../streaming';
 import { Legacy } from './Legacy';
 import { Preview } from './Preview';
+import { WarmupStrip } from './Warmup';
+import { progress as warmupProgress } from '../warmup';
 import { frOpenResume, frLoadEvents, frClearEvents, frReadRecord } from '../flight-recorder';
 import { IconChevron, IconBell, IconCheck, IconTodo, IconWarn, IconArrow, IconClose } from './icons';
 
@@ -857,7 +859,7 @@ function JobPanel() {
 export function JobScreen({ hidden }: { hidden: boolean }) {
   return (
     <main class="fs-screen fs-job" hidden={hidden}>
-      <CurrentJob />
+      {warmupProgress.value ? <WarmupStrip /> : <CurrentJob />}
       <div class="fs-job-row">
         <LeftPanel />
         <JobPanel />

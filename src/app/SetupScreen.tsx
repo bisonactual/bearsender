@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════
-// The Setup screen: the machine's cards (position, jogging, spindle, overrides, program limits, surfacing)
-// and the work offsets table. The jog, offsets and frame popups show the same cards.
+// The Setup screen: the machine's cards (position, jogging, spindle, overrides, program limits, surfacing),
+// the work offsets table and the spindle warmup. The jog, offsets and frame popups show the same cards.
 // ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
@@ -18,6 +18,7 @@ import { setWCS } from '../streaming';
 import { processGcode } from '../gcode';
 import { log } from '../console';
 import { loadOffsets, writeOffset, zeroOffset, setToCurrentPos, cancelTlo, WCS_ENTRIES } from '../offsets';
+import { WarmupCards } from './Warmup';
 
 const fix3 = (v: number) => v.toFixed(3);
 const num = (v: number) => v.toLocaleString('en-GB');
@@ -453,21 +454,24 @@ export function OffsetsTable() {
 export const width = signal(window.innerWidth);
 window.addEventListener('resize', () => { width.value = window.innerWidth; });
 
-const SETUP_TABS: [ui.SetupTab, string][] = [['machine', 'MACHINE'], ['offsets', 'OFFSETS']];
+const SETUP_TABS: [ui.SetupTab, string][] = [['machine', 'MACHINE'], ['offsets', 'OFFSETS'], ['warmup', 'SPINDLE WARMUP']];
 
-function MachineCards() {
-  const w = width.value;
-  // Columns by width; each column scrolls on its own, so the page never does.
-  const cols: (() => ComponentChildren)[][] = w >= 1500
-    ? [[PositionCard, SpindleCard], [JogCard, OverridesCard], [LimitsCard], [SurfacingCard]]
-    : w >= 1000
-      ? [[PositionCard, SpindleCard, OverridesCard], [JogCard, LimitsCard], [SurfacingCard]]
-      : [[PositionCard, JogCard, SpindleCard, OverridesCard], [LimitsCard, SurfacingCard]];
+/** Cards in columns; each column scrolls on its own, so the page never does. */
+export function Columns({ cols }: { cols: (() => ComponentChildren)[][] }) {
   return (
     <div class="fs-setup">
       {cols.map(col => <div class="fs-col">{col.map(C => <C />)}</div>)}
     </div>
   );
+}
+
+function MachineCards() {
+  const w = width.value;
+  return <Columns cols={w >= 1500
+    ? [[PositionCard, SpindleCard], [JogCard, OverridesCard], [LimitsCard], [SurfacingCard]]
+    : w >= 1000
+      ? [[PositionCard, SpindleCard, OverridesCard], [JogCard, LimitsCard], [SurfacingCard]]
+      : [[PositionCard, JogCard, SpindleCard, OverridesCard], [LimitsCard, SurfacingCard]]} />;
 }
 
 export function SetupScreen() {
@@ -482,7 +486,7 @@ export function SetupScreen() {
             onClick={() => { ui.setupTab.value = id; }}>{label}</button>
         ))}
       </div>
-      {tab === 'machine' ? <MachineCards /> : <div class="fs-sub fs-pad"><OffsetsTable /></div>}
+      {tab === 'machine' ? <MachineCards /> : tab === 'warmup' ? <WarmupCards /> : <div class="fs-sub fs-pad"><OffsetsTable /></div>}
     </section>
   );
 }

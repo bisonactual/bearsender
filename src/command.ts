@@ -296,6 +296,9 @@ export function endStream(src: JobSource): void {
   if (source === src) source = null;
 }
 
+/** Lines are being pulled from a source: a job, or the machine warmup. */
+export function streaming(): boolean { return source !== null; }
+
 /** Job lines sent and not answered yet, of any run. */
 export function jobLinesInFlight(): number { return jobInFlight; }
 

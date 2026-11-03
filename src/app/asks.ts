@@ -4,9 +4,10 @@
 //
 // $# (offsets and TLO) is read on connect by the old code, and the program limits when a file loads.
 // This adds homing ($22), the travel ($130-$132), what sets the travel's ends (hard limits $21, homing
-// direction $23, pull-off $27), the tool change mode ($341), the G73 retract ($28), the modes a job
-// starts from ($G) and the tool table ($TTLIST), once per connection, as the last of what is read on
-// connecting (connection.ts). $G is read again whenever a file is loaded.
+// direction $23, pull-off $27), the tool change mode ($341), the G73 retract ($28), the maximum spindle
+// speed ($30, for the warmup's note), the modes a job starts from ($G) and the tool table ($TTLIST), once
+// per connection, as the last of what is read on connecting (connection.ts). $G is read again whenever a
+// file is loaded.
 
 import { effect } from '@preact/signals';
 import * as connection from '../stores/connection';
@@ -17,7 +18,7 @@ import { readModesSoon } from '../parser';
 import * as ui from './ui';
 
 export async function readSetupState(): Promise<void> {
-  await Promise.all([22, 130, 131, 132, 21, 23, 27, 341, 28].map(id => command.send('$' + id, { quiet: true })));
+  await Promise.all([22, 130, 131, 132, 21, 23, 27, 341, 28, 30].map(id => command.send('$' + id, { quiet: true })));
   await command.send('$G', { quiet: true });
   await loadToolTable();
 }

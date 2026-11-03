@@ -21,7 +21,7 @@ export const mode = computed<Mode>(() => {
   const s = machine.stateName.value;
   if (s === 'alarm') return 'alarm';
   if (s === 'tool' || (job.heldAtM6.value && job.running.value)) return 'change';
-  // The controller's hold or door, whoever started the motion (a job, the console, the SD card).
+  // The controller's hold or door, whoever started the motion (a job, the console, the warmup).
   if (s === 'hold' || s === 'door') return 'hold';
   if (job.running.value) return job.paused.value ? 'hold' : 'running';
   return 'ready';
