@@ -29,6 +29,7 @@ import { progress as warmupProgress } from '../warmup';
 import { Stop, Miss, afterMiss } from './io';
 import type { Io, Point, StepType } from './io';
 import type { ProbeSettings } from './settings';
+import { probeProblems } from './settings';
 
 export const WCS_P: Record<string, number> = {
   G54: 1,
@@ -214,12 +215,18 @@ function stopped(): Stop {
  *  the drawing's dry run lists them. */
 export function machineIo(P: ProbeSettings, onStep: (type: StepType, label: string) => void = () => {}): Io {
   const backOff = (axis: string, dir: number) => sendAndWait(`G91G0${axis}${dir < 0 ? '' : '-'}${P.back.toFixed(4)}`);
+  // Feeds or a back-off that can't be used are never sent, nor any move before them: a back-off of 0 or
+  // below rapids into the wall it touched.
+  const bad = probeProblems(P, true);
+  const usable = () => { if (bad.length) throw new Stop(`the probe settings can't be used: ${bad.join('; ')}`); };
   return {
     async move(x, y, z, label, type = 'rapid') {
+      usable();
       onStep(type, label);
       if (!await rapidToMPos(x, y, z)) throw stopped();
     },
     async touch(axis, dir, distance, face) {
+      usable();
       const sign = dir < 0 ? '-' : '';
       onStep('probe', `Find the ${face} (fast)`);
       const fast = await probeMove(`G38.3G91F${P.fast}${axis}${sign}${distance.toFixed(4)}`);

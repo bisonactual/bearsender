@@ -38,7 +38,36 @@ function carried(): ProbeSettings {
   return DEFAULTS;
 }
 
-export const probe = signal<ProbeSettings>({ ...DEFAULTS, ...lsGet<Partial<ProbeSettings>>(KEY, carried()) });
+/** The kept set, each value as a number: what isn't one becomes NaN, so it shows as unusable rather than
+ *  as some other number. Values are kept as they were, right or wrong, and checked where they are used. */
+function asNumbers(o: Record<string, unknown>): ProbeSettings {
+  const n = (k: keyof ProbeSettings) => {
+    const v = o[k] ?? DEFAULTS[k];
+    return typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  };
+  return { tip: n('tip'), fast: n('fast'), slow: n('slow'), back: n('back'), clear: n('clear'), search: n('search') };
+}
+
+export const probe = signal<ProbeSettings>(asNumbers(lsGet<Record<string, unknown>>(KEY, carried() as unknown as Record<string, unknown>) ?? {}));
+
+/** What makes the settings unusable, in words; empty when they can be used. A routine never sends
+ *  settings that can't be used: a back-off of 0 or below, say, would rapid into the wall it touched.
+ *  Tool length uses the feeds and the back-off only. */
+export function probeProblems(P: ProbeSettings, toolLength = false): string[] {
+  const out: string[] = [];
+  const need = (ok: boolean, v: number, what: string, rule: string) => {
+    if (!ok) out.push(`${what} is ${Number.isFinite(v) ? v : 'not a number'} (${rule})`);
+  };
+  if (!toolLength) need(P.tip > 0, P.tip, 'the tip diameter', 'it must be above 0');
+  need(P.fast > 0, P.fast, 'the fast feed', 'it must be above 0');
+  need(P.slow > 0, P.slow, 'the slow feed', 'it must be above 0');
+  need(P.back > 0, P.back, 'the back-off', 'it must be above 0');
+  if (!toolLength) {
+    need(P.clear > 0, P.clear, 'the clearance', 'it must be above 0');
+    need(P.search > P.clear, P.search, 'the search distance', `it must be more than the clearance${Number.isFinite(P.clear) ? `, ${P.clear} mm` : ''}`);
+  }
+  return out;
+}
 
 export function setProbe(patch: Partial<ProbeSettings>): void {
   probe.value = { ...probe.value, ...patch };

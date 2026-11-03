@@ -19,7 +19,7 @@ import { rotation, applyRotationToGcode, ROT_SIDES } from './rotation';
 import type { RotCfg } from './rotation';
 import { Miss, Stop } from './io';
 import type { Io, Point } from './io';
-import { probe } from './settings';
+import { probe, probeProblems } from './settings';
 import { CORNER_NAMES } from './plan';
 import type { Plan, Routine } from './plan';
 
@@ -70,9 +70,44 @@ export const cfTarget = signal<Target>({ wcs: '', mode: 'G10' });
 export const efEdge = signal<string | null>(null);
 export function pickEdge(id: string): void { efEdge.value = id; settled('ef'); }
 
+/** What makes a routine's own numbers unusable, in words (kept ones can be anything); empty when usable. */
+export function routineProblems(r: Routine): string[] {
+  const out: string[] = [];
+  const need = (ok: boolean, v: unknown, what: string, rule: string) => {
+    if (!ok) out.push(`${what} is ${typeof v === 'number' && Number.isFinite(v) ? v : 'not a number'} (${rule})`);
+  };
+  const above0 = (v: number, what: string) => need(v > 0, v, what, 'it must be above 0');
+  if (r === 'ef') {
+    const c = ef.value, pick = efEdge.value;
+    if (pick && pick !== 'Z') above0(c.depth, '"Probe this far below the start"');
+    if (pick && pick.length === 1 && pick !== 'Z') need(c.offset >= 0, c.offset, '"Touch the sides this far from the corner"', 'it can\'t be below 0');
+    if (pick === 'Z' || (c.probeZ && pick && pick.length === 1)) {
+      need(c.touchPlateHeight >= 0, c.touchPlateHeight, 'The plate under the probe', 'it can\'t be below 0');
+      need(Number.isFinite(c.workpieceHeight), c.workpieceHeight, '"Put Z0 this far below"', 'it must be a number');
+    }
+  } else if (r === 'cf') {
+    const c = cf.value;
+    if (c.axes !== 'Y') above0(c.workpieceSizeX, 'The size in X');
+    if (c.axes !== 'X') above0(c.workpieceSizeY, 'The size in Y');
+    above0(c.depth, '"Probe this far below the start"');
+    need(Number.isInteger(c.passes) && c.passes >= 1, c.passes, '"Times round"', 'it must be a whole number, 1 or more');
+  } else if (r === 'rot') {
+    above0(rot.value.offset, '"Second point this far along"');
+    above0(rot.value.depth, '"Probe this far below the start"');
+  } else {
+    const c = tl.value;
+    if (c.mode === 'touchplate') {
+      need(c.touchPlateHeight >= 0, c.touchPlateHeight, 'The plate thickness', 'it can\'t be below 0');
+      above0(c.probeDistance, '"Search down up to"');
+    } else above0(c.toolsetterDepth, '"Stop this far above the toolsetter"');
+  }
+  return out;
+}
+
 // ── A run, as the screen shows it ─────────────────────────────────────────────
 
-export type Phase = 'running' | 'ok' | 'fail' | 'cancelled';
+/** 'held': nothing was sent, because something it would be built on can't be used (said in yellow). */
+export type Phase = 'running' | 'ok' | 'fail' | 'cancelled' | 'held';
 export interface ResultLine { k: string; v: string; old?: string; }
 export interface Run {
   phase: Phase;
@@ -137,6 +172,13 @@ let _cancelRequested = false;
 async function exec<T>(r: Routine, plan: Plan | null, body: (io: Io, sp: Point) => Promise<T>): Promise<T | null> {
   const why = probingRefusal();
   if (why) { setRun(r, { phase: 'fail', plan: null, step: 0, label: '', start: null, text: why, lines: [] }); return null; }
+  // Settings that can't be used are never sent: a negative back-off would rapid into the wall.
+  const pp = probeProblems(probe.value, r === 'tl'), rp = routineProblems(r);
+  if (pp.length || rp.length) {
+    const parts = [...(pp.length ? [`the probe settings can't be used: ${pp.join('; ')} (PROBE SETTINGS)`] : []), ...(rp.length ? [`${rp.join('; ')} (column 1)`] : [])];
+    setRun(r, { phase: 'held', plan: null, step: 0, label: '', start: null, lines: [], text: `Nothing was sent: ${parts.join('; and ')}.` });
+    return null;
+  }
   _cancelRequested = false;
   const sp = machineAt(), since = Date.now();
   running.value = r;

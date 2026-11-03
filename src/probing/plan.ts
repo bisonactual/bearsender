@@ -11,6 +11,7 @@
 import { Miss, Stop } from './io';
 import type { Io, Point, Step, StepType } from './io';
 import type { ProbeSettings } from './settings';
+import { probeProblems } from './settings';
 import { edge, CORNERS, SIDES } from './edge-finder';
 import type { EdgeCfg } from './edge-finder';
 import { centre } from './center-finder';
@@ -135,6 +136,13 @@ const H = 2;    // the start, this far above the top
 export async function makePlan(r: Routine, inp: PlanInputs): Promise<Plan> {
   const P = inp.P, rad = P.tip / 2, clr = P.clear + rad, reach = Math.max(+(P.search - clr).toFixed(3), 0);
   const plan: Plan = { r, wps: [], views: ['xy', 'xz'], stock: { k: 'none' }, res: null, where: '', sub: '', warn: '', tool: false, spacing: 0, miss: '' };
+  // Settings that can't be used aren't drawn: they are never sent.
+  const problems = probeProblems(P, r === 'tl');
+  if (problems.length) {
+    plan.where = "The probe settings can't be used, so nothing is drawn and nothing is sent.";
+    plan.warn = `${problems.join('; ')}. Fix them in PROBE SETTINGS.`;
+    return plan;
+  }
   let part: SDF = () => BIG, sp: Point = { x: 0, y: 0, z: H }, origin = O, ballR = rad;
   let run: ((io: Io) => Promise<unknown>) | null = null;
 

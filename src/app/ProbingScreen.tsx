@@ -133,11 +133,14 @@ function TargetBlock({ sig, what }: { sig: Signal<pr.Target>; what: string }) {
 }
 
 /** The probe settings in one line, and the way to them. */
-function ProbeLine() {
+function ProbeLine({ toolLength }: { toolLength?: boolean }) {
   const P = ps.probe.value;
+  const problems = ps.probeProblems(P, toolLength);
+  const n = (v: number) => Number.isFinite(v) ? String(v) : '?';
   return (
-    <div class="fs-psect fs-pset">
-      <span>Probe: tip Ø <b class="fs-mono">{P.tip.toFixed(3)}</b> · fast <b class="fs-mono">{P.fast}</b>, slow <b class="fs-mono">{P.slow}</b> mm/min · back off <b class="fs-mono">{P.back}</b> · clearance <b class="fs-mono">{P.clear}</b> · search <b class="fs-mono">{P.search}</b> mm</span>
+    <div class={'fs-psect fs-pset' + (problems.length ? ' is-warn' : '')}>
+      <span>{problems.length ? <>Probe settings can't be used, so no routine sends them: {problems.join('; ')}.</>
+        : <>Probe: tip Ø <b class="fs-mono">{Number.isFinite(P.tip) ? P.tip.toFixed(3) : '?'}</b> · fast <b class="fs-mono">{n(P.fast)}</b>, slow <b class="fs-mono">{n(P.slow)}</b> mm/min · back off <b class="fs-mono">{n(P.back)}</b> · clearance <b class="fs-mono">{n(P.clear)}</b> · search <b class="fs-mono">{n(P.search)}</b> mm</>}</span>
       <button type="button" class="fs-btn fs-btn-sm" onClick={() => { settingsOpen.value = true; }}>PROBE SETTINGS</button>
     </div>
   );
@@ -287,7 +290,7 @@ function ToolWhat() {
       <div class="fs-mono fs-ptlo">{tlo === null ? 'not read' : f3(tlo)} <span class="fs-dim">mm{tool !== null ? ` · T${tool} in the spindle` : ''}</span></div>
       <div class="fs-note">At a tool change in a job, the job screen's MEASURE has the controller measure the tool itself ($TPW).</div>
     </div>
-    <ProbeLine />
+    <ProbeLine toolLength />
   </>;
 }
 
@@ -406,7 +409,7 @@ function RunFoot({ tab }: { tab: Routine }) {
   let tone = '', text: string;
   if (busy && busy !== tab) { tone = 'run'; text = `${TAB_NAME[busy]} is probing. CANCEL stops it from here.`; }
   else if (run?.phase === 'running') { tone = 'run'; text = run.text || `Probing the ${pr.measuring(tab)}: ${run.label.toLowerCase()}.`; }
-  else if (run) { tone = run.phase === 'ok' ? 'ok' : run.phase === 'fail' ? 'err' : ''; text = run.text; }
+  else if (run) { tone = run.phase === 'ok' ? 'ok' : run.phase === 'fail' ? 'err' : run.phase === 'held' ? 'warn' : ''; text = run.text; }
   else text = pr.readyText(tab);
   const lines = run?.phase === 'ok' && (!busy || busy === tab) ? run.lines : [];
   const canApply = tab === 'rot' && pr.rotAngle.value !== null && job.lines.value.length > 0;
