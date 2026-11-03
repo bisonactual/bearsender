@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════
-// The Setup screen: the machine's cards (position, jogging, spindle, overrides, program limits, surfacing,
-// SD card) and the work offsets table. The jog, offsets and frame popups show the same cards.
+// The Setup screen: the machine's cards (position, jogging, spindle, overrides, program limits, surfacing)
+// and the work offsets table. The jog, offsets and frame popups show the same cards.
 // ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
@@ -12,14 +12,12 @@ import * as job from '../stores/job';
 import * as ui from './ui';
 import * as jog from '../jog';
 import * as frame from '../frame';
-import * as sd from '../sd';
 import * as surfacing from '../surfacing';
 import { sendCmd, rtSend } from '../connection';
 import { setWCS } from '../streaming';
 import { processGcode } from '../gcode';
 import { log } from '../console';
 import { loadOffsets, writeOffset, zeroOffset, setToCurrentPos, cancelTlo, WCS_ENTRIES } from '../offsets';
-import { fmtBytes } from '../ui';
 
 const fix3 = (v: number) => v.toFixed(3);
 const num = (v: number) => v.toLocaleString('en-GB');
@@ -369,41 +367,6 @@ function SurfacingCard() {
   );
 }
 
-// ── SD card ───────────────────────────────────────────────────────────────────
-
-function SdCard() {
-  const linked = connection.connected.value;
-  const list = sd.files.value;
-  const picker = useRef<HTMLInputElement>(null);
-  // Listed when the card opens on a link that's already up, and on REFRESH; never during the connect reads.
-  useEffect(() => {
-    if (linked && list === null && !sd.listing.value) sd.refresh();
-  }, []);
-  return (
-    <Card title="SD CARD" class="fs-mcard-tall" end={
-      <button type="button" class="fs-btn fs-btn-xs" disabled={sd.listing.value} onClick={() => sd.refresh()}>{sd.listing.value ? 'LISTING…' : 'REFRESH'}</button>
-    }>
-      <div class="fs-sdlist" role="listbox" aria-label="Files on the card">
-        {list?.length ? list.map(f => (
-          <button type="button" role="option" aria-selected={f.name === sd.selected.value ? 'true' : 'false'}
-            class={'fs-sdrow' + (f.name === sd.selected.value ? ' is-on' : '')} onClick={() => { sd.selected.value = f.name; }}>
-            <span class="fs-ellipsis">{f.name}</span><span class="fs-dim fs-mono">{f.size !== null ? fmtBytes(f.size) : ''}</span>
-          </button>
-        )) : <div class="fs-empty-sm">{list ? 'No G-code files on the card.' : sd.listing.value ? 'Listing…' : linked ? 'Not listed yet: press REFRESH.' : 'Connect to list the card.'}</div>}
-      </div>
-      {sd.note.value && <div class="fs-note">{sd.note.value}</div>}
-      <div class="fs-grid2b">
-        <button type="button" class="fs-btn" disabled={!linked || !sd.selected.value} title={sd.selected.value ? 'Run ' + sd.selected.value + ' from the card ($F=)' : ''}
-          onClick={() => sd.runSelected()}>RUN FROM SD</button>
-        <button type="button" class="fs-btn" disabled={!!sd.uploading.value} title="Open a file here and upload it to the card"
-          onClick={() => picker.current?.click()}>{sd.uploading.value ? (sd.uploading.value === 'uploading' ? 'UPLOADING…' : sd.uploading.value) : 'UPLOAD & OPEN'}</button>
-      </div>
-      <input ref={picker} type="file" hidden accept=".nc,.gcode,.g,.ngc,.tap"
-        onChange={e => { const input = e.target as HTMLInputElement; const f = input.files?.[0]; if (f) sd.uploadAndOpen(f); input.value = ''; }} />
-    </Card>
-  );
-}
-
 // ── Work offsets ──────────────────────────────────────────────────────────────
 
 type Edit = { x: string; y: string; z: string };
@@ -496,10 +459,10 @@ function MachineCards() {
   const w = width.value;
   // Columns by width; each column scrolls on its own, so the page never does.
   const cols: (() => ComponentChildren)[][] = w >= 1500
-    ? [[PositionCard, SpindleCard], [JogCard, OverridesCard], [LimitsCard, SdCard], [SurfacingCard]]
+    ? [[PositionCard, SpindleCard], [JogCard, OverridesCard], [LimitsCard], [SurfacingCard]]
     : w >= 1000
-      ? [[PositionCard, SpindleCard, OverridesCard], [JogCard, LimitsCard], [SdCard, SurfacingCard]]
-      : [[PositionCard, JogCard, SpindleCard, OverridesCard], [LimitsCard, SdCard, SurfacingCard]];
+      ? [[PositionCard, SpindleCard, OverridesCard], [JogCard, LimitsCard], [SurfacingCard]]
+      : [[PositionCard, JogCard, SpindleCard, OverridesCard], [LimitsCard, SurfacingCard]];
   return (
     <div class="fs-setup">
       {cols.map(col => <div class="fs-col">{col.map(C => <C />)}</div>)}
@@ -509,7 +472,7 @@ function MachineCards() {
 
 export function SetupScreen() {
   const tab = ui.setupTab.value;
-  // Built only while it shows: the offsets are read and the card listed when it opens, as the old tabs did.
+  // Built only while it shows: the offsets are read when it opens, as the old tab did.
   if (ui.screen.value !== 'setup') return null;
   return (
     <section class="fs-screen">

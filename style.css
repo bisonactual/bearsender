@@ -69,60 +69,6 @@
   .tb-btn.danger:hover { background: rgba(239,68,68,0.25); }
   .tb-btn.success { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.4); color: var(--green); }
   .tb-btn.success:hover { background: rgba(34,197,94,0.25); }
-  .tb-btn.upload-open-btn { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.5); color: var(--blue); }
-  .tb-btn.upload-open-btn:hover { background: rgba(59,130,246,0.3); border-color: var(--blue); }
-  .tb-btn.upload-open-btn.uploading { background: rgba(59,130,246,0.3); border-color: var(--blue2); color: #fff; animation: pulse 0.8s infinite; cursor: not-allowed; }
-
-  /* SD card button */
-  .sd-btn-wrap { position: relative; flex-shrink: 0; }
-  .tb-btn.sd-card-btn { background: rgba(20,184,166,0.15); border-color: rgba(20,184,166,0.45); color: var(--teal); }
-  .tb-btn.sd-card-btn:hover { background: rgba(20,184,166,0.28); border-color: var(--teal); }
-  .tb-btn.sd-card-btn.open { background: rgba(20,184,166,0.28); border-color: var(--teal); color: #fff; }
-
-  /* SD dropdown panel */
-  .sd-panel {
-    display: none; position: fixed; z-index: 500;
-    background: var(--surface); border: 1px solid var(--teal);
-    border-radius: var(--radius); box-shadow: 0 8px 32px rgba(0,0,0,0.7);
-    min-width: 360px; max-width: 480px;
-    flex-direction: column; overflow: hidden;
-  }
-  .sd-panel.visible { display: flex; }
-  .sd-panel-header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 12px; background: var(--surface2);
-    border-bottom: 1px solid var(--border2); flex-shrink: 0;
-  }
-  .sd-panel-title { font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--teal); flex: 1; }
-  .sd-refresh-btn {
-    background: var(--surface3); border: 1px solid var(--border2); color: var(--text2);
-    font-family: var(--cond); font-weight: 700; font-size: 11px; letter-spacing: 1px;
-    text-transform: uppercase; padding: 5px 10px; cursor: pointer; border-radius: var(--radius-sm);
-    transition: all 0.12s; white-space: nowrap;
-  }
-  .sd-refresh-btn:hover { background: var(--border); color: var(--text); }
-  .sd-refresh-btn.loading { color: var(--yellow); border-color: var(--yellow2); animation: pulse 0.7s infinite; cursor: not-allowed; }
-  .sd-close-btn {
-    background: none; border: none; color: var(--text3); font-size: 14px; cursor: pointer;
-    padding: 4px 6px; border-radius: 4px; transition: color 0.12s; flex-shrink: 0; line-height: 1;
-  }
-  .sd-close-btn:hover { color: var(--red); }
-  .sd-panel-body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
-  .sd-select-wrap { position: relative; }
-  .sd-select {
-    width: 100%; background: var(--surface3); border: 1px solid var(--border2); color: var(--text);
-    font-family: var(--mono); font-size: 12px; border-radius: var(--radius-sm);
-    outline: none; padding: 0; cursor: pointer; min-height: 120px; max-height: 200px;
-  }
-  .sd-select option {
-    padding: 7px 10px; background: var(--surface3); color: var(--text); border: none;
-  }
-  .sd-select option:checked { background: var(--accent2); color: #fff; }
-  .sd-select option:hover { background: var(--surface2); }
-  .sd-panel-actions { display: flex; align-items: center; gap: 8px; }
-  .sd-file-info { font-family: var(--mono); font-size: 10px; color: var(--text3); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sd-run-btn { padding: 9px 18px; font-size: 13px; }
-
   /* MAIN */
   .main { flex: 1; overflow: hidden; position: relative; display: flex; }
 
@@ -1584,13 +1530,6 @@
   .fs-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 4px 10px; }
   .fs-field { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--text2); }
   .fs-field .fs-in { width: 100%; }
-
-  /* SD card */
-  .fs-sdlist { flex: 1 1 auto; min-height: 120px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
-  .fs-sdlist .fs-empty-sm { padding: 8px 10px; }
-  .fs-sdrow { width: 100%; display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--surface3); background: none; color: var(--text-mid); text-align: left; font-size: 14px; }
-  .fs-sdrow.is-on { background: var(--text); color: var(--bg); }
-  .fs-sdrow.is-on .fs-dim { color: var(--bg); }
 
   /* Work offsets: the active one wears its chip; typed but not written is marked */
   .fs-offsets { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }

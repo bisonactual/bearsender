@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════
-// G-CODE FILES — loading, the SD upload, and the program limits module
+// G-CODE FILES — loading, and the program limits module
 // ═══════════════════════════════════════════════
 //
 // What the program does comes from the G-code interpreter (src/gcode, through stores/program.ts);
@@ -248,61 +248,4 @@ export function loadFile(input: HTMLInputElement): void {
   const reader = new FileReader();
   reader.onload = e => processGcode(e.target!.result as string, file.name);
   reader.readAsText(file);
-}
-
-export function uploadAndOpenFile(input: HTMLInputElement): void {
-  const file = input.files?.[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = e => processGcode(e.target!.result as string, file.name);
-  reader.readAsText(file);
-
-  const wsUrl = (document.getElementById('wsUrl') as HTMLInputElement).value.trim();
-  const httpUrl = wsUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
-  const uploadUrl = httpUrl + '/upload';
-
-  const btn = document.querySelector('.upload-open-btn') as HTMLElement;
-  btn.classList.add('uploading');
-  btn.textContent = '⏳ UPLOADING…';
-
-  log('info', `Uploading "${file.name}" (${(file.size / 1024).toFixed(1)} KB) to ${uploadUrl}`);
-
-  const xhr = new XMLHttpRequest();
-
-  xhr.upload.addEventListener('progress', e => {
-    if (e.lengthComputable) {
-      const pct = Math.round(e.loaded / e.total * 100);
-      btn.textContent = `⏳ ${pct}%…`;
-    }
-  });
-
-  xhr.addEventListener('load', () => {
-    btn.classList.remove('uploading');
-    btn.textContent = '📤 UPLOAD & OPEN';
-    if (xhr.status >= 200 && xhr.status < 300) {
-      log('info', `✓ Upload complete: "${file.name}" saved to SD card`);
-    } else {
-      log('err', `Upload failed: HTTP ${xhr.status} ${xhr.statusText} — check controller is reachable and SD card is mounted`);
-    }
-    input.value = '';
-  });
-
-  xhr.addEventListener('error', () => {
-    btn.classList.remove('uploading');
-    btn.textContent = '📤 UPLOAD & OPEN';
-    log('err', `Upload failed: could not reach ${uploadUrl} — is the controller connected and does it have a web server?`);
-    input.value = '';
-  });
-
-  xhr.addEventListener('timeout', () => {
-    btn.classList.remove('uploading');
-    btn.textContent = '📤 UPLOAD & OPEN';
-    log('err', `Upload timed out — controller did not respond in time`);
-    input.value = '';
-  });
-
-  xhr.timeout = 30000;
-  xhr.open('POST', uploadUrl);
-  xhr.send(new FormData().constructor === FormData ? (() => { const fd = new FormData(); fd.append('file', file, file.name); return fd; })() : null);
 }
