@@ -3,7 +3,7 @@
 Where each file is, in a line, is in `CLANKER_INDEX.md`. This is how the parts fit together.
 
 ## Build
-- **Bun and TypeScript:** `bun run build` (`build.ts`) type-checks with `tsc`, so a type error fails the build. It then bundles `src/main.ts`, and inlines the JS and `style.css` into `index.html`.
+- **Bun and TypeScript:** `bun run build` (`build.ts`) type-checks with `tsc`, so a type error fails the build. It then bundles `src/main.ts`, and inlines the JS and `style.css` into `index.html`, with the fonts in `fonts/` as data, so the page needs no internet for them.
 - **The output** is `dist/bearsender.html`, one file. Beside it are three redirect pages: `index.html`, `flexisender.html` and `Flexisender-Flightrecorder.html`.
 - **Dependencies:** Preact with `@preact/signals` for the UI, and `three` from npm for the 3D view.
 - **Dev server:** `serve.ts` bundles on each request, and reloads the page when a file changes.
@@ -44,7 +44,7 @@ Nothing is kept on the controller except its own settings, offsets and tool tabl
 |---|---|
 | Screens and panels | `fs-screen`, `fs-setup-tab`, `fs-settings-tab`, `fs-probing-sub`, `fs-panel`, `fs-panel-auto`, `fs-left`, `fs-left-auto`, `fs-pos-ref`, `fs-signals-shown` |
 | Connection | `fs-opt-conn` |
-| Options | `fs-opt-autoload-settings`, `fs-opt-colors`, `fs-opt-cols`, `fs-opt-jogsteps`, `fs-opt-jog-show-units`, `fs-opt-bearcolors` (zone colours), `fs-viewport-extents` |
+| Options | `fs-opt-autoload-settings`, `fs-opt-colors`, `fs-opt-font-text`, `fs-opt-font-numbers`, `fs-opt-cols`, `fs-opt-jogsteps`, `fs-opt-jog-show-units`, `fs-opt-bearcolors` (zone colours), `fs-viewport-extents`, `fs-opt-coolant`, `fs-opt-park` |
 | Jobs and the resume | `fs-opt-hold-every-m6`, `fs-opt-run-after-m30`, `fs-opt-resume-lift` |
 | Flight recorder | `fs-fr-enabled` |
 | Zones | `fs-ez-show-labels` |

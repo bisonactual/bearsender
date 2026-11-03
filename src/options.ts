@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════
-// Options — colours, jog steps, zone colours, kept in this browser
+// Options — colours, fonts, jog steps, zone colours, kept in this browser
 // ═══════════════════════════════════════════════
 //
 // Shown in Settings, Options (src/app/OptionsTab.tsx). The connection lives in stores/connection.ts,
@@ -55,6 +55,45 @@ export function optResetAllColors(): void { Object.keys(OPT_COLOR_DEFAULTS).forE
 export function optLoadColors(): void {
   for (const k of Object.keys(OPT_COLOR_DEFAULTS)) document.documentElement.style.setProperty(OPT_COLOR_CSS_VARS[k], colors.value[k]);
 }
+
+// ── Fonts ─────────────────────────────────────────────────────────────────────
+// All bundled in the page (fonts/, inlined by build.ts), so they look the same with no internet. The text
+// font brings its condensed cut for the labels; the numbers font is for the position, offsets and tables.
+
+const SYSTEM_SANS = "system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
+
+/** The text fonts: the name shown, and the stacks for text (--sans) and labels (--cond). */
+export const TEXT_FONTS: Record<string, { name: string; sans: string; cond: string }> = {
+  barlow: { name: 'BARLOW', sans: "'Barlow', sans-serif", cond: "'Barlow Condensed', sans-serif" },
+  plex: { name: 'IBM PLEX', sans: "'IBM Plex Sans', sans-serif", cond: "'IBM Plex Sans Condensed', sans-serif" },
+  roboto: { name: 'ROBOTO', sans: "'Roboto', sans-serif", cond: "'Roboto Condensed', sans-serif" },
+  system: { name: 'SYSTEM', sans: SYSTEM_SANS, cond: SYSTEM_SANS },
+};
+/** The numbers fonts (--mono). */
+export const NUMBER_FONTS: Record<string, { name: string; mono: string }> = {
+  'share-tech': { name: 'SHARE TECH MONO', mono: "'Share Tech Mono', monospace" },
+  'plex-mono': { name: 'IBM PLEX MONO', mono: "'IBM Plex Mono', monospace" },
+  'roboto-mono': { name: 'ROBOTO MONO', mono: "'Roboto Mono', monospace" },
+  system: { name: 'SYSTEM', mono: "ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace" },
+};
+
+function keptChoice(key: string, choices: Record<string, unknown>, fallback: string): string {
+  const v = lsGet<string>(key, fallback);
+  return v in choices ? v : fallback;
+}
+
+export const textFont = signal(keptChoice('fs-opt-font-text', TEXT_FONTS, 'barlow'));
+export const numberFont = signal(keptChoice('fs-opt-font-numbers', NUMBER_FONTS, 'share-tech'));
+
+effect(() => {
+  const t = TEXT_FONTS[textFont.value], n = NUMBER_FONTS[numberFont.value];
+  const root = document.documentElement.style;
+  root.setProperty('--sans', t.sans);
+  root.setProperty('--cond', t.cond);
+  root.setProperty('--mono', n.mono);
+  lsSet('fs-opt-font-text', textFont.value);
+  lsSet('fs-opt-font-numbers', numberFont.value);
+});
 
 // ── Jog step sizes & max speeds ───────────────────────────────────────────────
 /** As typed: comma-separated mm, and the speed caps in mm/min. Kept as typed; APPLY puts them in use. */

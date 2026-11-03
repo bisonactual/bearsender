@@ -50,7 +50,7 @@ export function viewSvg(W: number, H: number, v: 'xy' | 'xz', m: Plan, s: ViewSt
   const X = (a: number) => ox + k * a, Y = (b: number) => oy - k * b, L = (d: number) => d * k;
   const rect = (ax0: number, ay0: number, bx: number, by: number, fill: string, stroke?: string) =>
     `<rect x="${Math.min(X(ax0), X(bx))}" y="${Math.min(Y(ay0), Y(by))}" width="${Math.abs(X(bx) - X(ax0))}" height="${Math.abs(Y(by) - Y(ay0))}" fill="${fill}" stroke="${stroke || 'none'}" stroke-width="1.5"/>`;
-  const text = (x: number, y: number, t: string) => `<text x="${x}" y="${y}" fill="${C.dim}" font-size="11" font-family="Barlow">${esc(t)}</text>`;
+  const text = (x: number, y: number, t: string) => `<text x="${x}" y="${y}" fill="${C.dim}" font-size="11" style="font-family:var(--sans)">${esc(t)}</text>`;
   let o = '';
 
   // The part
@@ -115,12 +115,12 @@ export function viewSvg(W: number, H: number, v: 'xy' | 'xz', m: Plan, s: ViewSt
   if (Math.abs(u[0]) < .25) u = [.7, u[1] < 0 ? -.7 : .7];
   const rr = Math.max(L(s.tip / 2), 3) + 6;
   // A tool is drawn over its start, so there the mark goes on top.
-  const startMark = `<circle cx="${s0[0]}" cy="${s0[1]}" r="${rr}" fill="none" stroke="${C.warn}" stroke-width="2"/><text x="${s0[0] + u[0] * (rr + 6) + (m.tool ? Math.max(L(3), 4) * Math.sign(u[0] || 1) : 0)}" y="${s0[1] + u[1] * (rr + 6) + (u[1] > 0 ? 9 : 0)}" text-anchor="${u[0] < 0 ? 'end' : 'start'}" fill="${C.warn}" font-size="12" font-weight="700" letter-spacing="1.5" font-family="Barlow Condensed">START</text>`;
+  const startMark = `<circle cx="${s0[0]}" cy="${s0[1]}" r="${rr}" fill="none" stroke="${C.warn}" stroke-width="2"/><text x="${s0[0] + u[0] * (rr + 6) + (m.tool ? Math.max(L(3), 4) * Math.sign(u[0] || 1) : 0)}" y="${s0[1] + u[1] * (rr + 6) + (u[1] > 0 ? 9 : 0)}" text-anchor="${u[0] < 0 ? 'end' : 'start'}" fill="${C.warn}" font-size="12" font-weight="700" letter-spacing="1.5" style="font-family:var(--cond)">START</text>`;
   if (!m.tool) o += startMark;
   const away = [-u[0], -u[1]];
   const lab = (c: [number, number], t: string) => {
     const wd = t.length * 7.4 + 14, dx = away[0] < 0 ? -wd - 12 : 12, dy = away[1] < 0 ? -29 : 10;
-    return `<g transform="translate(${c[0] + dx},${c[1] + dy})"><rect width="${wd}" height="19" rx="4" fill="${C.acc}"/><text x="7" y="14" fill="#1a1208" font-size="13" font-family="Share Tech Mono">${esc(t)}</text></g>`;
+    return `<g transform="translate(${c[0] + dx},${c[1] + dy})"><rect width="${wd}" height="19" rx="4" fill="${C.acc}"/><text x="7" y="14" fill="#1a1208" font-size="13" style="font-family:var(--mono)">${esc(t)}</text></g>`;
   };
   const cross = (c: [number, number]) => `<g stroke="${C.acc}" stroke-width="2.2"><line x1="${c[0] - 11}" y1="${c[1]}" x2="${c[0] + 11}" y2="${c[1]}"/><line x1="${c[0]}" y1="${c[1] - 11}" x2="${c[0]}" y2="${c[1] + 11}"/></g><circle cx="${c[0]}" cy="${c[1]}" r="6" fill="none" stroke="${C.acc}" stroke-width="1.5"/>`;
   const vline = (x: number, dash: string) => `<line x1="${X(x)}" y1="${Y(-BIG)}" x2="${X(x)}" y2="${Y(BIG)}" stroke="${C.acc}" stroke-width="${dash ? 1.5 : 2}"${dash ? ` stroke-dasharray="${dash}" opacity=".9"` : ''}/>`;
@@ -158,7 +158,7 @@ export function viewSvg(W: number, H: number, v: 'xy' | 'xz', m: Plan, s: ViewSt
 
   // Which way is plus
   const ah = v === 'xy' ? ['X+', 'Y+'] : ['X+', 'Z+'], bx = W - 58, by = H - 12;
-  o += `<g stroke="${C.dim}" stroke-width="1.5" fill="none" opacity=".8"><path d="M${bx} ${by}h26m-5-4l5 4-5 4"/><path d="M${bx} ${by}v-26m-4 5l4-5 4 5"/></g><text x="${bx + 30}" y="${by + 4}" fill="${C.dim}" font-size="10" font-family="Share Tech Mono">${ah[0]}</text><text x="${bx - 6}" y="${by - 30}" fill="${C.dim}" font-size="10" font-family="Share Tech Mono">${ah[1]}</text>`;
+  o += `<g stroke="${C.dim}" stroke-width="1.5" fill="none" opacity=".8"><path d="M${bx} ${by}h26m-5-4l5 4-5 4"/><path d="M${bx} ${by}v-26m-4 5l4-5 4 5"/></g><text x="${bx + 30}" y="${by + 4}" fill="${C.dim}" font-size="10" style="font-family:var(--mono)">${ah[0]}</text><text x="${bx - 6}" y="${by - 30}" fill="${C.dim}" font-size="10" style="font-family:var(--mono)">${ah[1]}</text>`;
   return `<defs><clipPath id="cl-${id}"><rect x="1" y="1" width="${W - 2}" height="${H - 2}" rx="9"/></clipPath></defs><g clip-path="url(#cl-${id})">${o}</g>`;
 }
 

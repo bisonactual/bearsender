@@ -10,6 +10,7 @@ What lives where. BearSender (formerly FlexiSender; the repo keeps its name).
 |---|---|
 | `index.html` | The page: `#app` for the shell, the file picker and the resume dialog (`#frModal`) |
 | `style.css` | All styles. At the top are the colour tokens and the few old rules still used (the resume dialog's `fr-` and `tb-btn`, the probe preview overlay's `pp-`); after them come the shell's `fs-` rules |
+| `fonts/` | The bundled fonts (woff2), their `@font-face` rules (`fonts.css`), and where they came from with their licences (`README.md`) |
 | `build.ts` | The build |
 | `serve.ts` | The dev server |
 | `.github/workflows/pages.yml` | Publishes `dist/` to GitHub Pages |
@@ -67,7 +68,7 @@ What lives where. BearSender (formerly FlexiSender; the repo keeps its name).
 | `settings-load.ts` | Reads the `$` settings (`$EG`, `$ESH`, `$ES`, `$$`); `settings.ts` re-exports it |
 | `settings-write.ts` | Writes the `$` settings, and keeps the store current from any `$n=` reply |
 | `exclusion-zones.ts` | The zones plugin and the ATCi travel, and their 3D boxes |
-| `options.ts` | Theme colours, jog steps, zone colours, auto-load |
+| `options.ts` | Theme colours, fonts, jog steps, zone colours, auto-load |
 | `camera.ts` | The camera: picture, crosshair, the offset from the spindle, the moves by it |
 | `console.ts` | The log (the last 1000 lines) and the command history |
 | `flight-recorder.ts` | The flight recorder: plugin, settings, job stamping, the record, the resume dialog |

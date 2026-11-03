@@ -29,7 +29,14 @@ if (!result.success) {
 
 const js = await result.outputs[0].text();
 const html = readFileSync(resolve(rootDir, "index.html"), "utf-8");
-const css = readFileSync(resolve(rootDir, "style.css"), "utf-8");
+// The fonts go in the page as data, so it looks the same with no internet: style.css's import of
+// fonts/fonts.css is replaced by its rules, each font file inlined.
+const fontsDir = resolve(rootDir, "fonts");
+const fontFaces = readFileSync(resolve(fontsDir, "fonts.css"), "utf-8")
+  .replace(/url\(([\w.-]+\.woff2)\)/g, (_, file) => `url(data:font/woff2;base64,${readFileSync(resolve(fontsDir, file)).toString("base64")})`);
+const css = readFileSync(resolve(rootDir, "style.css"), "utf-8")
+  .replace(/@import url\('fonts\/fonts\.css'\);/, fontFaces);
+if (css.includes("fonts/fonts.css')")) { console.error("Build failed: style.css's font import wasn't replaced"); process.exit(1); }
 
 // Inline CSS and JS for single-file distribution
 const out = html

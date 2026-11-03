@@ -32,6 +32,7 @@ Type-checks, then writes `dist/` (not in git):
 |---|---|
 | `index.html` | The page: the shell's mount point, the file picker and the resume dialog |
 | `style.css` | All styles; the colour tokens are on `:root` |
+| `fonts/` | The bundled fonts; `README.md` there says where they came from |
 | `src/main.ts` | The entry point |
 | `src/app/` | The screens and panels (Preact) |
 | `src/stores/` | The signals they read |

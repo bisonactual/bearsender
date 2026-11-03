@@ -26,6 +26,7 @@ import * as frame from '../frame';
 import { park, whyNot as parkWhyNot } from '../park';
 import { PopupHost } from './Popup';
 import { startAsks } from './asks';
+import { textFont, numberFont } from '../options';
 import { BEAR_MARK } from './brand';
 import { IconHome, IconReady, IconPlay, IconPause, IconStop, IconWrench, IconWarn, IconUnplugged } from './icons';
 
@@ -152,6 +153,9 @@ function PositionLine() {
   // Fit again when something that changes the line's widths does, and when the window changes size.
   const widths = [ui.signalsShown.value, canSet, wcs, view.label, view.sub, ...shown.map(([a, v]) => a + v.toFixed(3).length)].join('|');
   useLayoutEffect(() => { if (line.current) fitLine(line.current); }, [widths]);
+  // A new font: fit again once it has loaded.
+  const fonts = textFont.value + '|' + numberFont.value;
+  useEffect(() => { document.fonts?.ready.then(() => { if (line.current) fitLine(line.current); }); }, [fonts]);
   useEffect(() => {
     const refit = () => { if (line.current) fitLine(line.current); };
     // The shell is the window's size, so this sees every resize without seeing the line's own changes.

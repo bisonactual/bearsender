@@ -1,4 +1,5 @@
-  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap');
+  /* The fonts are in the page, not fetched (fonts/; build.ts inlines them). Settings, Options picks them. */
+  @import url('fonts/fonts.css');
 
   :root {
     --bg:      #0f0e0c;
@@ -606,6 +607,13 @@
   .fs-run-step { min-width: 58px; height: 44px; padding: 0 10px; font-family: var(--mono) !important; font-size: 16px; letter-spacing: 0; }
   .fs-cool { min-width: 150px; height: 48px; font-size: 17px; }
   .fs-note-sm.is-warn { margin-top: 0; color: var(--warn-text); }
+
+  /* Settings, Options, FONTS: the choices, each in its own font, and a sample. */
+  .fs-font-row { display: flex; flex-direction: column; gap: 6px; }
+  .fs-font-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fs-font-picks .fs-btn { letter-spacing: 0.04em; }
+  .fs-font-sample { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .fs-font-sample .fs-mono { font-size: 24px; }
 
   /* The work offset picker, from the position line's chip. */
   .fs-wcspick { width: min(720px, 92vw); }

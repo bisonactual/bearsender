@@ -130,6 +130,37 @@ function ViewExtents() {
   );
 }
 
+/** A choice of font: each button in its own font. */
+function FontPick({ label, value, set, opts }: { label: string; value: string; set: (v: string) => void; opts: [string, string, string][] }) {
+  return (
+    <div class="fs-font-row">
+      <span class="fs-cap">{label}</span>
+      <div role="radiogroup" aria-label={label} class="fs-font-picks">
+        {opts.map(([k, name, stack]) => (
+          <button type="button" role="radio" aria-checked={k === value ? 'true' : 'false'} class={'fs-btn fs-btn-sm' + (k === value ? ' is-on' : '')}
+            style={{ fontFamily: stack }} onClick={() => set(k)}>{name}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Fonts() {
+  return (
+    <>
+      <FontPick label="TEXT AND LABELS" value={opt.textFont.value} set={v => { opt.textFont.value = v; }}
+        opts={Object.entries(opt.TEXT_FONTS).map(([k, f]) => [k, f.name, f.cond])} />
+      <FontPick label="NUMBERS" value={opt.numberFont.value} set={v => { opt.numberFont.value = v; }}
+        opts={Object.entries(opt.NUMBER_FONTS).map(([k, f]) => [k, f.name, f.mono])} />
+      <div class="fs-font-sample">
+        <span class="fs-cap">FEED</span><span class="fs-mono">1,200</span><span class="fs-dim">mm/min</span>
+        <span class="fs-cap">X</span><span class="fs-mono">−94.304</span>
+        <span class="fs-cap">Y</span><span class="fs-mono">12.500</span>
+      </div>
+    </>
+  );
+}
+
 function Theme() {
   const c = opt.colors.value;
   return (
@@ -231,6 +262,9 @@ const CARDS: OptCard[] = [
   { title: '3D VIEWPORT EXTENTS', text: '3d viewport extents projection grid',
     desc: 'Machine-coordinate workspace bounds. 0,0 is home (top-right); enter negative values for your working area. Updates the grid and camera position instantly.',
     body: () => <ViewExtents /> },
+  { title: 'FONTS', text: 'fonts font text labels numbers barlow plex roboto mono system',
+    desc: 'The fonts are part of the page, so they look the same with no internet. The text font sets the condensed labels too; the numbers font is for the position readout, offsets and tables. SYSTEM uses this device\'s own fonts.',
+    body: () => <Fonts /> },
   { title: 'COLOUR THEME', text: 'colour color theme text background accent 3d',
     desc: 'Customise the primary text colour and background colour. Click the swatch to open the colour picker, or type a hex value. Reset restores the defaults.',
     body: () => <Theme /> },

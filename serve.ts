@@ -47,6 +47,14 @@ Bun.serve({
       });
     }
 
+    // The bundled fonts and their @font-face rules (style.css imports fonts/fonts.css).
+    const font = path.match(/^\/fonts\/([\w.-]+\.(css|woff2))$/);
+    if (font) {
+      return new Response(Bun.file(`${rootDir}/fonts/${font[1]}`), {
+        headers: { "content-type": font[2] === "css" ? "text/css" : "font/woff2" },
+      });
+    }
+
     if (path === "/bundle.js") {
       try {
         const result = await Bun.build({
