@@ -112,8 +112,10 @@ export function context(withPosition = true): InterpreterContext {
   }
   const wcs = machine.wcs.value as WorkSystem;
   ctx.activeWorkOffset = WCS.includes(wcs) ? wcs : 'G54';
+  // The whole vector decides: an offset in X or Y alone counts, with Z 0.
   const tlo = machine.tlo.value, tloVector = machine.tloVector.value;
-  if (tlo) ctx.initialLengthOffset = tloVector ? vec(tloVector) : { x: 0, y: 0, z: tlo };
+  const lengthOffset = tloVector ? vec(tloVector) : tlo ? { x: 0, y: 0, z: tlo } : null;
+  if (lengthOffset && (lengthOffset.x || lengthOffset.y || lengthOffset.z)) ctx.initialLengthOffset = lengthOffset;
   // $110-$112 are mm/min whatever $13 says, as are $27, $28 and $130-$132.
   const rate = (id: number) => { const v = parseFloat(machine.settings.value[id] ?? ''); return v > 0 ? v : undefined; };
   const rates = { x: rate(110), y: rate(111), z: rate(112) };
