@@ -22,7 +22,6 @@ import { SettingsScreen } from './SettingsScreen';
 import { WarmupButton } from './Warmup';
 import * as warmup from '../warmup';
 import { PopupHost } from './Popup';
-import { startCarriedScreens } from './carried';
 import { startAsks } from './asks';
 import { BEAR_MARK } from './brand';
 import { IconHome, IconReady, IconPlay, IconPause, IconStop, IconWrench, IconWarn, IconUnplugged } from './icons';
@@ -378,8 +377,7 @@ function BottomBar() {
 
 export function App() {
   const s = ui.screen.value;
-  // After the first render, so the carried-over panels are in their screens.
-  useEffect(() => { startCarriedScreens(); startAsks(); }, []);
+  useEffect(() => { startAsks(); }, []);
   return (
     <div class="fs-shell">
       <TopBar />

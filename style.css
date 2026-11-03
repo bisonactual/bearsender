@@ -1195,35 +1195,74 @@
   .fs-sub-scroll { overflow-y: auto; }
   .fs-legacy { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; font-size: 13px; line-height: normal; }
   .fs-cards { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; padding: 16px; font-size: 13px; line-height: normal; }
-  .fs-console #mod-console { width: auto; flex: 1; min-height: 0; border-radius: 0; border: 0; }
-  .fs-console #mod-console .module-body { padding: 0; }
-  .fs-console #mod-console .console-out { min-height: 0; }
-  /* Carried-over panels in the job screen's right panel */
-  .fs-panel-box { flex: 1 1 auto; min-height: 160px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .fs-macros #mod-macros { width: auto; border: 0; background: none; }
-  .fs-macros #mod-macros .module-drag-handle { display: none; }
-  .fs-macros #mod-macros .module-body { padding: 0; }
-  .fs-macros #mod-macros[data-mod-size] .macro-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-  .fs-macros #mod-macros[data-mod-size] .macro-btn { min-height: 56px; padding: 0 10px; font-size: 15px; color: var(--text); }
-  /* The camera panel came without styles: settings on the left, the picture with its overlay on the right. */
-  .fs-cam .camera-outer { flex: 1; min-height: 0; display: flex; }
-  .fs-cam .camera-sidebar { width: 220px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; border-right: 1px solid var(--border); background: var(--surface); }
-  .fs-cam .cam-label { margin-bottom: 4px; font-family: var(--cond); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--text2); text-transform: uppercase; }
-  .fs-cam .cam-select, .fs-cam .cam-offset-input { width: 100%; box-sizing: border-box; height: 32px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg); color: var(--text); font-family: var(--mono); }
-  .fs-cam .cam-btn, .fs-cam .ccs-btn { min-height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); font-family: var(--cond); font-weight: 700; letter-spacing: 0.06em; }
-  .fs-cam .cam-btn.primary { border-color: var(--accent2); color: var(--accent); }
-  .fs-cam .ccs-btn.active { border-color: var(--text); }
-  .fs-cam .cam-slider-row, .fs-cam .cam-crosshair-style { display: flex; align-items: center; gap: 6px; }
-  .fs-cam .cam-slider { flex: 1; min-width: 0; }
-  .fs-cam .cam-offset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .fs-cam .cam-offset-label, .fs-cam .cam-pos-lbl { font-size: 11px; color: var(--text2); }
-  .fs-cam .cam-pos-row { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; }
-  .fs-cam .cam-divider { border-top: 1px solid var(--border); }
-  .fs-cam .camera-main { flex: 1; min-width: 0; container-type: size; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
-  .fs-cam .camera-off-msg { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text2); font-size: 14px; }
-  .fs-cam .camera-video-wrap { max-width: 100%; max-height: 100%; }
-  .fs-cam #camVideo { display: block; max-width: 100cqw; max-height: 100cqh; }
-  .fs-cam #camCanvas, .fs-cam .cam-drag-layer { position: absolute; inset: 0; }
+  /* The job screen's right panel: the camera, the console and the macros */
+  .fs-panel-box { flex: 1 1 auto; min-height: 160px; display: flex; flex-direction: column; position: relative; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+
+  /* Console: the log scrolls; the command line and its tools stay below it */
+  .fs-con { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+  .fs-con-out { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 12px; background: var(--surface); font-family: var(--mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+  .fs-con-line { white-space: pre-wrap; color: var(--text); }
+  .fs-con-line.is-tx { color: var(--text3); }
+  .fs-con-line.is-ok { color: var(--green); }
+  .fs-con-line.is-err { color: var(--red); }
+  .fs-con-line.is-info { color: var(--accent); }
+  .fs-con-line.is-alarm { color: var(--yellow); }
+  .fs-con-cmd { position: relative; flex: none; padding: 8px 10px 0; border-top: 1px solid var(--border); background: var(--card); }
+  .fs-con-row { display: flex; align-items: center; gap: 8px; }
+  .fs-con-prompt { font-family: var(--mono); font-size: 18px; color: var(--accent); }
+  .fs-con-input { flex: 1 1 auto; }
+  .fs-con-hint { margin-bottom: 6px; font-size: 13px; color: var(--text2); }
+  .fs-con-ac { position: absolute; left: 10px; right: 10px; bottom: 100%; z-index: 5; max-height: 260px; overflow-y: auto; border: 1px solid var(--border2); border-radius: 8px; background: var(--surface2); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5); }
+  .fs-con-ac-item { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; font-family: var(--mono); font-size: 13px; color: var(--text-mid); cursor: pointer; }
+  .fs-con-ac-item.is-on { background: var(--surface3); color: var(--text); }
+  .fs-con-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; background: var(--card); }
+
+  /* The touch keyboard, over the bottom of the console */
+  .fs-kbd { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; gap: 8px; padding: 8px 10px 10px; background: var(--surface); border-top: 2px solid var(--accent2); box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.75); }
+  .fs-kbd-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .fs-kbd-row { display: flex; gap: 3px; }
+  .fs-kbd-show { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--accent2); border-radius: 6px; background: var(--surface3); color: var(--text); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fs-kbd-pad { flex: none; width: 150px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; align-content: end; }
+  .fs-kbd-key { flex: 1 1 0; min-width: 0; height: 42px; padding: 0 2px; border: 1px solid var(--border2); border-radius: 6px; background: var(--surface3); color: var(--text); font-family: var(--mono) !important; font-size: 14px; font-weight: 700; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .fs-kbd-key:active { background: var(--accent2); border-color: var(--accent); color: #fff; }
+  .fs-kbd-key.is-action { flex: 1.6 1 0; background: rgba(229, 92, 0, 0.18); border-color: var(--accent2); color: var(--accent); font-family: var(--cond) !important; font-size: 13px; }
+  .fs-kbd-key.is-send { flex: 1.6 1 0; background: rgba(34, 197, 94, 0.18); border-color: var(--green); color: var(--go-text); font-family: var(--cond) !important; font-size: 13px; }
+  .fs-kbd-row:first-child .fs-kbd-key { flex: none; width: 90px; }
+  .fs-kbd-key.is-close { width: 48px !important; background: rgba(239, 68, 68, 0.15); border-color: var(--red); color: var(--stop-text); }
+  .fs-kbd-wide2 { grid-column: span 2; }
+
+  /* Macros: the built-in buttons, the operator's own, the editor and what the controller answered */
+  .fs-macros { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .fs-macro-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .fs-btn.fs-macro { height: 56px; white-space: normal; line-height: 1.1; }
+  .fs-macro-list { display: flex; flex-direction: column; gap: 6px; }
+  .fs-macro-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; }
+  .fs-macro-name { flex: none; font-weight: 600; }
+  .fs-macro-item .fs-ellipsis { flex: 1 1 auto; min-width: 0; white-space: nowrap; font-size: 13px; }
+  .fs-macro-edit { flex: none; }
+  .fs-in.fs-macro-code { width: 100%; height: auto; min-height: 120px; padding: 8px; resize: vertical; font-size: 14px; }
+  .fs-macro-btns { display: flex; gap: 8px; }
+  .fs-macro-out { flex: none; }
+  .fs-macro-out pre { margin: 6px 0 0; max-height: 260px; overflow: auto; font-size: 12px; color: var(--text-mid); white-space: pre-wrap; }
+
+  /* Camera: settings on the left, the picture with its crosshair on the right */
+  .fs-cam { flex: 1 1 auto; min-height: 0; display: flex; }
+  .fs-cam-side { flex: none; width: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; border-right: 1px solid var(--border); background: var(--surface); }
+  .fs-cam-side .fs-field b { margin-left: 6px; font-weight: 400; color: var(--text); }
+  .fs-cam-side .fs-btn { white-space: normal; }
+  .fs-cam-side .fs-seg button { flex: 1 1 0; font-size: 18px; }
+  .fs-cam-pair { display: flex; gap: 6px; }
+  .fs-cam-pair > * { flex: 1 1 0; min-width: 0; }
+  .fs-cam-colours { display: flex; flex-wrap: wrap; gap: 4px; }
+  .fs-cam-colours .fs-btn.is-on { background: var(--surface3); }
+  .fs-cam-off-in { display: flex; align-items: center; gap: 6px; }
+  .fs-cam-off-in .fs-in { width: 100%; }
+  .fs-cam-pos { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+  .fs-cam-main { flex: 1 1 auto; min-width: 0; container-type: size; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
+  .fs-cam-off { padding: 16px; font-size: 14px; color: var(--text2); text-align: center; }
+  .fs-cam-wrap { position: relative; max-width: 100%; max-height: 100%; }
+  .fs-cam-wrap video { display: block; max-width: 100cqw; max-height: 100cqh; }
+  .fs-cam-wrap canvas { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
 
   /* Cards on the job screen */
   .fs-card { box-sizing: border-box; background: var(--card); border: 1px solid var(--border); border-radius: 14px; }

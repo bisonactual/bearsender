@@ -24,10 +24,6 @@ export const state = {
   jogHoldMode: false,
   _jogHoldActive: false,
 
-  // Command history
-  cmdHistory: [] as string[],
-  histIdx: -1,
-
   // Machine position
   machineX: 0,
   machineY: 0,
@@ -49,12 +45,7 @@ export const state = {
   _rxBuf: '',
 
   // Settings engine
-  settingsGroups: {} as Record<number, { id: number; parentId: number; name: string }>,
-  settingsDefs: {} as Record<number, any>,
   settingsValues: {} as Record<number, string>,
-  settingsDirty: {} as Record<number, string>,
-  activeGroupId: null as number | null,
-  settingsLoaded: false,
   controllerAxes: ['X', 'Y', 'Z'] as string[],
 
   // Toolpath
@@ -72,10 +63,6 @@ export const state = {
   progLimits: null as any,
   progLimitsTab: 'overall' as string,
 
-  // Console
-  conLines: 0,
-  consoleMaxLines: 50,
-
   // Homing
   machineHomed: false,
   _prevMachineStateSl: '',
@@ -83,32 +70,9 @@ export const state = {
   // Overrides
   ovrCurrent: { feed: 100, rapid: 100, spindle: 100 },
 
-  // Camera
-  camStream: null as MediaStream | null,
-  camActive: false,
-  camZoomVal: 1.0,
-  camCrossSizeVal: 80,
-  camCrossStyle: 'cross',
-  camCrossColor: '#00d4ff',
-  camOffsetX: 0,
-  camOffsetY: 0,
-  camCrossX: 0.5,
-  camCrossY: 0.5,
-  camDragging: false,
-  camShiftDrag: false,
-  camDragStartCross: { x: 0.5, y: 0.5 },
-  camDragStartMouse: { x: 0, y: 0 },
-  camMeasuring: false,
-  camMeasureStartPos: null as { x: number; y: number } | null,
-  _camTabInited: false,
-  _probingTabInited: false,
-
   // Keyboard jog
   kbJogActive: false,
   kbJogKey: null as string | null,
-
-  // Touch keyboard
-  kbdBuffer: '',
 
   // Viewport extents
   vpXMin: -300,

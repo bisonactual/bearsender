@@ -20,7 +20,9 @@ import { mode, panel, leftPanel, rows, atLine, sectionIndex, nextSection, awaite
 import { plan, rowStarts, queuedMs } from './plan';
 import { bellOn, toggleBell } from './sound';
 import { measureAtToolChange } from '../streaming';
-import { Legacy } from './Legacy';
+import { CameraPanel as Camera } from './CameraPanel';
+import { ConsolePanel as Console } from './ConsolePanel';
+import { MacrosPanel as Macros } from './MacrosPanel';
 import { Preview } from './Preview';
 import { WarmupStrip } from './Warmup';
 import { progress as warmupProgress } from '../warmup';
@@ -753,7 +755,8 @@ function RecorderPanel() {
 
 // ── Right panel: Preview, Camera, Console, Macros ─────────────────────────────
 //
-// The carried-over panels stay mounted, hidden while another tab shows. Each fills the panel's height (fs-fill).
+// These stay mounted, hidden while another tab shows, so the console keeps its place and the 3D view its
+// scene. Each fills the panel's height (fs-fill).
 
 function PreviewPanel({ hidden }: { hidden: boolean }) {
   const full = ui.fullView.value;
@@ -771,7 +774,7 @@ function PreviewPanel({ hidden }: { hidden: boolean }) {
 function CameraPanel({ hidden }: { hidden: boolean }) {
   return (
     <div class="fs-fill" hidden={hidden}>
-      <Legacy class="fs-legacy fs-panel-box fs-cam" ids={['tabpanel-camera']} />
+      <div class="fs-panel-box"><Camera /></div>
       <div class="fs-note-sm">
         {camera.device.value === null
           ? 'No camera set up: pick one and press START. BearSender remembers it, starts it whenever this tab shows, and AUTO shows it while a job runs.'
@@ -784,15 +787,15 @@ function CameraPanel({ hidden }: { hidden: boolean }) {
 function ConsolePanel({ hidden }: { hidden: boolean }) {
   return (
     <div class="fs-fill" hidden={hidden}>
-      <Legacy class="fs-legacy fs-panel-box fs-console" ids={['mod-console', 'touchKbdOverlay']} />
+      <div class="fs-panel-box"><Console /></div>
     </div>
   );
 }
 
 function MacrosPanel({ hidden }: { hidden: boolean }) {
   return (
-    <div hidden={hidden}>
-      <Legacy class="fs-macros" ids={['mod-macros']} />
+    <div class="fs-fill" hidden={hidden}>
+      <Macros />
     </div>
   );
 }

@@ -3,8 +3,7 @@
 // ═══════════════════════════════════════════════
 //
 // The groups ($EG), the definitions with their descriptions ($ESH, $ES) and the values ($$), into
-// signals for the Settings screen. The values go to the machine store. The console's autocomplete
-// still reads the copies in `state` until it is rebuilt.
+// signals for the Settings screen and the console's autocomplete. The values go to the machine store.
 
 import { signal, batch } from '@preact/signals';
 import { state, DTYPE_MAP } from './state';
@@ -49,10 +48,7 @@ export async function loadSettings(): Promise<void> {
     reading.value = false;
     return;
   }
-  state.settingsGroups = g;
-  state.settingsDefs = d;
   state.settingsValues = { ...state.settingsValues, ...v };
-  state.settingsLoaded = true;
   batch(() => {
     groups.value = g;
     defs.value = d;
@@ -65,7 +61,6 @@ export async function loadSettings(): Promise<void> {
 
 /** Forgets the definitions on disconnecting; they are read again from the next controller. */
 export function forgetSettings(): void {
-  state.settingsLoaded = false;
   batch(() => { loaded.value = false; readNote.value = null; });
 }
 
