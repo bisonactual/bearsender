@@ -257,15 +257,20 @@ function onClose(): void {
 
 // ── Send helpers ──────────────────────────────────────────────────────────────
 
-/** Writes to the open link. Only the command layer calls it. */
+/** Writes to the open link. Only the command layer calls it. A real-time byte from 0x80 up (0x85, 0x87,
+ *  the overrides, the coolant toggles) goes as that one byte. As text it would go as UTF-8, 0xC2 first:
+ *  grblHAL acts on the second byte and keeps the 0xC2, which starts the next line, so a $ line after it
+ *  is read as G-code (error:9 in an alarm, error:71 when idle). Over WebSocket it goes in a binary
+ *  frame, whose bytes grblHAL's websocketd puts into the input as it does a text frame's. */
 function write(data: string): boolean {
+  const raw = data.length === 1 && data.charCodeAt(0) >= 0x80 ? new Uint8Array([data.charCodeAt(0)]) : null;
   if (connection.settings.value.mode === 'serial') {
     if (!serialWriter) return false;
-    serialWriter.write(new TextEncoder().encode(data)).catch(() => {});
+    serialWriter.write(raw ?? new TextEncoder().encode(data)).catch(() => {});
     return true;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  ws.send(data);
+  ws.send(raw ?? data);
   return true;
 }
 
