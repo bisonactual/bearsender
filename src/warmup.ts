@@ -4,13 +4,20 @@
 //
 // The warmup is a stream of its own through the command layer, like a job but not one: it has no
 // Jobs list row and no runtime, doesn't take the queue's next job, and sends no flight recorder stamp
-// or line numbers (the recorder keeps a record only of a job stamped with $FLIGHT=). Its lines go into
-// the controller's input as they fit, so the controller times the steps (G4) and ends with M5 even if
-// the link drops after the last line went.
+// or line numbers (the recorder keeps a record only of a job stamped with $FLIGHT=). The controller
+// times the steps (G4) and ends with M5.
+//
+// The whole warmup fits in the controller's input (the RX buffer from $I), so all of it, M5 included,
+// is in the controller as soon as it starts, and a lost link can't leave the spindle running (the
+// owner's choice, 3 Nov). The input is what counts, not the planner as well: a new spindle speed and a
+// dwell each wait for the moves before them to finish, so what follows waits in the input. Where the
+// motion pattern's passes don't fit, each step runs fewer passes and dwells the rest of its time, and
+// the Setup tab says so.
 //
 // The way to the start point: Z up first, to the higher of the point's Z and where the tool is, then
-// over to the point's X and Y, then to its Z. Every move is G53, in mm. Then each step sets the speed
-// and dwells, or runs the motion pattern, for its time. M5 ends it; G20 is put back if it was set.
+// over to the point's X and Y, then to its Z. Every move is G53, in mm and mm/min (G21 G94 first, so an
+// inverse-time G93 left by a program doesn't scale the feed). Then each step sets the speed and dwells,
+// or runs the motion pattern, for its time. M5 ends it; G93 and G20 are put back if they were set.
 //
 // Hold and Stop are the bottom bar's, as for a job: Stop is the hold, then the reset once the machine
 // has stopped (streaming.ts), and the reset stops the spindle.
@@ -86,38 +93,70 @@ export function passSecs(m: Motion): number {
 const MAX_PASSES = 100;
 
 export interface Step { line: number; rpm: number; secs: number; }
-export interface Plan { lines: string[]; steps: Step[]; secs: number; }
+/** `fit`: the passes per step its time wants, and those that fit in the room given (null with no motion).
+ *  `fits`: all of it fits in that room. */
+export interface Plan { lines: string[]; steps: Step[]; secs: number; fit: { wanted: number; sent: number } | null; fits: boolean; }
 
 const n = (v: number) => String(Math.round(v * 1000) / 1000);
+/** The bytes the lines take in the controller's input, a newline each. */
+export const bytes = (lines: string[]) => lines.reduce((t, l) => t + byteLen(l + '\n'), 0);
 
-/** The warmup's lines, from where the tool is (machine Z). */
-export function plan(r: Routine, m: Motion, p: Point, fromZ: number): Plan {
+/** The lines with at most `cap` passes a step, and the passes a step's time wants. */
+function build(r: Routine, m: Motion, p: Point, fromZ: number, cap: number): { lines: string[]; steps: Step[]; wanted: number } {
   const lines = [
-    `G21G53G0Z${n(Math.max(p.z, fromZ))}`,
-    `G21G53G0X${n(p.x)}Y${n(p.y)}`,
-    `G21G53G0Z${n(p.z)}`,
+    `G21G94G53G0Z${n(Math.max(p.z, fromZ))}`,
+    `G53G0X${n(p.x)}Y${n(p.y)}`,
+    `G53G0Z${n(p.z)}`,
   ];
   const pts = pass(m, p);
   const each = passSecs(m);
   const steps: Step[] = [];
+  let wanted = 0;
   for (const rpm of speeds(r)) {
     const secs = Math.max(0, r.minutes * 60);
     steps.push({ line: lines.length, rpm, secs });
     lines.push(`M3S${rpm}`);
     if (!each) { lines.push(`G4P${n(secs)}`); continue; }
-    const passes = Math.min(MAX_PASSES, Math.max(1, Math.floor(secs / each)));
-    for (let k = 0; k < passes; k++) for (const pt of pts) lines.push(`G21G53G1X${n(pt.x)}Y${n(pt.y)}F${n(m.feed)}`);
+    wanted = Math.min(MAX_PASSES, Math.max(1, Math.floor(secs / each)));
+    const passes = Math.min(wanted, cap);
+    let first = true;
+    for (let k = 0; k < passes; k++) for (const pt of pts) { lines.push(`G53G1X${n(pt.x)}Y${n(pt.y)}${first ? 'F' + n(m.feed) : ''}`); first = false; }
     const rest = secs - passes * each;
     if (rest >= 0.5) lines.push(`G4P${n(rest)}`);
     steps[steps.length - 1].secs = Math.max(secs, passes * each);
   }
   lines.push('M5');
-  return { lines, steps, secs: steps.reduce((t, s) => t + s.secs, 0) };
+  return { lines, steps, wanted };
+}
+
+/** The warmup's lines, from where the tool is (machine Z), in at most `room` bytes: the passes a step
+ *  are cut until they fit, and each step dwells the rest of its time. */
+export function plan(r: Routine, m: Motion, p: Point, fromZ: number, room = Infinity): Plan {
+  let b = build(r, m, p, fromZ, MAX_PASSES);
+  let cap = b.wanted;
+  while (cap > 0 && bytes(b.lines) > room) b = build(r, m, p, fromZ, --cap);
+  return { lines: b.lines, steps: b.steps, secs: b.steps.reduce((t, s) => t + s.secs, 0),
+    fit: passSecs(m) ? { wanted: b.wanted, sent: cap } : null, fits: bytes(b.lines) <= room };
 }
 
 /** The routine's time in s, the way to the start point not counted. */
 export function estimate(r: Routine, m: Motion): number {
   return plan(r, m, point.peek(), point.peek().z).secs;
+}
+
+/** The routine as it would go now, in the room the controller's input has. */
+export function fitted(r: Routine, m: Motion): Plan {
+  return plan(r, m, point.peek(), point.peek().z, room());
+}
+
+/** What goes after the routine: G93 and G20 put back if $G showed them, and the barrier. */
+function tail(words: string[] | null): string[] {
+  return [...(words?.includes('G93') ? ['G93'] : []), ...(words?.includes('G20') ? ['G20'] : []), 'G4P0'];
+}
+
+/** The room the routine has in the controller's input, with what goes after it. */
+export function room(words: string[] | null = machine.modal.peek()): number {
+  return command.rxBufferSize() - 1 - bytes(tail(words));
 }
 
 // ── Running it ────────────────────────────────────────────────────────────────
@@ -164,20 +203,23 @@ export function start(): void {
   if (why) { log('err', 'Machine warmup: nothing was sent (' + why + ')'); return; }
   starting = true;
   const isCold = fromCold.peek();
-  // The modes first, to put G20 back after. The sim refused the first $ command after homing
-  // (error:71) and took the next, so a refusal gets one more try, as Start does.
+  // The modes first, to put G93 and G20 back after. The sim refused the first $ command after homing
+  // (error:71) and took the next, so a refusal gets one more try, as Start does. Stop, RESET, a reset
+  // or the link going while $G is answered revokes the warmup (command.intent).
+  const live = command.intent();
   const modes = () => command.send('$G', { quiet: true }).catch(e => { if (e instanceof command.CommandFailed) return null; throw e; });
-  modes().then(r => r?.result === 'error' ? modes() : r).then(reply => {
+  modes().then(r => r?.result === 'error' && live() ? modes() : r).then(reply => {
     starting = false;
+    if (!live()) { log('info', 'Machine warmup: nothing was sent. Stop, RESET, a reset or the link going came while $G was answered.'); return; }
     const why = whyNot();
     if (why) { log('err', 'Machine warmup: nothing was sent (' + why + ')'); return; }
-    const p = plan(isCold ? cold.peek() : normal.peek(), motion.peek(), point.peek(), machine.mpos.peek().z);
-    const lines = [...p.lines];
-    if (reply?.result === 'ok' && machine.modal.peek().includes('G20')) lines.push('G20');
-    else if (reply?.result !== 'ok') log('err', 'Machine warmup: $G got no answer, so the units mode isn\'t known; it is left at G21.');
+    const words = reply?.result === 'ok' ? [...machine.modal.peek()] : null;
+    if (!words) log('err', 'Machine warmup: $G got no answer, so the modes it found aren\'t known; it leaves G21 G94 in force.');
+    const p = plan(isCold ? cold.peek() : normal.peek(), motion.peek(), point.peek(), machine.mpos.peek().z, room(words));
+    if (p.fit && p.fit.sent < p.fit.wanted) log('info', `Machine warmup: ${p.fit.sent} of the ${p.fit.wanted} passes a step, to fit in the controller's ${command.rxBufferSize()}-byte input; each step dwells the rest of its time.`);
+    if (!p.fits) log('err', `Machine warmup: it doesn't fit in the controller's ${command.rxBufferSize()}-byte input even without motion, so its M5 goes only when there is room: if the link drops before then, the spindle keeps running.`);
     // Its ok comes once the planner is empty: the machine has stopped.
-    lines.push('G4P0');
-    begin(isCold, p, lines);
+    begin(isCold, p, [...p.lines, ...tail(words)]);
   });
 }
 

@@ -84,6 +84,8 @@ function MotionCard() {
   const usesX = m.pattern !== 'none' && m.pattern !== 'y';
   const usesY = m.pattern !== 'none' && m.pattern !== 'x';
   const each = wu.passSecs(m);
+  // The routine the button runs, as it fits in the controller's input (warmup.ts): known once connected.
+  const fit = connection.connected.value ? wu.fitted(wu.fromCold.value ? wu.cold.value : wu.normal.value, m) : null;
   // Machine travel as the frame check takes it: from 0 down to −$130 (X) and −$131 (Y).
   const tx = setting(130), ty = setting(131);
   const past: string[] = [];
@@ -108,6 +110,10 @@ function MotionCard() {
         ? <>From the start point toward −X and −Y, and back to it. One pass is {about(each)}; each step runs whole passes for its time, then dwells what is left. Acceleration isn't counted.</>
         : <>The spindle runs at the start point; nothing moves.</>}</div>
       {past.length > 0 && <div class="fs-note is-warn">The pattern takes {past.join(', and ')}.</div>}
+      {fit?.fit && fit.fit.sent < fit.fit.wanted && <div class="fs-note is-warn">
+        To fit in the controller's input, so that its M5 is there from the start, each step runs {fit.fit.sent} of its {fit.fit.wanted} passes{fit.fit.sent ? '' : ' (none)'} and dwells the rest of its time. Longer ranges or a slower feed give fewer, longer passes.</div>}
+      {fit && !fit.fits && <div class="fs-note is-warn">
+        This routine doesn't fit in the controller's input even without motion, so its M5 goes only when there is room: if the link drops before then, the spindle keeps running. Fewer steps fit.</div>}
     </Card>
   );
 }
