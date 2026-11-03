@@ -23,6 +23,13 @@ export interface InterpreterContext {
   initialLengthOffset?: Point;
   /** The controller's g73_retract setting, in mm. Required for G73. */
   g73RetractMm?: number;
+  /** The controller's modes when the program starts ($G). Each one not given is G21, G90, G17, G94, G0. */
+  initialModes?: Partial<Pick<ModalState, 'units' | 'distance' | 'plane' | 'feedMode' | 'motion'>>;
+  /** Where homing ($H) leaves each axis, in machine coordinates; null where it isn't known. */
+  homePosition?: Position;
+  /** After M2/M30 grblHAL resets some modes and reads on. 'stop' (the default) reads nothing after it,
+   *  for a sender that doesn't send the rest; 'continue' reads on with grblHAL's resets. */
+  afterProgramEnd?: 'stop' | 'continue';
   /** Resource guard for erroneous L/Q values; exceeding it stops interpretation. */
   maxExpandedMoves?: number;
 }

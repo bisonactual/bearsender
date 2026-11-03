@@ -9,6 +9,9 @@ const WCS = new Set([54, 55, 56, 57, 58, 59, 59.1, 59.2, 59.3]);
 const CYCLES = new Set([73, 81, 82, 83, 85, 89]);
 const SUPPORTED_G = new Set([0, 1, 2, 3, 4, 17, 18, 19, 20, 21, 28, 30, 40, 43, 49, 53, ...WCS, ...CYCLES, 80, 90, 91, 90.1, 91.1, 92, 93, 94, 98, 99]);
 const SUPPORTED_M = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30]);
+/** grblHAL commands that report, unlock or read and move nothing: $, $$, $#, $G, $I, $I+, $N, $X, $HELP…,
+ *  $ES/$EA/$EG (and …H), $PINS, $LIM, $LEV, $SPINDLES, $TTLIST, $FLIGHT, $EVENTS. */
+const TRANSPARENT = /^\$(|\$|#|G|I\+?|N|X|HELP.*|E[SAG]H?|PINS|LIM|LEV|SPINDLES|TTLIST|FLIGHT|EVENTS(=\d+)?)$/;
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const copy = (p: Position): Position => ({ x: p.x, y: p.y, z: p.z });
 /** The same independent snapshot as clone(), field by field: each line takes two, and JSON was most of the run time. */
@@ -59,8 +62,11 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
   if (context.g73RetractMm !== undefined && (!Number.isFinite(context.g73RetractMm) || context.g73RetractMm <= 0)) throw new Error('g73RetractMm must be positive');
   const maxMoves = context.maxExpandedMoves ?? 1000000;
   if (!Number.isInteger(maxMoves) || maxMoves < 1) throw new Error('maxExpandedMoves must be a positive integer');
+  const modes = context.initialModes;
+  if (!modes) issue(0, 'assumed-modes', 'Starting modes not supplied; G21 G90 G17 G94 G0 assumed.', 'inference');
   let state: ModalState = {
-    motion: 'G0', plane: 'G17', units: 'G21', distance: 'G90', arcDistance: 'G91.1', feedMode: 'G94',
+    motion: modes?.motion ?? 'G0', plane: modes?.plane ?? 'G17', units: modes?.units ?? 'G21', distance: modes?.distance ?? 'G90',
+    arcDistance: 'G91.1', feedMode: modes?.feedMode ?? 'G94',
     workOffset: active, workOffsetValue: offsets[active] ? { ...offsets[active]! } : unknown(),
     tool: context.initialTool ?? null, selectedTool: context.initialTool ?? null,
     lengthOffset: context.initialLengthOffset ? { mode: 'G43', h: null, value: { ...context.initialLengthOffset } } : { mode: 'G49', h: null, value: zero() }, g92: { ...(context.initialG92 ?? zero()) },
@@ -72,7 +78,7 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
   if (!offsets[active]) issue(0, 'unknown-work-offset', `${active} not supplied; initial work translation is unknown.`);
   const initialState = clone(state);
   let currentTool: number | null = null;
-  let halted = false, timeComplete = true, estimatedSeconds = 0;
+  let halted = false, timeComplete = true, estimatedSeconds = 0, programEndLine = 0;
   const frameOffset = (): Position => Object.fromEntries(AXES.map(k => [k, add(add(state.workOffsetValue[k], state.g92[k]), state.lengthOffset.value[k])])) as Position;
   const markIncomplete = () => { bounds.machine.complete = bounds.work.complete = timeComplete = false; };
   const stop = (line: number, code: string, message: string) => {
@@ -274,7 +280,45 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
     if (raw.trim()) loaderToFile.push(line);
     const finish = () => lines.push({ line, raw, code: block.code, loaderLine: fileToLoader[line], stateAfter: cloneState(state), moveRange: [moveStart, moves.length] });
     if (state.programEnd) {
-      if (block.code && block.code !== '%') issue(line, 'after-program-end', 'Executable text after program end ignored.');
+      const executable = !!block.code && block.code !== '%';
+      if (context.afterProgramEnd !== 'continue') {
+        if (executable) issue(line, 'after-program-end', 'Executable text after program end ignored.');
+        finish(); continue;
+      }
+      if (!executable) { finish(); continue; }
+      // grblHAL reads on: the end only reset its modes (below, at the M2/M30).
+      if (!halted) issue(line, 'after-program-end', `Line ${line} runs after the program end on line ${programEndLine}: grblHAL reset G1 G17 G90 G94 G54 M5 M9 there and reads on.`);
+      state.programEnd = null;
+    }
+    // $ and [ lines are grblHAL's own commands, not G-code. Those known to change nothing are passed
+    // over; $H puts the axes where homing leaves them; anything else (a jog, a setting written, a
+    // command not known here) leaves the reading incomplete, and the position after it unknown where
+    // it can move the machine. The sender still sends every one of them.
+    if (/^\s*[$[]/.test(raw)) {
+      const text = raw.replace(/\(.*?\)/g, '').replace(/;.*/, '').toUpperCase().replace(/\s+/g, '');
+      if (halted || TRANSPARENT.test(text)) { finish(); continue; }
+      const homing = text.match(/^\$H([XYZABCUVW]*)$/);
+      if (homing) {
+        const axes = homing[1] ? AXES.filter(k => homing[1].includes(k.toUpperCase())) : AXES;
+        const end = { ...state.position };
+        for (const k of axes) end[k] = context.homePosition?.[k] ?? null;
+        if (axes.some(k => end[k] === null)) issue(line, 'unknown-home', `${text}: where homing leaves the machine isn't known; positions after it are unknown until absolute moves set them.`);
+        // A rapid's time is a lower bound for homing, which seeks slower.
+        if (axes.length) emit(line, 'rapid', end, '$H', undefined, deltaTo(end, axes));
+      } else {
+        const jog = text.startsWith('$J=');
+        const setting = /^\$(\d+|N\d+)=/.test(text);
+        issue(line, 'unknown-system-line', jog
+          ? `${text} jogs the machine: BearSender doesn't follow it, so positions after it are unknown until absolute moves set them.`
+          : setting ? `${text} writes a controller setting, which can change how the rest runs; BearSender reads on as before it.`
+          : `${text} is a controller command BearSender doesn't follow; it may move the machine or change its state, so positions after it are unknown until absolute moves set them.`);
+        markIncomplete();
+        state.reliable = false;
+        if (jog) {
+          const words = lexLine(text.slice(3)).words;
+          for (const k of AXES) if (words.some(([l]) => l === k.toUpperCase())) state.position[k] = null;
+        } else if (!setting) state.position = unknown();
+      }
       finish(); continue;
     }
     // Diagnose unsupported tokens even in a suffix already stopped by an earlier error.
@@ -413,7 +457,8 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
     if (!halted) for (const m of ms) {
       if (m === 0 || m === 1) { event(line, m === 0 ? 'pause' : 'optional-stop', null); issue(line, 'untimed-stop', `M${m} operator wait excluded from lower-bound time.`); }
       if (m === 2 || m === 30) {
-        event(line, 'end', 0); state.programEnd = `M${m}`;
+        // grblHAL's program end (gcode.c): these reset; units, the tool length offset, F, S and T stay.
+        event(line, 'end', 0); state.programEnd = `M${m}`; programEndLine = line;
         state.spindle = 'M5'; state.coolant = { mist: false, flood: false };
         state.motion = 'G1'; state.plane = 'G17'; state.distance = 'G90'; state.feedMode = 'G94'; state.cycle = null;
         selectWcs('G54', line);
@@ -421,7 +466,7 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
     }
     finish();
   }
-  const lastExecuted = lines.find(l => l.stateAfter.programEnd !== null)?.line ?? lines.length;
+  const lastExecuted = context.afterProgramEnd === 'continue' ? lines.length : lines.find(l => l.stateAfter.programEnd !== null)?.line ?? lines.length;
   if (currentTool !== null) tools[currentTool].endLine = lastExecuted;
   if (state.operation !== null) operations[state.operation].endLine = lastExecuted;
   if (halted) {
