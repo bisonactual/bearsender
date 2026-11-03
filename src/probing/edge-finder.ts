@@ -60,9 +60,10 @@ async function probeSingleEdge(cfg: any, sp: { x: number; y: number; z: number }
   }
   await rapidToMPos(null, null, sp.z);
   await rapidToMPos(sp.x, sp.y, null);
+  // The tip's centre stops a radius short of the side, so the side is a radius further on.
   const radius = cfg.probeDiameter / 2;
-  const ex = isX ? result.x - dir * radius : result.x;
-  const ey = !isX ? result.y - dir * radius : result.y;
+  const ex = isX ? result.x + dir * radius : result.x;
+  const ey = !isX ? result.y + dir * radius : result.y;
   const opts = { mode: cfg.coordMode, wcs: cfg.wcs };
   applyXYResult(ex, ey, axis, opts);
   log('info', `✓ Edge ${edge}: X=${ex.toFixed(4)} Y=${ey.toFixed(4)}`);
@@ -100,12 +101,15 @@ async function probeCorner(cfg: any, sp: { x: number; y: number; z: number }, cl
     return false;
   }
   await rapidToMPos(null, null, sp.z);
+  // The tip's centre stops a radius short of each side, so the sides are a radius further on.
   const radius = cfg.probeDiameter / 2;
-  const ex = rx.x - s.x * radius;
-  const ey = ry.y - s.y * radius;
+  const ex = rx.x + s.x * radius;
+  const ey = ry.y + s.y * radius;
   let ez: number | null = null;
   if (cfg.probeZ) {
-    await rapidToMPos(ex + s.x * radius, ey + s.y * radius, null);
+    // Z on the part (or the pocket floor), the corner offset in from both sides.
+    const into = signs[edge];
+    await rapidToMPos(ex + into.x * cfg.offset, ey + into.y * cfg.offset, null);
     const rz = await probeAxis('Z', -1, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
     if (rz) ez = rz.z;
     await rapidToMPos(null, null, sp.z);
