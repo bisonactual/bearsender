@@ -16,6 +16,7 @@ import * as surfacing from '../surfacing';
 import { sendCmd, rtSend } from '../connection';
 import { setWCS } from '../streaming';
 import { processGcode } from '../gcode';
+import { loadPreview3D } from '../probing/probe-preview-3d';
 import { log } from '../console';
 import { loadOffsets, writeOffset, zeroOffset, setToCurrentPos, cancelTlo, WCS_ENTRIES } from '../offsets';
 import { WarmupCards } from './Warmup';
@@ -358,7 +359,7 @@ function SurfacingCard() {
         </div>
       </div>
       <div class="fs-grid2b">
-        <button type="button" class="fs-btn" title="Show the passes in the 3D view" onClick={() => (window as any).loadPreview3D?.(surfacing.generateWaypoints(sfCfg.value))}>PREVIEW</button>
+        <button type="button" class="fs-btn" title="Show the passes in the 3D view" onClick={() => loadPreview3D(surfacing.generateWaypoints(sfCfg.value))}>PREVIEW</button>
         <button type="button" class="fs-btn fs-btn-go" title="Load the surfacing program as the job" onClick={() => {
           const gcode = surfacing.generateGcode(sfCfg.value);
           processGcode(gcode, 'Surfacing.nc');

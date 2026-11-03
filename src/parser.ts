@@ -193,14 +193,6 @@ function parseStatusReport(s: string): void {
   }
 
   emit('status', tags, report);
-
-  const stats = document.getElementById('vpStats');
-  if (stats) {
-    const q = command.stats();
-    stats.innerHTML =
-      `X: ${state.machineX.toFixed(3)}&nbsp;&nbsp;Y: ${state.machineY.toFixed(3)}&nbsp;&nbsp;Z: ${state.machineZ.toFixed(3)}<br>` +
-      `RX: ${q.bytes}/${state.RX_BUFFER_SIZE}B&nbsp;&nbsp;QUEUE: ${q.waiting.length}`;
-  }
 }
 
 export function setMachineState(s: string): void {

@@ -19,8 +19,6 @@ export function processGcode(text: string, name: string): void {
   // CR, LF or CRLF: grblHAL ends a line at either, so a lone CR inside a line would split it there.
   state.gcodeLines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l.length > 0);
   state.lineHead = 0; state.segmentIndex = 0;
-  const label = document.getElementById('fileName');
-  if (label) label.textContent = name;
   job.loaded(name, state.gcodeLines);
   updateProgress(0, state.gcodeLines.length);
   log('info', 'Loaded: ' + name + ' (' + state.gcodeLines.length + ' lines)');
