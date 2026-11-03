@@ -1,5 +1,5 @@
 import { resolve } from "path";
-import { readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 
 const rootDir = import.meta.dir;
 const srcDir = resolve(rootDir, "src");
@@ -38,5 +38,23 @@ const out = html
   .replace(/<!-- DEV-RELOAD -->[\s\S]*?<!-- \/DEV-RELOAD -->/, '')
   .replace(/<!-- CSS extracted to style\.css[^>]*-->/, '');
 
-writeFileSync(resolve(rootDir, "dist", "bearsender.html"), out);
-console.log("Built → dist/bearsender.html");
+const distDir = resolve(rootDir, "dist");
+mkdirSync(distDir, { recursive: true });
+writeFileSync(resolve(distDir, "bearsender.html"), out);
+
+// The old addresses go to BearSender, keeping any ?query and #hash, so bookmarks still work.
+const redirect = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BearSender</title>
+<meta http-equiv="refresh" content="0; url=bearsender.html">
+<script>location.replace('bearsender.html' + location.search + location.hash);</script>
+</head>
+<body><p>BearSender has moved to <a href="bearsender.html">bearsender.html</a>.</p></body>
+</html>
+`;
+for (const page of ["index.html", "flexisender.html", "Flexisender-Flightrecorder.html"]) {
+  writeFileSync(resolve(distDir, page), redirect);
+}
+console.log("Built → dist/bearsender.html, with index.html, flexisender.html and Flexisender-Flightrecorder.html redirecting to it");

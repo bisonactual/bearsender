@@ -1,46 +1,41 @@
 # Runbook
 
 ## Prerequisites
+[Bun](https://bun.sh); 1.4.4 is what the Pages workflow uses. No node or npm is needed. Run `bun install` once.
 
-- [Bun](https://bun.sh) (tested with 1.3.x)
-- No node/npm required
-
-## Dev Server
-
+## Dev server
 ```bash
-bun dev
+bun run dev
 ```
+Serves the source on `http://localhost:3000` (or `PORT`). `src/main.ts` is bundled on each request for `/bundle.js`, and editing a file reloads the page.
 
-Starts on `http://localhost:3000`. TypeScript is bundled on-the-fly by Bun on each request to `/app.js`. Editing any file in `src/` or `index.html` triggers a browser reload via WebSocket.
-
-## Build (single-file release)
-
+## Type check
 ```bash
-mkdir -p dist
-bun run build.ts
+bun run check
 ```
 
-Produces `dist/flexisender.html` — a single self-contained HTML file with all JS inlined and minified. The dev-reload snippet is stripped. Three.js is still loaded from CDN.
-
-## Project Structure
-
+## Build
+```bash
+bun run build
 ```
-index.html      — markup + CSS, loads /app.js in dev, inlined in release
-serve.ts        — Bun dev server (port 3000, live reload)
-build.ts        — produces dist/flexisender.html
-package.json    — scripts: dev, build
-src/            — TypeScript source modules
-```
+Type-checks, then writes `dist/` (not in git):
+- **`dist/bearsender.html`:** the app, one file with the JS and CSS inlined, and the dev reload stripped;
+- **the old addresses:** `dist/index.html`, `dist/flexisender.html` and `dist/Flexisender-Flightrecorder.html`, which redirect to it and keep any `?query` and `#hash`.
 
-## Adding a New Module
+## Publishing (GitHub Pages)
+`.github/workflows/pages.yml` runs on every push to `main`, and can be started by hand. It installs, builds, and publishes `dist/` with the official Pages actions, each pinned to a commit.
+- **The Pages source must be "GitHub Actions":** repository Settings, Pages, Build and deployment, Source.
+- **Switch the source first.** With "Deploy from a branch", the push would publish `main`'s root, which no longer has the old built pages.
 
-1. Create `src/yourmodule.ts`
-2. Import and wire it in `src/main.ts`
-3. If it has functions called from HTML `onclick` handlers, expose them on `window` in `main.ts`
+## Project layout
+| Path | What it is |
+|---|---|
+| `index.html` | The page: the shell's mount point, the file picker, the resume dialog and the probe preview's overlay |
+| `style.css` | All styles; the colour tokens are on `:root` |
+| `src/main.ts` | The entry point |
+| `src/app/` | The screens and panels (Preact) |
+| `src/stores/` | The signals they read |
+| `serve.ts` | The dev server |
+| `build.ts` | The build |
 
-## Notes
-
-- Three.js is loaded from CDN (`<script>` in `index.html`), accessed via `declare const THREE: any` in TS files
-- All mutable shared state lives in `src/state.ts`
-- HTML `onclick` handlers call global functions — these are assigned to `window` in `main.ts`
-- The build step inlines the bundled JS back into the HTML to preserve the single-file distribution model
+`CLANKER_INDEX.md` says what each file does, and `reference.md` how they fit together.

@@ -4,3 +4,5 @@ Thumbs.db
 .kiro/
 node_modules/
 *.log
+# Built by `bun run build`; the Pages workflow builds and publishes it.
+dist/
