@@ -8,13 +8,15 @@
 // that, $# gives the same line. A move is answered once it is planned, so G4 P0 goes after it: its
 // ok comes when the planner is empty, that is, when the machine has stopped there.
 //
-// Every move and write says G21: the distances are millimetres whatever the last job left. A
-// routine reads the distance mode and units first ($G) and puts them back when it ends, however it
-// ends, so its G91 moves don't leave the next move incremental. If that $G gets no answer (a reset or
-// a banner came first), the routine doesn't start: the modes to put back aren't known. Cancel takes
-// back the routine's commands not sent yet, including those held while the line is synced, and stops
-// the move in progress (a hold, then the reset once the machine has stopped); the routine owns the
-// machine until then.
+// Every move says G21 G94: the distances are millimetres and the feeds mm/min whatever the last job
+// left (in G93 a feed is a time, and the probe would go faster than set). A routine reads the units,
+// the distance mode and the feed mode first ($G); it writes its result while it still owns the
+// machine, then puts the modes back, however it ends, so "as before" holds at the end. If that $G
+// gets no answer (a reset or a banner came first), the routine doesn't start: the modes to put back
+// aren't known. Cancel takes back the routine's commands not sent yet, including those held while
+// the line is synced, and stops the move in progress (a hold, then the reset once the machine has
+// stopped); the routine owns the machine until then. Once its result is being written, Cancel has
+// nothing left to stop and isn't taken: a Cancel that is taken means nothing was written.
 
 import { state } from '../state';
 import { log } from '../console';
@@ -39,6 +41,9 @@ export const WCS_P: Record<string, number> = {
   'G59.2': 8,
   'G59.3': 9,
 };
+
+/** What every move and write says first: millimetres, and feeds in mm/min. */
+const MM = 'G21G94';
 
 let _running = false;
 let _cancelled = false;
@@ -116,8 +121,8 @@ export async function runProbing<T>(sequence: () => Promise<T>): Promise<T | nul
   }
 }
 
-/** The distance mode and units now, from the [GC:] line that $G brings: as "G21G90". Null when $G
- *  got no answer or was refused: the [GC:] held may be from before a reset. */
+/** The units, distance mode and feed mode now, from the [GC:] line that $G brings: as "G21G90G94".
+ *  Null when $G got no answer or was refused: the [GC:] held may be from before a reset. */
 async function readModes(): Promise<string | null> {
   let reply: command.Reply;
   try { reply = await command.send('$G', { owner: OWNER }); }
@@ -128,17 +133,18 @@ async function readModes(): Promise<string | null> {
   }
   if (reply.result !== 'ok') { log('err', `Probing didn't start: $G was refused (error:${reply.code}). Nothing was sent.`); return null; }
   const words = machine.modal.value;
-  return (words.includes('G20') ? 'G20' : 'G21') + (words.includes('G91') ? 'G91' : 'G90');
+  return (words.includes('G20') ? 'G20' : 'G21') + (words.includes('G91') ? 'G91' : 'G90')
+    + (words.includes('G93') ? 'G93' : words.includes('G95') ? 'G95' : 'G94');
 }
 
 async function restoreModes(modes: string): Promise<void> {
   try {
     const reply = await command.send(modes, { quiet: true });
     if (reply.result === 'ok') log('info', `Probing ended: ${modes} as before`);
-    else log('err', `Probing ended, but ${modes} was refused (error:${reply.code}): check the distance mode and units before the next move`);
+    else log('err', `Probing ended, but ${modes} was refused (error:${reply.code}): check the units, distance mode and feed mode before the next move`);
   } catch (e) {
     if (!(e instanceof command.CommandFailed)) throw e;
-    log('err', `Probing ended without putting back ${modes} (${e.why}): check the distance mode and units before the next move`);
+    log('err', `Probing ended without putting back ${modes} (${e.why}): check the units, distance mode and feed mode before the next move`);
   }
 }
 
@@ -168,9 +174,9 @@ const noAnswer = (cmd: string) => `${cmd} got no answer${_failed ? ` (${_failed}
 /** A probing move, and where it touched. Null if it was refused, not answered, or cancelled. */
 async function probeMove(cmd: string): Promise<ProbeResult | null> {
   if (_cancelled) return null;
-  const reply = await orCancel(command.send('G21' + cmd, { log: true, owner: OWNER }));
-  if (!reply) { _why = noAnswer('G21' + cmd); return null; }
-  if (reply.result !== 'ok') { _why = `G21${cmd} was refused (error:${reply.code})`; return null; }
+  const reply = await orCancel(command.send(MM + cmd, { log: true, owner: OWNER }));
+  if (!reply) { _why = noAnswer(MM + cmd); return null; }
+  if (reply.result !== 'ok') { _why = `${MM}${cmd} was refused (error:${reply.code})`; return null; }
   const result = parseProbe(reply.lines);
   if (result) return result;
   const params = await orCancel(command.send('$#', { owner: OWNER }));
@@ -181,8 +187,8 @@ async function probeMove(cmd: string): Promise<ProbeResult | null> {
 /** A move, waiting until the machine has stopped at its end. */
 async function sendAndWait(cmd: string): Promise<boolean> {
   if (_cancelled) return false;
-  const replies = await orCancel(Promise.all([command.send('G21' + cmd, { log: true, owner: OWNER }), command.send('G4P0', { owner: OWNER })]));
-  if (!replies) { _why = noAnswer('G21' + cmd); return false; }
+  const replies = await orCancel(Promise.all([command.send(MM + cmd, { log: true, owner: OWNER }), command.send('G4P0', { owner: OWNER })]));
+  if (!replies) { _why = noAnswer(MM + cmd); return false; }
   const bad = replies.find(r => r.result !== 'ok');
   if (bad) { _why = `${bad.command} was refused (error:${bad.code})`; return false; }
   return true;
