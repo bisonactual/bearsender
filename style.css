@@ -56,152 +56,26 @@
   .tb-btn.danger:hover { background: rgba(239,68,68,0.25); }
   .tb-btn.success { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.4); color: var(--green); }
   .tb-btn.success:hover { background: rgba(34,197,94,0.25); }
-  /* MAIN */
   .main { flex: 1; overflow: hidden; position: relative; display: flex; }
-
-  /* PANELS */
   .panel { background: var(--bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; padding: 8px; gap: 6px; }
 
-  /* DRO — big card style matching screenshot */
-
-  /* Override grid to be flex rows per axis */
-
-  /* JOG MODE TOGGLE */
-
-  /* JOG */
-
-  /* ── Jogging module — fills card width at every size preset ────────────── */
-
-  /* Buttons fill their cell and stay square */
-
-  /* Z column tracks the computed cell size */
-
-  /* Step buttons fill their row */
-
-  /* Normal (282px) — same feel as before */
-
-  /* Large (360px) */
-
-  /* XL (460px) */
-
-  /* XXL (580px) */
-
-  /* ── Machine Position module ─────────────────────────────────────────────── */
-
-  /* normal */
-
-  /* large */
-
-  /* xl */
-
-  /* xxl */
-
-  /* ── Overrides module ────────────────────────────────────────────────────── */
-
-  /* normal */
-
-  /* large */
-
-  /* xl */
-
-  /* xxl */
-
-  /* ── Spindle / Coolant module ────────────────────────────────────────────── */
-
-  /* normal */
-
-  /* large */
-
-  /* xl */
-
-  /* xxl */
-
-  /* ── Macros module ───────────────────────────────────────────────────────── */
-
-  /* normal */
-
-  /* large */
-
-  /* xl — 3 columns fit nicely at 460px */
-
-  /* xxl — 4 columns at 580px */
-
-  /* ── Console module ──────────────────────────────────────────────────────── */
-  /* Default: tall enough to show ~3x more output than the old 320px cap */
-
-  /* Binary toggle pairs */
-
-  /* Action buttons */
-
-  /* Size scaling for quick planing */
-
-  /* CENTER - 3D VIEWPORT */
-
+  /* The 3D view's buttons */
   .view-btn { background: var(--surface3); border: 1px solid var(--border2); color: var(--text2); font-family: var(--cond); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; padding: 4px 10px; cursor: pointer; transition: all 0.12s; border-radius: 20px; }
   .view-btn:hover { color: var(--accent); border-color: var(--accent2); }
   .view-btn.active { background: var(--accent2); border-color: var(--accent2); color: #fff; }
 
-  /* ── Viewport rulers — sized and positioned entirely by JS ───────────────── */
-
-  /* CONSOLE */
-
-  /* RIGHT-PANEL CONSOLE */
-
-  /* TOUCH KEYBOARD OVERLAY — positioned in .main, spans full width */
-
-  /* Left side: input bar + QWERTY rows */
-
-  /* Right side: numpad */
-
-  /* Keys */
-
-   /* numpad 0 spans 2 cols */
-       /* numpad enter spans 2 rows */
-
-  /* RIGHT */
-
+  /* The hidden file input, and thin scrollbars */
   input[type=file] { display: none; }
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
-  /* OPTIONS PAGE */
-
-  /* PROGRAM LIMITS MODULE */
-
+  /* The program limits' tabs */
   .limits-tab { background: var(--surface3); border: 1px solid var(--border2); color: var(--text2); font-family: var(--cond); font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; cursor: pointer; transition: all 0.15s; }
   .limits-tab:hover { border-color: var(--accent); color: var(--text); }
   .limits-tab.active { background: rgba(255,140,66,0.16); border-color: var(--accent); color: var(--accent); }
 
-  /* TAB SYSTEM */
-
-  /* SETTINGS PANEL */
-
-  /* ── CONSOLE AUTOCOMPLETE ─────────────────────────────────────────────── */
-
-  /* ── EXCLUSION ZONES ─────────────────────────────────────────────────── */
-
-  /* ── MODULE SYSTEM ──────────────────────────────────────────────────────── */
-
-  /* Page toolbar (column selector + search) */
-
-  /* ── Signals module ─────────────────────────────────────────────────────── */
-
-  /* Active state — generic fallback (overridden per-signal below) */
-
-  /* X / Y / Z limits — amber */
-
-  /* Probe — blue */
-
-  /* Toolsetter — teal */
-
-  /* Door — orange */
-
-  /* E-Stop — red pulsing */
-
-  /* Size scaling */
-
-  /* ── Probe preview 3D overlay ─────────────────────────────────────────────── */
+  /* Probe preview 3D overlay */
   .pp-overlay {
     position: absolute; top: 8px; right: 8px; z-index: 30;
     background: rgba(15,14,12,0.88); border: 1px solid var(--border2);
@@ -224,16 +98,7 @@
   .pp-btn-close { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.3); color: var(--red); margin-left: 2px; }
   .pp-counter { font-family: var(--mono); font-size: 10px; color: var(--text3); flex: 1; text-align: center; }
 
-  /* ── Tool Length probing module ──────────────────────────────────────────── */
-
-  /* ── Probing Tab ─────────────────────────────────────────────────────────── */
-
-  /* ── Probe preview panel ─────────────────────────────────────────────────── */
-
-  /* ── Tool Length module ──────────────────────────────────────────────────── */
-
-  /* ── Flight recorder tab and resume dialog ──────────────────────────────── */
-
+  /* The flight recorder's toggle and the resume dialog */
   .fr-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--surface3); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 6px 12px; font-family: var(--cond); font-weight: 700; font-size: 11px; letter-spacing: 0.5px; color: var(--text2); cursor: pointer; transition: all 0.12s; user-select: none; }
   .fr-toggle:hover { background: var(--surface2); color: var(--text); }
   .fr-toggle input[type=checkbox] { accent-color: var(--accent); cursor: pointer; width: 14px; height: 14px; flex-shrink: 0; margin: 0; }
@@ -256,8 +121,8 @@
   .fr-refused { font-family: var(--cond); font-size: 13px; color: var(--red); }
   .fr-modal-actions { display: flex; align-items: center; gap: 8px; }
 
-  /* ── THE SHELL (src/app): top bar, position line, message line, job screen, bottom bar ── */
-  /* Sizes and colours from the job screen mockup (v2); colours from the tokens above. */
+  /* The shell (src/app): top bar, position line, message line, screens and bottom bar. Its own colour
+     tokens build on those above. */
   .fs-shell {
     --text-mid: #cbd5e1; --go-text: #4ade80; --stop-text: #f87171; --warn-text: #fbbf24;
     flex: 1; min-height: 0; display: flex; flex-direction: column;
@@ -542,7 +407,7 @@
   .fs-pv-canvas { position: absolute; left: 0; top: 0; display: block; }
   .fs-pv-stats { position: absolute; left: 8px; bottom: 8px; padding: 4px 8px; border-radius: 6px; background: rgba(15, 14, 12, 0.85); font-size: 12px; line-height: 1.5; color: var(--text2); pointer-events: none; }
 
-  /* Popups: the carried-over setup tools over the screen */
+  /* Popups: panels over the screen */
   .fs-popup-back { position: fixed; inset: 0; z-index: 800; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, 0.6); }
   .fs-popup { max-width: min(1200px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border2); border-radius: 14px; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7); overflow: hidden; }
   .fs-popup.is-tall { width: min(1200px, 100%); height: min(760px, 100%); }
@@ -638,7 +503,7 @@
     .fs-panel { flex: 3 1 0; }
   }
 
-  /* ── The Setup screen (src/app/SetupScreen.tsx): cards in columns that scroll on their own ── */
+  /* The Setup screen (src/app/SetupScreen.tsx): cards in columns that scroll on their own */
   .fs-setup { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; padding: 12px 16px; overflow: hidden; }
   .fs-col { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
   .fs-pad { padding: 12px 16px; }
@@ -822,7 +687,7 @@
   .fs-wcs-sm { height: 26px; padding: 0 8px; font-size: 14px; }
   .fs-popup-cards .fs-mcard { width: 420px; max-width: 100%; }
   .fs-popup-body { width: min(1100px, 92vw); flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px; box-sizing: border-box; }
-  /* ── The Probing screen (src/app/ProbingScreen.tsx): three numbered columns, as the agreed mockup (3 Nov) ── */
+  /* The Probing screen (src/app/ProbingScreen.tsx): three numbered columns */
   /* 1 what to measure, 2 where it starts and what it does, 3 position and probe. Each scrolls inside itself;
      column 3's status and buttons never scroll away. Below 1000 px: 1 over 2 on the left, 3 on the right. */
   .fs-pstatus { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 14px; color: var(--text2); }
@@ -969,7 +834,7 @@
     .fs-where { font-size: 14px; }
     .fs-where small { font-size: 12px; }
   }
-  /* ── Machine warmup (src/app/Warmup.tsx): the Setup tab, and the bottom bar's hold button ── */
+  /* Machine warmup (src/app/Warmup.tsx): the Setup tab, and the bottom bar's hold button */
   .fs-warm-est { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; }
   .fs-warm-tag { font-family: var(--cond); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--teal); }
   .fs-mcard.is-picked { border-color: var(--teal); }
