@@ -134,7 +134,6 @@ export const POLL_JOG = 50;
 export const POLL_NORM = 100;
 export const KEYBOARD_JOG_DIST = 100000;
 export const VP_STORAGE_KEY = 'fs-viewport-extents';
-export const SD_EXTS = new Set(['.nc', '.gcode', '.g', '.ngc', '.tap', '.gc']);
 
 export const KB_JOG_MAP: Record<string, string> = {
   'ArrowLeft': 'X-', 'ArrowRight': 'X+',
