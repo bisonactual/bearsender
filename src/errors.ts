@@ -44,6 +44,7 @@ const ERRORS: Record<number, string> = {
   46: 'the machine must be homed first',
   47: 'the current tool is not set (M61)',
   50: 'emergency stop is active',
+  61: 'a file could not be read',
   71: 'unknown operation in an expression',
 };
 

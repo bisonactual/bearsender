@@ -4,8 +4,6 @@
 //
 // New code reads the signal stores in src/stores instead.
 
-import type { ToolEntry } from './stores/machine';
-
 export const state = {
   // Connection
   ws: null as WebSocket | null,
@@ -70,8 +68,6 @@ export const state = {
   tloActive: false as boolean,
   activeWcs: 'G54' as string,
   rulerCoords: 'machine' as string,
-  currentToolNumber: 0,
-  ttEntries: [] as ToolEntry[],
 
   // Program limits
   progLimits: null as any,

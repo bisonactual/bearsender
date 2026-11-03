@@ -5,12 +5,12 @@
 import { Component, createRef } from 'preact';
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { loadToolTable } from '../tooltable';
 import { renderFlightTab } from '../flight-recorder';
 import * as messages from '../stores/messages';
 import * as ui from './ui';
 import { JogCard, PositionCard, LimitsCard, OffsetsTable } from './SetupScreen';
 import { ProbingPopupBody } from './ProbingScreen';
+import { ToolTable } from './ToolsScreen';
 
 /** Lends carried-over panels to a popup, and puts each back where it came from on close. */
 class Borrow extends Component<{ ids: string[]; class?: string }> {
@@ -66,7 +66,7 @@ const POPUPS: Record<ui.Popup, PopupDef> = {
   probe: { title: 'PROBE', body: () => <ProbingPopupBody />, tall: true, open: () => { ui.probingTab.value = 'ef'; } },
   measure: { title: 'MEASURE THE TOOL', body: () => <ProbingPopupBody />, tall: true, open: () => { ui.probingTab.value = 'tl'; } },
   frame: { title: 'FRAME THE PROGRAM', body: () => <div class="fs-popup-cards"><LimitsCard /></div>, tall: false },
-  tools: { title: 'TOOL TABLE', ids: ['tabpanel-tooltable'], tall: true, open: () => loadToolTable() },
+  tools: { title: 'TOOL TABLE', body: () => <div class="fs-popup-body"><ToolTable /></div>, tall: true },
   recorder: { title: 'FLIGHT RECORDER SETTINGS', ids: ['tabpanel-flight'], tall: true, open: () => renderFlightTab() },
   messages: { title: 'MESSAGES', body: () => <MessagesList />, tall: false },
 };

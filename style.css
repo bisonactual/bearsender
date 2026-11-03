@@ -369,26 +369,6 @@
   #mod-console[data-mod-size="xxl"] .con-prompt           { font-size: 20px; padding: 13px 16px; }
   #mod-console[data-mod-size="xxl"] .con-send             { font-size: 17px; padding: 0 28px; }
 
-  /* ── Tool Table module ───────────────────────────────────────────────────── */
-  #mod-tooltable .module-body    { padding: 0; }
-  /* Normal (282px): hide name, X/Y offsets, status to keep it compact */
-  #mod-tooltable[data-mod-size="normal"] .mod-tt-name-col   { display: none; }
-  #mod-tooltable[data-mod-size="normal"] .mod-tt-off-col    { display: none; }
-  #mod-tooltable[data-mod-size="normal"] .mod-tt-status-col { display: none; }
-  #mod-tooltable[data-mod-size="normal"] .tt-th,
-  #mod-tooltable[data-mod-size="normal"] .tt-td             { font-size: 10px; padding: 6px 8px; }
-  /* Large (360px): show name, hide X/Y offsets */
-  #mod-tooltable[data-mod-size="large"] .mod-tt-off-col     { display: none; }
-  #mod-tooltable[data-mod-size="large"] .tt-th,
-  #mod-tooltable[data-mod-size="large"] .tt-td              { font-size: 11px; padding: 7px 9px; }
-  /* XL (460px): show all columns */
-  #mod-tooltable[data-mod-size="xl"] .tt-th,
-  #mod-tooltable[data-mod-size="xl"] .tt-td                 { font-size: 11px; padding: 8px 10px; }
-  /* XXL (580px): show all, larger text */
-  #mod-tooltable[data-mod-size="xxl"] .tt-th,
-  #mod-tooltable[data-mod-size="xxl"] .tt-td                { font-size: 13px; padding: 10px 12px; }
-  #mod-tooltable[data-mod-size="xxl"] .tt-status-pill       { font-size: 11px; padding: 4px 12px; }
-
   .qp-field-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
   .qp-row { display: flex; align-items: center; gap: 8px; }
   .qp-label {
@@ -726,38 +706,6 @@
 
   .settings-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text3); font-family: var(--cond); letter-spacing: 2px; font-size: 12px; text-transform: uppercase; gap: 12px; }
   .settings-placeholder-icon { font-size: 36px; opacity: 0.25; }
-
-  /* TOOL TABLE */
-  .tt-th {
-    font-family: var(--cond); font-weight: 700; font-size: 10px; letter-spacing: 1.5px;
-    text-transform: uppercase; color: var(--text3); text-align: left;
-    padding: 8px 12px; border-bottom: 1px solid var(--border2); white-space: nowrap;
-  }
-  .tt-row { border-bottom: 1px solid var(--border); transition: background 0.1s; }
-  .tt-row:last-child { border-bottom: none; }
-  .tt-row.in-carousel { background: rgba(255,140,66,0.08); }
-  .tt-row.in-carousel:hover { background: rgba(255,140,66,0.15); }
-  .tt-row.current-tool { background: rgba(34,197,94,0.10); }
-  .tt-row.current-tool:hover { background: rgba(34,197,94,0.18); }
-  .tt-row:not(.in-carousel):not(.current-tool):hover { background: var(--surface2); }
-  .tt-td {
-    font-family: var(--mono); font-size: 12px; color: var(--text2);
-    padding: 9px 12px; white-space: nowrap;
-  }
-  .tt-td.pocket-badge {
-    font-weight: 700; font-size: 13px;
-  }
-  .tt-td.tool-id { color: var(--text); font-weight: 700; }
-  .tt-td.tool-name { font-family: var(--sans); color: var(--text); font-size: 12px; min-width: 120px; }
-  .tt-td.zero-val { color: var(--text3); }
-  .tt-status-pill {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-family: var(--cond); font-weight: 700; font-size: 10px; letter-spacing: 1px;
-    text-transform: uppercase; padding: 3px 10px; border-radius: 20px;
-  }
-  .tt-status-pill.carousel { background: rgba(255,140,66,0.18); color: var(--accent); border: 1px solid var(--accent2); }
-  .tt-status-pill.hand { background: var(--surface3); color: var(--text3); border: 1px solid var(--border2); }
-  .tt-status-pill.active { background: rgba(34,197,94,0.18); color: var(--green); border: 1px solid var(--green2); }
 
   /* ── CONSOLE AUTOCOMPLETE ─────────────────────────────────────────────── */
   .con-autocomplete {
@@ -1543,6 +1491,28 @@
   .fs-offtable td .fs-in { width: 120px; text-align: right; }
   .fs-offtable tbody tr.is-dirty td .fs-in { border-color: var(--accent2); }
   .fs-offtable tbody tr.is-home td { color: var(--text2); }
+  /* Tools: the tool table. Pocketed tools are tinted orange, the one in the spindle green, the program's missing ones red. */
+  .fs-tools { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .fs-tttable td, .fs-tttable th { white-space: nowrap; width: 1%; }
+  .fs-tttable .fs-tt-name, .fs-tttable .fs-tt-use { width: auto; }
+  .fs-tttable thead th:nth-child(2), .fs-tttable .fs-tt-tool, .fs-tttable .fs-tt-pocket { text-align: left; }
+  .fs-tttable .fs-tt-pocket { font-weight: 700; color: var(--accent); }
+  .fs-tttable .fs-tt-tool { font-weight: 700; color: var(--text); }
+  .fs-tttable .fs-tt-name, .fs-tttable .fs-tt-status, .fs-tttable .fs-tt-use { text-align: left; }
+  .fs-tttable td.fs-tt-name { white-space: normal; min-width: 140px; }
+  .fs-tttable td.fs-tt-use { max-width: 320px; }
+  .fs-tttable .fs-tt-zero, .fs-tttable .fs-tt-pocket.fs-tt-zero { color: var(--text3); font-weight: 400; }
+  .fs-tttable tbody tr.is-pocket { background: rgba(255, 140, 66, 0.06); }
+  .fs-tttable tbody tr.is-spindle { background: rgba(34, 197, 94, 0.10); }
+  .fs-tttable tbody tr.is-missing { background: rgba(239, 68, 68, 0.06); }
+  .fs-tt-usebox { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .fs-tt-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border2); background: var(--surface3); font-family: var(--cond); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--text2); white-space: nowrap; }
+  .fs-tt-pill.is-pocket { border-color: var(--accent2); background: rgba(255, 140, 66, 0.15); color: var(--accent); }
+  .fs-tt-pill.is-go { border-color: var(--green2); background: rgba(34, 197, 94, 0.15); color: var(--go-text); }
+  .fs-tt-pill.is-stop { border-color: var(--red2); background: rgba(239, 68, 68, 0.12); color: var(--stop-text); }
+  .fs-tt-legend { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 13px; color: var(--text2); }
+  .fs-tt-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+  .fs-pstatus.is-warn { border-color: var(--warn-text); color: var(--warn-text); }
   .fs-offname { white-space: nowrap; }
   .fs-offname > span:first-child { display: inline-block; min-width: 64px; font-family: var(--mono); font-size: 15px; color: var(--text); }
   .fs-offname .fs-small { margin-left: 8px; font-family: var(--sans); font-weight: 400; letter-spacing: 0; }

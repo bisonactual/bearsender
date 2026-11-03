@@ -1,18 +1,36 @@
 // ═══════════════════════════════════════════════
-// Tool table — $TTLIST parser & rendering
+// Tool table — reads $TTLIST into the machine store
 // ═══════════════════════════════════════════════
+//
+// The tool table comes from a plugin: the Expatria ATC plugin, or grblHAL's file based tooltable.c.
+// $TTLIST answers a heading, a line per tool, then ok:
+//   [TOOLTABLE: P=pocket T=tool offsets diameter name]
+//   [TOOL: P1 T3 X0.000 Y0.000 Z-41.250 D6.000 ;6 mm flat]
+// or [TOOL: table is empty]. [TOOL: file not accessible] comes with error:61. A controller without
+// the plugin doesn't know the command, and answers error:3.
 
-import { state } from './state';
-import { fmtOffset } from './ui';
+import { signal } from '@preact/signals';
 import { log } from './console';
 import * as command from './command';
+import * as connection from './stores/connection';
 import * as machine from './stores/machine';
+import type { ToolEntry } from './stores/machine';
 
-function parseToolTableLine(line: string): any {
-  const semi = line.indexOf(';');
-  const name = semi >= 0 ? line.slice(semi + 1).trim() : '';
-  const body = semi >= 0 ? line.slice(0, semi) : line;
-  const entry: any = { pocket: 0, tool: 0, x: null, y: null, z: null, d: null, name };
+/** A read is under way. */
+export const reading = signal(false);
+/** What the controller said besides its tools on the last read: "table is empty", "file not accessible". */
+export const said = signal<string[]>([]);
+/** Why the last read got no answer (a reset, the link lost, a timeout); cleared by the next read. */
+export const cutShort = signal<command.Failure | null>(null);
+/** When the controller last answered $TTLIST. */
+export const readAt = signal<number | null>(null);
+
+function parseToolTableLine(line: string): ToolEntry {
+  const text = line.replace(/^\[(TOOL:)?\s*/i, '').replace(/\]\s*$/, '');
+  const semi = text.indexOf(';');
+  const name = semi >= 0 ? text.slice(semi + 1).trim() : '';
+  const body = semi >= 0 ? text.slice(0, semi) : text;
+  const entry: ToolEntry = { pocket: 0, tool: 0, x: null, y: null, z: null, d: null, name };
   const re = /([PTXYZD])([+-]?[\d.]+)/gi;
   let m;
   while ((m = re.exec(body)) !== null) {
@@ -27,141 +45,36 @@ function parseToolTableLine(line: string): any {
   return entry;
 }
 
-function sortedEntries(): any[] {
-  return [...state.ttEntries].sort((a, b) => {
-    if (a.pocket > 0 && b.pocket > 0) return a.pocket - b.pocket;
-    if (a.pocket > 0) return -1;
-    if (b.pocket > 0) return 1;
-    return a.tool - b.tool;
-  });
+let pending: Promise<void> | null = null;
+
+/** Reads the tool table ($TTLIST). A read already under way is joined, not sent again. */
+export function loadToolTable(): Promise<void> {
+  if (!connection.connected.value) return Promise.resolve();
+  if (!pending) pending = read().finally(() => { pending = null; reading.value = false; });
+  return pending;
 }
 
-function renderRow(e: any, isMod: boolean): string {
-  const inCarousel = e.pocket > 0;
-  const isCurrent = e.tool === state.currentToolNumber && state.currentToolNumber !== 0;
-  let rowClass = 'tt-row';
-  if (isCurrent) rowClass += ' current-tool';
-  else if (inCarousel) rowClass += ' in-carousel';
-
-  const pocketCell = inCarousel
-    ? `<span style="color:var(--accent);font-weight:700">P${e.pocket}</span>`
-    : `<span style="color:var(--text3)">P0</span>`;
-
-  let statusPill: string;
-  if (isCurrent) statusPill = `<span class="tt-status-pill active">▶ ACTIVE</span>`;
-  else if (inCarousel) statusPill = `<span class="tt-status-pill carousel">⬡ ${isMod ? e.pocket : 'POCKET ' + e.pocket}</span>`;
-  else statusPill = `<span class="tt-status-pill hand">○${isMod ? '' : ' STORED'}</span>`;
-
-  const nameCol = isMod ? `<td class="tt-td tool-name mod-tt-name-col">${e.name || '<span style="color:var(--text3)">—</span>'}</td>` : `<td class="tt-td tool-name">${e.name || '<span style="color:var(--text3)">—</span>'}</td>`;
-  const offClass = isMod ? ' mod-tt-off-col' : '';
-  const pktClass = isMod ? ' mod-tt-pocket-col' : '';
-  const diaClass = isMod ? ' mod-tt-dia-col' : '';
-  const statusClass = isMod ? ' mod-tt-status-col' : '';
-
-  return `<tr class="${rowClass}">
-    <td class="tt-td${pktClass} pocket-badge">${pocketCell}</td>
-    <td class="tt-td tool-id">T${e.tool}</td>
-    ${nameCol}
-    <td class="tt-td${offClass}">${fmtOffset(e.x)}</td>
-    <td class="tt-td${offClass}">${fmtOffset(e.y)}</td>
-    <td class="tt-td">${fmtOffset(e.z)}</td>
-    <td class="tt-td${diaClass}">${fmtOffset(e.d)}</td>
-    <td class="tt-td${statusClass}">${statusPill}</td>
-  </tr>`;
-}
-
-function renderTTInto(tableId: string, emptyId: string, tbodyId: string, countId: string, isMod: boolean): void {
-  const table = document.getElementById(tableId) as HTMLElement;
-  const empty = document.getElementById(emptyId) as HTMLElement;
-  const count = document.getElementById(countId) as HTMLElement | null;
-  const tbody = document.getElementById(tbodyId) as HTMLElement;
-  if (!table || !empty || !tbody) return;
-
-  if (!state.ttEntries.length) {
-    table.style.display = 'none';
-    empty.style.display = 'flex';
-    if (count) count.textContent = '';
-    return;
-  }
-
-  tbody.innerHTML = sortedEntries().map(e => renderRow(e, isMod)).join('');
-  table.style.display = '';
-  empty.style.display = 'none';
-  const notice = document.getElementById('ttPluginNotice');
-  if (notice) notice.style.display = 'none';
-  const carouselCount = state.ttEntries.filter(e => e.pocket > 0).length;
-  if (count) count.textContent = isMod
-    ? `${state.ttEntries.length}T · ${carouselCount}P`
-    : `${state.ttEntries.length} tool${state.ttEntries.length !== 1 ? 's' : ''} · ${carouselCount} in carousel`;
-}
-
-export function renderToolTable(): void {
-  renderTTInto('ttTable', 'ttEmpty', 'ttTableBody', 'ttToolCount', false);
-  renderModTT();
-}
-
-export function renderModTT(): void {
-  const modCard = document.getElementById('mod-tooltable');
-  if (!modCard || modCard.classList.contains('mod-hidden')) return;
-  renderTTInto('modTTTable', 'modTTEmpty', 'modTTBody', 'modTTCount', true);
-}
-
-function ttSetStatus(msg: string | null): void {
-  const el = document.getElementById('ttStatus');
-  const mel = document.getElementById('modTTStatus');
-  if (el) { if (msg) { el.textContent = msg; el.style.display = ''; } else { el.style.display = 'none'; } }
-  if (mel) { if (msg) { mel.textContent = msg; mel.style.display = ''; } else { mel.style.display = 'none'; } }
-}
-
-let loading = false;
-
-/** Reads the tool table ($TTLIST). */
-export async function loadToolTable(): Promise<void> {
-  const tabBtn = document.getElementById('btnTTRefresh') as HTMLButtonElement | null;
-  const modBtn = document.getElementById('modTTRefresh') as HTMLButtonElement | null;
-
-  if (!state.connected) {
-    ttSetStatus('');
-    (document.getElementById('ttTable') as HTMLElement).style.display = 'none';
-    const empty = document.getElementById('ttEmpty') as HTMLElement;
-    empty.style.display = 'flex';
-    empty.querySelector('div:last-child')!.textContent = 'Connect to a controller and click Refresh.';
-    document.getElementById('ttToolCount')!.textContent = '';
-    const notice = document.getElementById('ttPluginNotice');
-    if (notice) notice.style.display = '';
-    renderModTT();
-    return;
-  }
-
-  // Already loading — don't re-fire
-  if (loading) return;
-
-  ttSetStatus('Loading tool table…');
-  state.ttEntries = [];
-  loading = true;
-  if (tabBtn) tabBtn.disabled = true;
-  if (modBtn) modBtn.disabled = true;
+async function read(): Promise<void> {
+  reading.value = true;
+  cutShort.value = null;
   try {
     const reply = await command.send('$TTLIST', { log: true, quiet: true });
+    readAt.value = Date.now();
+    said.value = reply.lines
+      .filter(l => /^\[TOOL:/i.test(l) && parseToolTableLine(l).tool <= 0)
+      .map(l => l.replace(/^\[TOOL:\s*/i, '').replace(/\]\s*$/, ''));
     if (reply.result === 'ok') {
-      state.ttEntries = reply.lines.map(parseToolTableLine).filter(e => e.tool > 0);
-      machine.toolTable.value = [...state.ttEntries];
+      const entries = reply.lines.map(parseToolTableLine).filter(e => e.tool > 0);
+      machine.toolTable.value = entries;
       machine.toolTableError.value = null;
-      renderToolTable();
-      ttSetStatus('');
-      log('info', 'Tool table: ' + state.ttEntries.length + ' entr' + (state.ttEntries.length === 1 ? 'y' : 'ies'));
+      log('info', 'Tool table: ' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies'));
     } else {
       const raw = 'error:' + reply.code;
       machine.toolTableError.value = raw;
-      ttSetStatus('⚠ ' + raw);
       log('err', '$TTLIST: ' + raw);
     }
   } catch (e) {
     if (!(e instanceof command.CommandFailed)) throw e;
-    ttSetStatus('');
-  } finally {
-    loading = false;
-    if (tabBtn) tabBtn.disabled = false;
-    if (modBtn) modBtn.disabled = false;
+    cutShort.value = e.why;
   }
 }

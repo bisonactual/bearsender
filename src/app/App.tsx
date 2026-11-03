@@ -19,6 +19,7 @@ import { Legacy } from './Legacy';
 import { JobScreen } from './JobScreen';
 import { SetupScreen } from './SetupScreen';
 import { ProbingScreen } from './ProbingScreen';
+import { ToolsScreen } from './ToolsScreen';
 import { WarmupButton } from './Warmup';
 import * as warmup from '../warmup';
 import { PopupHost } from './Popup';
@@ -414,7 +415,7 @@ export function App() {
       <JobScreen hidden={s !== 'job'} />
       <SetupScreen />
       <ProbingScreen />
-      <section class="fs-screen" hidden={s !== 'tools'}><Legacy class="fs-legacy" ids={['tabpanel-tooltable']} /></section>
+      <ToolsScreen />
       <SettingsScreen />
       <BottomBar />
       <PopupHost />

@@ -11,7 +11,6 @@ import { _updateHomeBtnHomed, rtSend } from './connection';
 import { endRunOnAlarm } from './streaming';
 import { reportMm } from './units';
 import { toolGroup } from './viewport';
-import { renderToolTable, renderModTT } from './tooltable';
 import { ezParseStatus } from './exclusion-zones';
 import { emit, type StatusReport } from './bus';
 import { loadOffsets, offsetsUnread } from './offsets';
@@ -112,10 +111,6 @@ function parseStatusReport(s: string): void {
         report.tool = tn;
         tags.add('tool');
         machine.tool.value = tn;
-        if (tn !== state.currentToolNumber) {
-          state.currentToolNumber = tn;
-          if (state.ttEntries.length) renderToolTable();
-        }
       }
     }
     if (key === 'Ln') {
@@ -145,11 +140,6 @@ function parseStatusReport(s: string): void {
         report.tool = ct;
         tags.add('tool');
         machine.tool.value = ct;
-        if (ct !== state.currentToolNumber) {
-          state.currentToolNumber = ct;
-          renderToolTable();
-          renderModTT();
-        }
       }
     }
     if (key === 'WCS') {

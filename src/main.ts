@@ -17,7 +17,6 @@ import { mount as mountMacros } from './modules/macros';
 import { mount as mountSignals } from './modules/signals';
 import { loadPreview3D, clearPreview3D, stepPreview3D, playPreview3D } from './probing/probe-preview-3d';
 import { loadSettings, filterSettings, writeAllDirty } from './settings';
-import { loadToolTable } from './tooltable';
 import { selectCamera, startCamera, stopCamera, measureOffset, goToCamera, goToSpindle, zeroAtCrosshair, camMouseDown, camMouseMove, camMouseUp, setCrosshairStyle, setCrosshairColor, loadCamSettings, drawOverlay, initCameraListeners } from './camera';
 import { kbdPress, kbdBackspace, kbdClear, kbdSend, toggleTouchKeyboard } from './keyboard';
 import { optSetConnMode, optSaveConnSettings, optLoadConnSettings, optLoadColors, optApplyColor, optHexChange, optResetColor, optResetAllColors, optSaveJogSteps, optLoadJogSteps, optApplyJogSteps, optApplyJogShowUnits, optLoadJogShowUnits, optSaveBearColors, optLoadBearColors } from './options';
@@ -127,7 +126,7 @@ function initChunk3Events(): void {
   });
 }
 
-// ── Event wiring (chunk 2: console, limits, tool table, keyboard) ─────────────
+// ── Event wiring (chunk 2: console, limits, keyboard) ─────────────────────────
 function initChunk2Events(): void {
 
   // Console
@@ -136,10 +135,6 @@ function initChunk2Events(): void {
   on('conInput', 'keydown', e => handleConInput(e));
   on('conInput', 'input', () => conAutoUpdate());
   on('btnConSend', 'click', () => sendManual());
-
-  // Tool table
-  on('modTTRefresh', 'click', () => loadToolTable());
-  on('btnTTRefresh', 'click', () => loadToolTable());
 
   // Touch keyboard (delegated)
   const kbd = document.getElementById('touchKbdOverlay');

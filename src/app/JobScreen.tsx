@@ -54,7 +54,7 @@ const NO_TINT = { tint: '#475569', bar: '#2a271e' };
 
 const tintOrder = computed(() => [...new Set([...rows.value.map(r => r.tool), ...queue.entries.value.flatMap(e => e.summary.rows.map(r => r.tool))])]);
 
-function tintOf(tool: number | null): { tint: string; bar: string } {
+export function tintOf(tool: number | null): { tint: string; bar: string } {
   if (tool === null) return NO_TINT;
   return TINTS[Math.max(0, tintOrder.value.indexOf(tool)) % TINTS.length];
 }
