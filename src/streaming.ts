@@ -18,7 +18,12 @@
 //   - on Stop, or dropped (a reset, an alarm, a lost link).
 // At an M6 nothing more is sent until the tool change is over, so no job line waits in the
 // controller behind it: the tool change can be acknowledged (jogging works), and Resume sends the
-// cycle start once every reply is in (command.ts).
+// cycle start once every reply is in (command.ts). An M6 the controller passes without a tool change
+// (the same tool, $341=4) carries on, unless "Hold at every M6" is on: then the job waits for Resume
+// with the controller idle.
+//
+// Start reads the modes first ($G): the program is read from them, and they are kept with the job
+// (stores/starts.ts) for a resume. With "Run lines after M30" off, the job ends at its first M2/M30.
 
 import { state } from './state';
 import { byteLen } from './ui';
@@ -29,14 +34,20 @@ import { updateProgress } from './gcode';
 import { frActive, frEnabled, frJobLines, frJobStamp } from './flight-recorder';
 import { cleanLine } from './flight-recorder-resume';
 import { errorText } from './errors';
+import { rereadAfterReset } from './offsets';
 import * as job from './stores/job';
 import * as messages from './stores/messages';
+import * as machine from './stores/machine';
+import * as jobOptions from './stores/options';
+import * as program from './stores/program';
+import * as starts from './stores/starts';
 
 export interface SendLine { text: string; line: number; }
 
-// The planner barrier after the last line, and the M6 of a tool change (not M61, M6.x).
+// The planner barrier after the last line, the M6 of a tool change (not M61, M6.x), and the program end.
 const BARRIER = 'G4P0';
 const TOOL_CHANGE = /(?<![A-Z])M0*6(?![\d.])/;
+const PROGRAM_END = /(?<![A-Z])M0*(2|30)(?![\d.])/;
 
 interface Run {
   source: command.JobSource;
@@ -44,14 +55,15 @@ interface Run {
   head: number;
   inFlight: number;    // this run's lines sent and not yet answered
   ended: boolean;      // nothing more is pulled; replies still to come are only counted
-  // An M6 went: 'sent' until the controller is at the tool change, 'change' until it has left it.
-  atM6: 'no' | 'sent' | 'change';
+  // An M6 went: 'sent' until the controller is at the tool change, 'change' until it has left it;
+  // 'held' when the controller made none and BearSender holds for Resume (Hold at every M6).
+  atM6: 'no' | 'sent' | 'change' | 'held';
   m6Line: number;      // the line of that M6, for the job's tool change timeline
   lastSystem: boolean; // the line sent last was a $ or [ line
 }
 
 let run: Run | null = null;
-let starting = false;   // waiting for the recorder's answer to the job stamp
+let starting = false;   // waiting for Start's $G, or the recorder's answer to the job stamp
 // After an error: the hold is sent again while the controller reports Run, until it has taken, for
 // HOLD_AGAIN ms. grblHAL ignores a feed hold that comes before the cycle has started (seen on the sim:
 // an error answered as the first move began, the controller still Idle, and the hold was lost).
@@ -81,7 +93,8 @@ function newRun(lines: SendLine[]): Run {
     },
     // One-offs wait from an M6 until the tool change is acknowledged: one sent before that would sit
     // unread in the controller and run after the cycle start.
-    holdsOneOffs() { return !r.ended && r.atM6 !== 'no' && !command.toolChangeAcknowledged(); },
+    // At an M6 BearSender holds, the controller is idle and reads them at once.
+    holdsOneOffs() { return !r.ended && r.atM6 !== 'no' && r.atM6 !== 'held' && !command.toolChangeAcknowledged(); },
     replied(line, reply) {
       r.inFlight = Math.max(0, r.inFlight - 1);
       if (r.ended) return;
@@ -91,6 +104,12 @@ function newRun(lines: SendLine[]): Run {
         end(r);
         log('info', '✓ Job complete');
         job.finished('completed');
+        const early = job.endsEarly.value;
+        if (early) {
+          const text = `The job ended at the program end on line ${early.line}: the ${early.left} line${early.left === 1 ? '' : 's'} after it ${early.left === 1 ? 'wasn\'t' : 'weren\'t'} sent (Options: Run lines after M30).`;
+          log('info', text);
+          messages.push('job', text);
+        }
       }
     },
     dropped(why) {
@@ -107,7 +126,7 @@ function newRun(lines: SendLine[]): Run {
 function end(r: Run): void {
   r.ended = true;
   command.endStream(r.source);
-  if (run === r) { state.running = false; state.paused = false; }
+  if (run === r) { state.running = false; state.paused = false; job.heldAtM6.value = false; }
   updateRunButtons();
 }
 
@@ -143,20 +162,44 @@ command.on('status', line => {
   }
   const r = run;
   if (!r || r.ended || r.atM6 === 'no') return;
+  // Held by BearSender: only a late tool change state takes it over.
+  if (r.atM6 === 'held' && s !== 'tool') return;
   if (s === 'tool') {
     if (r.atM6 === 'sent') job.changeStarted(r.m6Line, true);
     r.atM6 = 'change';
+    job.heldAtM6.value = false;
     // It goes once the M6's ok is in: by then grblHAL has stopped reading its input.
     command.acknowledgeToolChange();
   } else if (s === 'jog' || s === 'hold') {
     // Jogging at a tool change reports Jog; the tool change goes on.
   } else if (r.atM6 === 'change' || (r.inFlight === 0 && s === 'idle')) {
-    // The tool change is over, or the M6 (answered, the machine idle) made none.
+    // The tool change is over, or the M6 (answered, the machine idle) made none. With "Hold at every
+    // M6" on, one that made none holds the job here until Resume.
+    if (r.atM6 === 'sent' && jobOptions.holdEveryM6.value) {
+      r.atM6 = 'held';
+      job.changeStarted(r.m6Line, true);
+      job.heldAtM6.value = true;
+      log('info', `Held at the M6 on line ${r.m6Line}: the controller made no tool change (the same tool, or $341=4), and Hold at every M6 is on. Resume goes on.`);
+      return;
+    }
     if (r.atM6 === 'change') job.changeEnded(); else job.changeStarted(r.m6Line, false);
     r.atM6 = 'no';
     command.pump();
   }
 });
+
+/** With "Run lines after M30" off the job ends at its first M2/M30: the lines after it aren't sent,
+ *  and the message line says so when the job completes. */
+export function untilProgramEnd(lines: SendLine[]): SendLine[] {
+  job.endsEarly.value = null;
+  if (jobOptions.runAfterM30.value) return lines;
+  const k = lines.findIndex(l => !/^[$[]/.test(l.text) && PROGRAM_END.test(cleanLine(l.text)));
+  const left = k < 0 ? 0 : lines.slice(k + 1).filter(l => l.text !== '%').length;
+  if (!left) return lines;
+  job.endsEarly.value = { line: lines[k].line, left };
+  log('info', `The job ends at the program end on line ${lines[k].line}; the ${left} line${left === 1 ? '' : 's'} after it won't be sent (Options: Run lines after M30 is off).`);
+  return lines.slice(0, k + 1);
+}
 
 export function startJob(): void {
   if (!state.connected) { log('err', 'Not connected'); return; }
@@ -170,12 +213,25 @@ export function startJob(): void {
     command.pump();
     return;
   }
-  const recorded = frActive();
-  if (frEnabled() && !recorded) log('info', '✈ The flight recorder is on, but this controller has no Flight Recorder plugin. Running without a record.');
-  log('info', 'Starting job: ' + state.gcodeLines.length + ' lines  (RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes)' +
-      (recorded ? '  flight recorder on' : ''));
-  if (recorded) streamLines(frJobLines(), true, { stamp: frJobStamp() });
-  else streamLines(plainLines(), false, {});
+  if (starting) return;
+  // The modes first: the program is read from them, and they are kept with the job for a resume. The
+  // sim refused the first $ command after homing (error:71) and took the next, so a refusal gets one more try.
+  starting = true;
+  const modes = () => command.send('$G', { quiet: true }).catch(e => { if (e instanceof command.CommandFailed) return null; throw e; });
+  modes().then(r => r?.result === 'error' ? modes() : r).then(reply => {
+    starting = false;
+    if (!state.connected || state.running) return;
+    const words = reply?.result === 'ok' ? [...machine.modal.value] : null;
+    if (!words) log('err', 'Start: $G got no answer, so the modes the job starts from aren\'t known: the program was read from the last known, and a resume will assume G21 G90 G17 G94.');
+    program.readNow();
+    starts.keep(state.gcodeLines, job.file.value ?? '—', words);
+    const recorded = frActive();
+    if (frEnabled() && !recorded) log('info', '✈ The flight recorder is on, but this controller has no Flight Recorder plugin. Running without a record.');
+    log('info', 'Starting job: ' + state.gcodeLines.length + ' lines  (RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes)' +
+        (recorded ? '  flight recorder on' : '') + (words ? '  modes ' + words.filter(w => w.startsWith('G')).join(' ') : ''));
+    if (recorded) streamLines(untilProgramEnd(frJobLines()), true, { stamp: frJobStamp() });
+    else streamLines(untilProgramEnd(plainLines()), false, {});
+  });
 }
 
 /** Start streaming prepared lines, either a whole job or a resume (the moves back in, then the rest of the file).
@@ -237,8 +293,18 @@ export function pauseJob(): void {
   if (!state.paused) command.pump();
 }
 
-/** RESUME at a tool change: the cycle start, once every reply is in (command.ts). */
+/** RESUME at a tool change: the cycle start, once every reply is in (command.ts). At an M6 BearSender
+ *  holds (Hold at every M6) the controller is idle, so the job just goes on. */
 export function resumeToolChange(): void {
+  const r = run;
+  if (r && !r.ended && r.atM6 === 'held') {
+    r.atM6 = 'no';
+    job.heldAtM6.value = false;
+    job.changeEnded();
+    log('info', 'Resume: the job goes on after the M6 on line ' + r.m6Line);
+    command.pump();
+    return;
+  }
   command.resumeToolChange();
 }
 
@@ -312,6 +378,7 @@ function finishStop(timedOut: boolean): void {
   job.stopping.value = false;
   if (!command.isConnected()) return;
   rtSend('\x18');
+  rereadAfterReset();
   if (timedOut) {
     const text = `The machine hadn't stopped ${HOLD_LIMIT / 1000} s after Stop, so the reset went anyway. The position may be lost: home again.`;
     log('err', text);
@@ -332,6 +399,7 @@ export function sendReset(): void {
   holdUntilHeld = 0;
   state.running = false; state.paused = false;
   rtSend('\x18');
+  rereadAfterReset();
   state.lineHead = 0;
   log('info', 'Soft reset');
   updateRunButtons();

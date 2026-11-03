@@ -20,7 +20,7 @@ export const mode = computed<Mode>(() => {
   if (!connection.connected.value) return 'offline';
   const s = machine.stateName.value;
   if (s === 'alarm') return 'alarm';
-  if (s === 'tool') return 'change';
+  if (s === 'tool' || (job.heldAtM6.value && job.running.value)) return 'change';
   // The controller's hold or door, whoever started the motion (a job, the console, the SD card).
   if (s === 'hold' || s === 'door') return 'hold';
   if (job.running.value) return job.paused.value ? 'hold' : 'running';

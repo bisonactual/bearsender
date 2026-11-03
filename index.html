@@ -612,6 +612,31 @@
         </div>
       </div>
 
+      <!-- ── JOBS AND THE RESUME ── -->
+      <div class="options-card">
+        <div class="options-card-icon">⏯</div>
+        <div class="options-card-body">
+          <div class="options-card-title">Jobs and the resume</div>
+          <div class="options-card-desc">Hold at every M6: the job waits for Resume at each M6 in the file, also for the tool already loaded or when the controller ignores M6 ($341=4). Off, it holds only where the controller really changes tools.</div>
+          <div style="margin-top:10px;">
+            <label class="tb-opt-toggle" style="padding:8px 14px;">
+              <input type="checkbox" id="optHoldEveryM6"> Hold at every M6
+            </label>
+          </div>
+          <div class="options-card-desc" style="margin-top:12px;">Run lines after M30: grblHAL goes on reading after M2 or M30, with some modes reset. Off, the job ends at the first M2/M30 and the lines after it aren't sent. On, the file is sent whole and the Program panel says lines run after the program end.</div>
+          <div style="margin-top:10px;">
+            <label class="tb-opt-toggle" style="padding:8px 14px;">
+              <input type="checkbox" id="optRunAfterM30"> Run lines after M30
+            </label>
+          </div>
+          <div class="options-card-desc" style="margin-top:12px;">Resume lift: the first move of a flight recorder resume goes up to this height, in mm below machine zero, unless the tool is already higher; then it crosses to the start of the line there. It never moves down.</div>
+          <div style="margin-top:10px;">
+            <div class="opt-field-label">Resume lift (mm below machine zero)</div>
+            <input class="opt-input" type="number" id="optResumeLift" step="1" min="0" value="5" />
+          </div>
+        </div>
+      </div>
+
       <!-- ── 3D VIEWPORT EXTENTS ── -->
       <div class="options-card">
         <div class="options-card-icon">🗺️</div>

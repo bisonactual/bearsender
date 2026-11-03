@@ -250,7 +250,9 @@ function MessageLine() {
     const z = machine.mpos.value.z;
     // How the controller measures at a tool change, by $341 (JobScreen.tsx, measureCheck).
     const tc = toolChangeMode();
-    const how = tc === 1 || tc === 2 ? <>, press <strong>MEASURE</strong> in Setup, then press Resume.</>
+    // Held by BearSender at an M6 the controller passed (Options: Hold at every M6): it is idle.
+    const how = job.heldAtM6.value ? <>, measure it if it changed, then press Resume. BearSender holds here (Hold at every M6).</>
+      : tc === 1 || tc === 2 ? <>, press <strong>MEASURE</strong> in Setup, then press Resume.</>
       : tc === 3 ? <>, then press Resume; the controller measures it.</>
       : <>, then press Resume.</>;
     return (

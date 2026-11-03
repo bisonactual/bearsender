@@ -287,6 +287,7 @@ window.addEventListener('load', () => {
   optLoadBearColors();
   initExclusionZonesTab();
   initFlightRecorderTab();
+  import('./options').then(o => o.optInitJobOptions());
   // Restore auto-load settings toggle
   try { const al = document.getElementById('optAutoLoadSettings') as HTMLInputElement; if (al) al.checked = lsGet('fs-opt-autoload-settings', false); } catch (_) {}
   // Sync projection toggle

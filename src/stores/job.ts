@@ -52,6 +52,11 @@ export const resumedFrom = signal<number | null>(null);
 export interface ToolChange { line: number; startedAt: number; endedAt: number | null; held: boolean; }
 /** The run's tool changes so far, in order. */
 export const changes = signal<ToolChange[]>([]);
+/** BearSender holds the job at an M6 the controller passed without a tool change ("Hold at every M6"),
+ *  until Resume. The controller is idle meanwhile. */
+export const heldAtM6 = signal(false);
+/** The job ends at an M2/M30 with lines after it, which aren't sent ("Run lines after M30" off). */
+export const endsEarly = signal<{ line: number; left: number } | null>(null);
 /** The file loaded itself from the queue when the job before it completed: that job's name. */
 export const fromQueueAfter = signal<string | null>(null);
 
@@ -104,6 +109,7 @@ export function loaded(name: string, fileLines: string[]): void {
   resumedFrom.value = null;
   changes.value = [];
   fromQueueAfter.value = null;
+  endsEarly.value = null;
 }
 
 export function started(isNumbered: boolean, resumedAt?: number): void {

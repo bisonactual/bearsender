@@ -14,6 +14,7 @@ import * as program from '../stores/program';
 import type { ToolRow } from '../stores/program';
 import * as queue from '../stores/queue';
 import * as runtimes from '../stores/runtimes';
+import * as options from '../stores/options';
 import * as ui from './ui';
 import { mode, panel, leftPanel, rows, atLine, sectionIndex, nextSection, awaitedSection, stoppedShort, toolLabel, toolChangeMode } from './mode';
 import { plan, rowStarts, queuedMs } from './plan';
@@ -468,7 +469,8 @@ function travelCheck(): Check {
   if (over.length) return { key, tone: 'fail', text: 'Program goes outside the machine travel', detail: over.join('; ') + (b.complete ? '' : '; and some moves aren\'t known'), actions, tickWord };
   if (v.stopped) return todo(`checked up to line ${num(v.stopped.line)}, where BearSender stops reading the program`);
   if (!b.complete) {
-    const why = v.program.issues.find(i => i.code.startsWith('unknown-'));
+    // A controller command it doesn't follow says most; then any other unknown.
+    const why = v.program.issues.find(i => i.code === 'unknown-system-line' || i.code === 'unknown-home') ?? v.program.issues.find(i => i.code.startsWith('unknown-'));
     return todo('some moves aren\'t known' + (why ? ` (line ${num(why.line)}: ${why.message})` : '') + '; ' + work);
   }
   return { key, tone: 'done', text: 'Program fits the machine travel', detail: work, actions, tickWord };
@@ -481,6 +483,32 @@ function programCheck(): Check | null {
   const s = v.stopped;
   return { key: 'program:' + s.line, tone: 'todo', text: `BearSender reads the program only up to line ${num(s.line)}`,
     detail: `${s.message.replace(/ Interpretation stops here.*$/, '')} Times, tools, preview and travel are of the lines before it; the job still sends whole.` };
+}
+
+/** Yellow notes on lines the reading can't follow (controller commands) and on the program end, for the
+ *  Setup list and the Program panel. For information: the job sends as it says. */
+function programNotes(): Check[] {
+  const v = program.view.value;
+  if (!job.file.value || !v) return [];
+  const notes: Check[] = [];
+  const issues = v.program.issues;
+  const system = issues.filter(i => i.code === 'unknown-system-line' || i.code === 'unknown-home');
+  if (system.length) {
+    const first = system[0];
+    notes.push({ key: 'program-system:' + first.line, tone: 'todo',
+      text: `Line ${num(first.line)} is a controller command BearSender doesn't follow` + (system.length > 1 ? `, and ${system.length - 1} more` : ''),
+      detail: `${first.message} The travel check and the preview leave out what it does; it is still sent.` });
+  }
+  const after = issues.filter(i => i.code === 'after-program-end');
+  if (after.length) {
+    const end = v.program.lines.find(l => l.stateAfter.programEnd !== null)?.line ?? 0;
+    notes.push(options.runAfterM30.value
+      ? { key: 'program-after-end:' + after[0].line, tone: 'todo', text: `Lines run after the program end${end ? ' on line ' + num(end) : ''}`,
+          detail: `${after[0].message} The travel check and the preview take them in (Options: Run lines after M30 is on).` }
+      : { key: 'program-ends:' + end, tone: 'todo', text: `The job ends at the program end on line ${num(end)}`,
+          detail: `the ${after.length} line${after.length === 1 ? '' : 's'} after it with something to run ${after.length === 1 ? 'isn\'t' : 'aren\'t'} sent (Options: Run lines after M30 is off)` });
+  }
+  return notes;
 }
 
 function recorderCheck(): Check {
@@ -516,7 +544,11 @@ function changeChecks(): Check[] {
     { key: key + 'spindle', tone: spinning ? 'fail' : 'done', text: spinning ? `Spindle still turning at ${num(machine.spindle.value)} rpm` : 'Spindle stopped',
       detail: 'tool at machine Z ' + machine.mpos.value.z.toFixed(3) },
     { key: key + 'load', tone: 'todo', text: 'Load ' + (s ? toolLabel(s.tool) : 'the next tool'), detail: entry && entry.pocket ? 'pocket ' + entry.pocket : '' },
-    measureCheck(key + 'measure', tlo),
+    // Held by BearSender (Hold at every M6): the controller is idle, so the Probing tab can measure.
+    job.heldAtM6.value
+      ? { key: key + 'measure', tone: 'todo', text: 'Measure the tool length if it changed: the controller is idle, so MEASURE probes it',
+          detail: [tlo ? `TLO now ${mm(tlo)} mm` : '', 'held by BearSender at this M6 (Options: Hold at every M6)'].filter(Boolean).join(' · '), actions: [['MEASURE', 'measure']] }
+      : measureCheck(key + 'measure', tlo),
     { key: key + 'resume', tone: 'todo', text: 'Press Resume', detail: s && sections[sections.indexOf(s)]?.name ? sections[sections.indexOf(s)].name + ' starts' : '', noTick: true },
   ];
 }
@@ -524,7 +556,7 @@ function changeChecks(): Check[] {
 function setupChecks(): Check[] {
   if (mode.value === 'change') return changeChecks();
   const read = programCheck();
-  return [offsetCheck(), tloCheck(), toolCheck(), toolTableCheck(), travelCheck(), ...(read ? [read] : []), recorderCheck()];
+  return [offsetCheck(), tloCheck(), toolCheck(), toolTableCheck(), travelCheck(), ...(read ? [read] : []), ...programNotes(), recorderCheck()];
 }
 
 const TONE_WORD: Record<Tone, string> = { done: 'done', todo: 'to do', fail: 'failed' };
@@ -583,6 +615,7 @@ function ProgramPanel() {
   const first = Math.max(1, Math.min(centre - 3, lines.length - 6));
   const shown = lines.slice(first - 1, first + 6);
   const next = nextSection.value ?? (at === 0 && sections[1] ? sections[1] : null);
+  const notes = programNotes();
   return (
     <div>
       <div class="fs-panel-title">{title}</div>
@@ -592,6 +625,12 @@ function ProgramPanel() {
           return <div class={'fs-code-line' + (n === at ? ' is-now' : '')}><span class="fs-code-n">{num(n)}</span><span>{code}</span></div>;
         }) : <div class="fs-code-line"><span class="fs-code-n" /><span>No job loaded.</span></div>}
       </div>
+      {notes.map(n => (
+        <div class="fs-check is-todo">
+          <span class="fs-check-icon" role="img" aria-label="note" title="For your information"><IconTodo /></span>
+          <span class="fs-check-text"><span class="fs-check-main">{n.text}</span>{' '}<span class="fs-check-detail">{n.detail}</span></span>
+        </div>
+      ))}
       <div class="fs-note-sm">
         {next ? <>Next tool change at line {num(next.changeLine)}: <span class="fs-mono fs-soft">T{next.tool} M6</span>. </> : sections.length > 1 && at ? <>No more tool changes. </> : null}
         {job.numbered.value ? 'The line is the one the controller reports executing (flight recorder N numbers).'

@@ -1,7 +1,8 @@
 // ═══════════════════════════════════════════════
-// Options — connection, colours, jog steps, zone colours
+// Options — connection, colours, jog steps, zone colours, jobs and the resume
 // ═══════════════════════════════════════════════
 
+import * as jobOptions from './stores/options';
 import { state, OPT_COLOR_DEFAULTS, OPT_COLOR_CSS_VARS } from './state';
 import { lsGet, lsSet } from './ui';
 import { log } from './console';
@@ -174,6 +175,23 @@ export function optLoadBearColors(): void {
     const disp = document.getElementById('optBearScaleVal');
     if (sl) sl.value = c['optBearScale'];
     if (disp) disp.textContent = parseFloat(c['optBearScale']).toFixed(3);
+  }
+}
+
+// ── Jobs and the resume (stores/options.ts) ───────────────────────────────────
+export function optInitJobOptions(): void {
+  const box = (id: string, sig: { value: boolean }) => {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (!el) return;
+    el.checked = sig.value;
+    el.addEventListener('change', () => { sig.value = el.checked; log('info', `${el.parentElement?.textContent?.trim() ?? id}: ${el.checked ? 'on' : 'off'}`); });
+  };
+  box('optHoldEveryM6', jobOptions.holdEveryM6);
+  box('optRunAfterM30', jobOptions.runAfterM30);
+  const lift = document.getElementById('optResumeLift') as HTMLInputElement | null;
+  if (lift) {
+    lift.value = String(jobOptions.resumeLiftMm.value);
+    lift.addEventListener('change', () => { jobOptions.setResumeLift(parseFloat(lift.value)); lift.value = String(jobOptions.resumeLiftMm.value); });
   }
 }
 
