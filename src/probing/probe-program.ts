@@ -10,8 +10,11 @@
 //
 // Every move and write says G21: the distances are millimetres whatever the last job left. A
 // routine reads the distance mode and units first ($G) and puts them back when it ends, however it
-// ends, so its G91 moves don't leave the next move incremental. Cancel stops the move in progress
-// (a hold, then the reset once the machine has stopped), and the routine owns the machine until then.
+// ends, so its G91 moves don't leave the next move incremental. If that $G gets no answer (a reset or
+// a banner came first), the routine doesn't start: the modes to put back aren't known. Cancel takes
+// back the routine's commands not sent yet, including those held while the line is synced, and stops
+// the move in progress (a hold, then the reset once the machine has stopped); the routine owns the
+// machine until then.
 
 import { state } from '../state';
 import { log } from '../console';
@@ -36,6 +39,7 @@ export const WCS_P: Record<string, number> = {
 let _running = false;
 let _cancelled = false;
 let _cancel: (() => void) | null = null;   // ends the wait of the step in progress
+const OWNER = {};                          // the routine's commands, for Cancel (command.cancelOwned)
 
 interface ProbeResult {
   x: number;
@@ -93,6 +97,7 @@ export async function runProbing<T>(sequence: () => Promise<T>): Promise<T | nul
   _running = true;
   _cancelled = false;
   const modes = await readModes();
+  if (modes === null || _cancelled) { _running = false; return null; }
   try {
     return await sequence();
   } finally {
@@ -104,10 +109,17 @@ export async function runProbing<T>(sequence: () => Promise<T>): Promise<T | nul
   }
 }
 
-/** The distance mode and units now, from the [GC:] line that $G brings: as "G21G90". */
-async function readModes(): Promise<string> {
-  try { await command.send('$G'); }
-  catch (e) { if (!(e instanceof command.CommandFailed)) throw e; }
+/** The distance mode and units now, from the [GC:] line that $G brings: as "G21G90". Null when $G
+ *  got no answer or was refused: the [GC:] held may be from before a reset. */
+async function readModes(): Promise<string | null> {
+  let reply: command.Reply;
+  try { reply = await command.send('$G', { owner: OWNER }); }
+  catch (e) {
+    if (!(e instanceof command.CommandFailed)) throw e;
+    if (e.why !== 'cancelled') log('err', `Probing didn't start: $G got no answer (${e.why}), so the modes to put back afterwards aren't known. Nothing was sent.`);
+    return null;
+  }
+  if (reply.result !== 'ok') { log('err', `Probing didn't start: $G was refused (error:${reply.code}). Nothing was sent.`); return null; }
   const words = machine.modal.value;
   return (words.includes('G20') ? 'G20' : 'G21') + (words.includes('G91') ? 'G91' : 'G90');
 }
@@ -143,30 +155,31 @@ function parseProbe(lines: string[]): ProbeResult | null {
 /** A probing move, and where it touched. */
 async function probeMove(cmd: string): Promise<ProbeResult | null> {
   if (_cancelled) return null;
-  const reply = await orCancel(command.send('G21' + cmd, { log: true }));
+  const reply = await orCancel(command.send('G21' + cmd, { log: true, owner: OWNER }));
   if (!reply || reply.result !== 'ok') return null;
   const result = parseProbe(reply.lines);
   if (result) return result;
-  const params = await orCancel(command.send('$#'));
+  const params = await orCancel(command.send('$#', { owner: OWNER }));
   return params ? parseProbe(params.lines) : null;
 }
 
 /** A move, waiting until the machine has stopped at its end. */
 async function sendAndWait(cmd: string): Promise<boolean> {
   if (_cancelled) return false;
-  const replies = await orCancel(Promise.all([command.send('G21' + cmd, { log: true }), command.send('G4P0')]));
+  const replies = await orCancel(Promise.all([command.send('G21' + cmd, { log: true, owner: OWNER }), command.send('G4P0', { owner: OWNER })]));
   return !!replies && replies.every(r => r.result === 'ok');
 }
 
-/** Cancel: the routine stops sending, and a move in progress is stopped too. */
+/** Cancel: the routine's commands not sent yet are taken back, and a move in progress is stopped. */
 export function cancelProbing(): void {
   if (!_running) return;
   _cancelled = true;
   if (_cancel) { _cancel(); _cancel = null; }
-  if (command.stats().waiting.length) {
+  // A $G or $# in flight moves nothing; a move or a dwell behind one may still be under way.
+  if (command.cancelOwned(OWNER).some(c => !c.startsWith('$'))) {
     log('info', 'Probing cancelled: stopping the move in progress');
     stopMachine();
-  } else log('info', 'Probing cancelled');
+  } else log('info', 'Probing cancelled: no move of it was in flight, and what was still to send was taken back');
 }
 
 export async function runToolLengthProbe(seq: any): Promise<ProbeResult | null> {

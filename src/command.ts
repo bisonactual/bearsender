@@ -45,7 +45,7 @@ export interface Reply {
   code: number;
 }
 
-export type Failure = 'timeout' | 'reset' | 'disconnected' | 'not connected' | 'alarm' | 'jog cancel' | 'banner' | 'not one line' | 'too long';
+export type Failure = 'timeout' | 'reset' | 'disconnected' | 'not connected' | 'alarm' | 'jog cancel' | 'banner' | 'not one line' | 'too long' | 'cancelled';
 
 /** Why a command's promise was rejected. A timed-out command still owns its reply when it comes. */
 export class CommandFailed extends Error {
@@ -59,6 +59,8 @@ export interface SendOptions {
   log?: boolean;
   /** An error is the caller's to show: not logged here, and not put in the messages. */
   quiet?: boolean;
+  /** Who sent it, so cancelOwned() can take back what it hasn't sent yet. */
+  owner?: object;
 }
 
 export interface JobLine { text: string; line: number; }
@@ -100,6 +102,7 @@ interface Entry {
   timer?: ReturnType<typeof setTimeout>;
   late?: boolean;   // its promise timed out; it keeps its place and its reply
   clear?: boolean;  // the empty line that clears a kept error; its ok is nobody's
+  owner?: object;
 }
 
 interface Sync {
@@ -194,8 +197,15 @@ export function send(line: string, opts: SendOptions = {}): Promise<Reply> {
     if (phase === 'offline') { reject(new CommandFailed(command, 'not connected')); return; }
     // grblHAL ends a line at CR as well as LF: one entry with either inside would get two replies.
     if (/[\r\n]/.test(command)) { log('err', `Not sent: "${command.replace(/[\r\n]+/g, '⏎')}" is more than one line`); reject(new CommandFailed(command, 'not one line')); return; }
-    enqueue({ command, bytes: byteLen(command + '\n'), lines: [], log: !!opts.log, quiet: opts.quiet, resolve, reject }, opts.timeout ?? DEFAULT_TIMEOUT);
+    enqueue({ command, bytes: byteLen(command + '\n'), lines: [], log: !!opts.log, quiet: opts.quiet, owner: opts.owner, resolve, reject }, opts.timeout ?? DEFAULT_TIMEOUT);
   });
+}
+
+/** Cancel for `owner`: its commands not sent yet are dropped (rejected as 'cancelled'), also while the
+ *  line is being synced, so none of them goes later. Returns its commands still in flight. */
+export function cancelOwned(owner: object): string[] {
+  dropQueued(e => e.owner === owner, 'cancelled');
+  return waiting.filter(e => e.owner === owner).map(e => e.command);
 }
 
 /** Sends lines nobody waits for (split at CR, LF or CRLF), through the same queue. */
