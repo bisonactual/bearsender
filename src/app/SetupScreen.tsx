@@ -69,14 +69,15 @@ export function PositionCard() {
     }>
       <div class={'fs-badge' + stateTone(sl)}>{linked ? (machine.state.value || 'NO REPORT YET').toUpperCase() : 'OFFLINE'}</div>
       <div class="fs-dro">
-        {(['x', 'y', 'z'] as const).map(a => (
+        {/* X, Y, Z, then whatever other axes the controller has; A, B and C are in degrees. */}
+        {[...(['x', 'y', 'z'] as const).map(a => ({ letter: a.toUpperCase(), rotary: false, w: w[a], m: m[a] })), ...machine.extraAxes.value].map(a => (
           <div class="fs-dro-row">
-            <span class="fs-axis-name">{a.toUpperCase()}</span>
-            <span class="fs-dro-w fs-mono">{fix3(w[a])}</span>
-            <span class="fs-dro-m fs-mono" title="Machine position">M {fix3(m[a])}</span>
-            <span class="fs-unit">MM</span>
-            <button type="button" class="fs-btn fs-btn-xs" disabled={!linked} title={`Zero ${a.toUpperCase()} in ${wcs} here (G10 L20)`}
-              onClick={() => sendCmd('G10 L20 P' + machine.activeP.value + ' ' + a.toUpperCase() + '0')}>ZERO</button>
+            <span class="fs-axis-name">{a.letter}</span>
+            <span class="fs-dro-w fs-mono">{fix3(a.w)}</span>
+            <span class="fs-dro-m fs-mono" title="Machine position">M {fix3(a.m)}</span>
+            <span class="fs-unit">{a.rotary ? 'DEG' : 'MM'}</span>
+            <button type="button" class="fs-btn fs-btn-xs" disabled={!linked} title={`Zero ${a.letter} in ${wcs} here (G10 L20)`}
+              onClick={() => sendCmd('G10 L20 P' + machine.activeP.value + ' ' + a.letter + '0')}>ZERO</button>
           </div>
         ))}
       </div>

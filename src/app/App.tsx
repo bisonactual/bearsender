@@ -140,12 +140,15 @@ function PositionLine() {
   const view = stateView();
   const ref = ui.posRef.value;
   const pos = ref === 'work' ? machine.wpos.value : machine.mpos.value;
+  // X, Y, Z, then whatever other axes the controller has (A, B, C in degrees).
+  const shown: [string, number][] = [['X', pos.x], ['Y', pos.y], ['Z', pos.z],
+    ...machine.extraAxes.value.map((e): [string, number] => [e.letter, ref === 'work' ? e.w : e.m])];
   const wcs = machine.wcs.value;
   // Set zeroes an axis in the active work offset. Only offered when the machine is idle.
   const canSet = connection.connected.value && machine.stateName.value === 'idle' && !job.running.value;
   const line = useRef<HTMLDivElement>(null);
   // Fit again when something that changes the line's widths does, and when the window changes size.
-  const widths = [ui.signalsShown.value, canSet, wcs, view.label, view.sub, pos.x.toFixed(3).length, pos.y.toFixed(3).length, pos.z.toFixed(3).length].join('|');
+  const widths = [ui.signalsShown.value, canSet, wcs, view.label, view.sub, ...shown.map(([a, v]) => a + v.toFixed(3).length)].join('|');
   useLayoutEffect(() => { if (line.current) fitLine(line.current); }, [widths]);
   useEffect(() => {
     const refit = () => { if (line.current) fitLine(line.current); };
@@ -162,11 +165,11 @@ function PositionLine() {
         <div><div class="fs-state-label">{view.label}</div><div class="fs-state-sub">{view.sub}</div></div>
       </div>
       <div role="group" aria-label="Position" class="fs-axes">
-        {(['x', 'y', 'z'] as const).map(a => (
+        {shown.map(([a, v]) => (
           <div class="fs-axis">
-            <span class="fs-axis-name">{a.toUpperCase()}</span><span class="fs-axis-value">{pos[a].toFixed(3)}</span>
-            {canSet && <button type="button" class="fs-set" title={`Zero ${a.toUpperCase()} in ${wcs} here (G10 L20)`}
-              onClick={() => sendCmd(`G10 L20 P${machine.activeP.value} ${a.toUpperCase()}0`)}>SET {wcs}</button>}
+            <span class="fs-axis-name">{a}</span><span class="fs-axis-value">{v.toFixed(3)}</span>
+            {canSet && <button type="button" class="fs-set" title={`Zero ${a} in ${wcs} here (G10 L20)`}
+              onClick={() => sendCmd(`G10 L20 P${machine.activeP.value} ${a}0`)}>SET {wcs}</button>}
           </div>
         ))}
       </div>

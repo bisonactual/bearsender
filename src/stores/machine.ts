@@ -57,6 +57,23 @@ export const activeP = computed(() => WCS_P[wcs.value] ?? 1);
 /** idle, run, hold, alarm, tool, door, home, jog, check, sleep, or '' before the first report. */
 export const stateName = computed(() => state.value.split(':')[0].toLowerCase());
 
+/** The axes the controller has, from [AXS:] in $I: X, Y, Z, then any of A, B, C, U, V, W. */
+export const axes = signal<string[]>(['X', 'Y', 'Z']);
+/** The machine position of the axes after Z, in the order of `axes`: degrees for A, B and C, mm for U, V, W. */
+export const mposExtra = signal<number[]>([]);
+/** WCO for the axes after Z, null until reported. */
+export const wcoExtra = signal<number[] | null>(null);
+
+export interface ExtraAxis { letter: string; rotary: boolean; m: number; w: number; }
+/** The axes after Z, for the DROs: from $I, or as many as the status report gives if $I named none. */
+export const extraAxes = computed<ExtraAxis[]>(() => {
+  const letters = axes.value.slice(3), m = mposExtra.value, o = wcoExtra.value ?? [];
+  return Array.from({ length: Math.max(letters.length, m.length) }, (_, i) => {
+    const letter = letters[i] ?? 'ABCUVW'[i] ?? '?';
+    return { letter, rotary: 'ABC'.includes(letter), m: m[i] ?? 0, w: (m[i] ?? 0) - (o[i] ?? 0) };
+  });
+});
+
 export const wpos = computed<Vec3>(() => {
   const m = mpos.value;
   const o = wco.value ?? offsets.value[wcs.value] ?? { x: 0, y: 0, z: 0 };

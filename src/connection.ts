@@ -193,7 +193,11 @@ function readBuildInfo(lines: string[]): void {
       log('info', 'RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes  planner blocks: ' + opt[1]);
     }
     const axes = line.match(/^\[AXS:\d+:([A-Z]+)\]/);
-    if (axes) { state.controllerAxes = axes[1].split(''); log('info', 'Axes: ' + state.controllerAxes.join(',')); }
+    if (axes) {
+      state.controllerAxes = axes[1].split('');
+      machine.axes.value = state.controllerAxes;
+      log('info', 'Axes: ' + state.controllerAxes.join(','));
+    }
     ezCheckPlugin(line);
     frCheckPlugin(line);
   }
@@ -230,6 +234,9 @@ function onClose(): void {
     machine.alarm.value = null;
     machine.tool.value = null;
     machine.homed.value = false;
+    machine.axes.value = ['X', 'Y', 'Z'];
+    machine.mposExtra.value = [];
+    machine.wcoExtra.value = null;
     machine.feed.value = 0;
     machine.spindle.value = 0;
     connection.firmware.value = '';

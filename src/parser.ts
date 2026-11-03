@@ -86,8 +86,16 @@ function parseStatusReport(s: string): void {
   let hasPn = false;
   // Positions in mm whatever $13 says. The report gives MPos, or WPos with WCO now or earlier.
   const vec = (vals: string[]): machine.Vec3 => ({ x: reportMm(parseFloat(vals[0]) || 0), y: reportMm(parseFloat(vals[1]) || 0), z: reportMm(parseFloat(vals[2]) || 0) });
+  // The axes after Z: A, B and C in degrees as reported, U, V and W in mm like X, Y and Z.
+  const letters = machine.axes.peek();
+  const rest = (vals: string[]): number[] => vals.slice(3).map((v, i) => {
+    const n = parseFloat(v) || 0;
+    return 'UVW'.includes(letters[3 + i] ?? '') ? reportMm(n) : n;
+  });
   let mpos: machine.Vec3 | null = null;
   let wpos: machine.Vec3 | null = null;
+  let mposExtra: number[] | null = null;
+  let wposExtra: number[] | null = null;
   // A: comes with the overrides (Ov:), and only while something is on.
   let accessories: string | null = null;
   for (let i = 1; i < parts.length; i++) {
@@ -95,9 +103,9 @@ function parseStatusReport(s: string): void {
     if (colon === -1) continue;
     const key = parts[i].slice(0, colon);
     const vals = parts[i].slice(colon + 1).split(',');
-    if (key === 'WPos') wpos = vec(vals);
-    if (key === 'MPos') mpos = vec(vals);
-    if (key === 'WCO') machine.wco.value = vec(vals);
+    if (key === 'WPos') { wpos = vec(vals); wposExtra = rest(vals); }
+    if (key === 'MPos') { mpos = vec(vals); mposExtra = rest(vals); }
+    if (key === 'WCO') { machine.wco.value = vec(vals); machine.wcoExtra.value = rest(vals); }
     if (key === 'H') machine.homed.value = vals[0] === '1';
     if (key === 'FS' || key === 'F') {
       report.fs = { feed: vals[0] || '0', spindle: vals[1] || '0' };
@@ -167,12 +175,17 @@ function parseStatusReport(s: string): void {
   // has G92 and the tool length offset in it). Until a WCO has come it isn't known: ask for one.
   if (wpos && !mpos) {
     const o = machine.wco.value;
-    if (o) mpos = { x: wpos.x + o.x, y: wpos.y + o.y, z: wpos.z + o.z };
+    if (o) {
+      mpos = { x: wpos.x + o.x, y: wpos.y + o.y, z: wpos.z + o.z };
+      const ox = machine.wcoExtra.value ?? [];
+      mposExtra = (wposExtra ?? []).map((v, i) => v + (ox[i] ?? 0));
+    }
     else rtSend('\x87');
   }
   // The store, the old state fields and the bus all get the machine position, never the work one.
   if (mpos) {
     machine.mpos.value = mpos;
+    if (mposExtra) machine.mposExtra.value = mposExtra;
     state.machineX = mpos.x; state.machineY = mpos.y; state.machineZ = mpos.z;
     report.mpos = { ...mpos };
     tags.add('mpos');
