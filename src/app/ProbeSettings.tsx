@@ -25,6 +25,7 @@ export function ProbeSettingsCard() {
       <div class="fs-prow">{f('tip', 'Tip diameter', 'mm', 0.001, 0)}{f('clear', 'Clearance from the side', 'mm', 0.5, 0)}</div>
       <div class="fs-prow">{f('fast', 'Fast feed, first touch', 'mm/min', 10, 1)}{f('slow', 'Slow feed, second touch', 'mm/min', 5, 1)}</div>
       <div class="fs-prow">{f('back', 'Back off between touches', 'mm', 0.1, 0.1)}{f('search', 'Search up to', 'mm', 1, 1)}</div>
+      {ps.probeProblems(P).map(p => <div class="fs-note is-warn">Can't be used, so no routine sends it: {p}.</div>)}
       <div class="fs-note">Tool length keeps its own search distance and plate thickness on its card, and the edge finder's Z keeps its own plate.</div>
     </Card>
   );

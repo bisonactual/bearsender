@@ -6,9 +6,7 @@
 // AD left, CB right; Z the top. Every touch is made with the tip a radius short of the surface, so the
 // surface is the contact plus the direction of travel times the radius.
 
-import { log } from '../console';
-import { applyXYResult, applyZResult, isProbingRunning, runProbing, machineIo, machineAt, settingsOf } from './probe-program';
-import { Miss, Stop, afterMiss } from './io';
+import { Miss, afterMiss } from './io';
 import type { Io, Point } from './io';
 import type { ProbeSettings } from './settings';
 
@@ -101,22 +99,4 @@ async function corner(io: Io, sp: Point, c: EdgeCfg, P: ProbeSettings): Promise<
   }
   await io.move(found.x!, found.y!, null, `Over the corner: X0 Y0${c.probeZ ? ' and Z0' : ''}`, 'result');
   return found;
-}
-
-/** The old entry (the dead modules): runs it and writes the result, as before. */
-export async function runEdgeFinder(cfg: any): Promise<boolean> {
-  if (isProbingRunning()) { log('err', 'Probe already running'); return false; }
-  return (await runProbing(async () => {
-    try {
-      const f = await edge(machineIo(settingsOf(cfg)), machineAt(), cfg, settingsOf(cfg));
-      const opts = { mode: cfg.coordMode, wcs: cfg.wcs };
-      if (f.x !== undefined || f.y !== undefined) applyXYResult(f.x ?? 0, f.y ?? 0, f.x !== undefined && f.y !== undefined ? 'XY' : f.x !== undefined ? 'X' : 'Y', opts);
-      if (f.z !== undefined) applyZResult(f.z, cfg.touchPlateHeight, cfg.workpieceHeight, opts);
-      return true;
-    } catch (e) {
-      if (e instanceof Miss) { log('err', `✗ ${cfg.edge}: ${e.message}`); return false; }
-      if (e instanceof Stop) return false;
-      throw e;
-    }
-  })) ?? false;
 }

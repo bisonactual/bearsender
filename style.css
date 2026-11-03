@@ -920,6 +920,8 @@
   .fs-pstatus2.is-run { border-color: var(--orange); color: #fdba74; }
   .fs-pstatus2.is-ok { border-color: var(--green); color: var(--go-text); }
   .fs-pstatus2.is-err { border-color: var(--red); color: var(--stop-text); }
+  .fs-pstatus2.is-warn { border-color: var(--warn-text); color: var(--warn-text); }
+  .fs-pset.is-warn { color: var(--warn-text); }
   .fs-pres { font-size: 13px; line-height: 1.5; color: var(--text-mid); padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--surface3); }
   .fs-pres .k { display: inline-block; min-width: 7ch; color: var(--text2); }
   .fs-pres .old { color: var(--text2); }

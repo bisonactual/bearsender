@@ -133,11 +133,14 @@ function TargetBlock({ sig, what }: { sig: Signal<pr.Target>; what: string }) {
 }
 
 /** The probe settings in one line, and the way to them. */
-function ProbeLine() {
+function ProbeLine({ toolLength }: { toolLength?: boolean }) {
   const P = ps.probe.value;
+  const problems = ps.probeProblems(P, toolLength);
+  const n = (v: number) => Number.isFinite(v) ? String(v) : '?';
   return (
-    <div class="fs-psect fs-pset">
-      <span>Probe: tip Ø <b class="fs-mono">{P.tip.toFixed(3)}</b> · fast <b class="fs-mono">{P.fast}</b>, slow <b class="fs-mono">{P.slow}</b> mm/min · back off <b class="fs-mono">{P.back}</b> · clearance <b class="fs-mono">{P.clear}</b> · search <b class="fs-mono">{P.search}</b> mm</span>
+    <div class={'fs-psect fs-pset' + (problems.length ? ' is-warn' : '')}>
+      <span>{problems.length ? <>Probe settings can't be used, so no routine sends them: {problems.join('; ')}.</>
+        : <>Probe: tip Ø <b class="fs-mono">{Number.isFinite(P.tip) ? P.tip.toFixed(3) : '?'}</b> · fast <b class="fs-mono">{n(P.fast)}</b>, slow <b class="fs-mono">{n(P.slow)}</b> mm/min · back off <b class="fs-mono">{n(P.back)}</b> · clearance <b class="fs-mono">{n(P.clear)}</b> · search <b class="fs-mono">{n(P.search)}</b> mm</>}</span>
       <button type="button" class="fs-btn fs-btn-sm" onClick={() => { settingsOpen.value = true; }}>PROBE SETTINGS</button>
     </div>
   );
@@ -265,7 +268,12 @@ function ToolWhat() {
   const set = (p: Partial<pr.TlCfg>) => pr.update('tl', pr.tl, p);
   const tlo = machine.tlo.value, tool = machine.tool.value;
   const linked = connection.connected.value, busy = !!pr.running.value;
-  const when = c.refAt ? new Date(c.refAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const when = (at: number) => new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const T = (n: number | null | undefined) => n !== null && n !== undefined ? 'T' + n : 'the reference tool';
+  // A reference belongs to the surface it was measured on; the other surface's, or one from before
+  // references were kept per surface, doesn't apply here and is said so.
+  const here = pr.SURFACE_NAME[c.mode], otherMode = c.mode === 'touchplate' ? 'toolsetter' : 'touchplate';
+  const ref = pr.referenceFor(c), other = c.refs?.[otherMode] ?? null;
   return <>
     <Tiles label="Measure on" value={c.mode} set={v => set({ mode: v })} opts={[['touchplate', 'plate', 'ON A TOUCH PLATE'], ['toolsetter', 'setter', 'ON THE TOOLSETTER']]} />
     <div class="fs-prow">
@@ -275,19 +283,21 @@ function ToolWhat() {
       </> : <UnitField label="Stop this far above the toolsetter" value={c.toolsetterDepth} unit="mm" step={1} min={1} set={v => set({ toolsetterDepth: v })} />}
     </div>
     <div class="fs-psect"><div class="fs-cap">REFERENCE TOOL</div>
-      <div class="fs-note">{c.tloReference === null
-        ? <><b>Not set.</b> Measure the reference tool first. Every later tool is measured against it, and the difference becomes its tool length offset.</>
-        : <><b>{c.refTool !== null && c.refTool !== undefined ? 'T' + c.refTool : 'The reference tool'}, touched at machine Z <span class="fs-mono">{f3(c.tloReference)}</span></b>{when ? ', ' + when : ''}. Later tools are measured against it.</>}</div>
+      <div class="fs-note">{ref
+        ? <><b>{T(ref.tool)}, touched at machine Z <span class="fs-mono">{f3(ref.z)}</span> on the {here}</b>, {when(ref.at)}. Later tools measured on the {here} are measured against it.</>
+        : <><b>Not set on the {here}.</b> Measure the reference tool on the {here} first. Every later tool is measured against it, and the difference becomes its tool length offset.</>}</div>
+      {!ref && other && <div class="fs-note is-warn">The {pr.SURFACE_NAME[otherMode]}'s reference ({T(other.tool)}, Z {f3(other.z)}) doesn't apply on the {here}: a touch on one isn't comparable with a touch on the other.</div>}
+      {!ref && c.tloReference !== null && <div class="fs-note is-warn">A reference kept from before ({T(c.refTool)}, Z {f3(c.tloReference)}) doesn't say whether it was on the plate or the toolsetter, so it isn't used. Measure it again.</div>}
       <div class="fs-row-gap">
-        <button type="button" class="fs-btn" disabled={!linked || busy} title="Probe this tool as the reference the others are measured from" onClick={() => probeNow('tl', true)}>MEASURE AS REFERENCE</button>
-        {c.tloReference !== null && <button type="button" class="fs-btn" title="Forget the reference and cancel the tool length offset (G49)" onClick={() => pr.clearReference()}>CLEAR</button>}
+        <button type="button" class="fs-btn" disabled={!linked || busy} title={`Probe this tool on the ${here} as the reference the others are measured from`} onClick={() => probeNow('tl', true)}>MEASURE AS REFERENCE</button>
+        {(ref || c.tloReference !== null) && <button type="button" class="fs-btn" title={`Forget the ${here}'s reference and cancel the tool length offset (G49)`} onClick={() => pr.clearReference()}>CLEAR</button>}
       </div>
     </div>
     <div class="fs-psect"><div class="fs-cap">TOOL LENGTH OFFSET NOW</div>
       <div class="fs-mono fs-ptlo">{tlo === null ? 'not read' : f3(tlo)} <span class="fs-dim">mm{tool !== null ? ` · T${tool} in the spindle` : ''}</span></div>
       <div class="fs-note">At a tool change in a job, the job screen's MEASURE has the controller measure the tool itself ($TPW).</div>
     </div>
-    <ProbeLine />
+    <ProbeLine toolLength />
   </>;
 }
 
@@ -406,7 +416,7 @@ function RunFoot({ tab }: { tab: Routine }) {
   let tone = '', text: string;
   if (busy && busy !== tab) { tone = 'run'; text = `${TAB_NAME[busy]} is probing. CANCEL stops it from here.`; }
   else if (run?.phase === 'running') { tone = 'run'; text = run.text || `Probing the ${pr.measuring(tab)}: ${run.label.toLowerCase()}.`; }
-  else if (run) { tone = run.phase === 'ok' ? 'ok' : run.phase === 'fail' ? 'err' : ''; text = run.text; }
+  else if (run) { tone = run.phase === 'ok' ? 'ok' : run.phase === 'fail' ? 'err' : run.phase === 'held' ? 'warn' : ''; text = run.text; }
   else text = pr.readyText(tab);
   const lines = run?.phase === 'ok' && (!busy || busy === tab) ? run.lines : [];
   const canApply = tab === 'rot' && pr.rotAngle.value !== null && job.lines.value.length > 0;
@@ -419,7 +429,8 @@ function RunFoot({ tab }: { tab: Routine }) {
       <button type="button" class="fs-pgo" disabled={!linked || !!busy} onClick={() => probeNow(tab)}>PROBE</button>
       {tab === 'rot' && <button type="button" class="fs-pap" disabled={!canApply}
         title={pr.rotAngle.value === null ? 'Measure first' : `Turn the program by ${pr.rotAngle.value.toFixed(3)}°`} onClick={() => pr.applyRotation()}>APPLY ROTATION</button>}
-      <button type="button" class={'fs-pcx' + (busy ? ' is-live' : '')} disabled={!busy} title="Stop the routine and the move in progress" onClick={() => pr.cancel()}>CANCEL</button>
+      <button type="button" class={'fs-pcx' + (busy && !pr.finishing.value ? ' is-live' : '')} disabled={!busy || pr.finishing.value}
+        title={pr.finishing.value ? 'The moves are done and the result is being written: nothing is left to cancel' : 'Stop the routine and the move in progress'} onClick={() => pr.cancel()}>CANCEL</button>
     </div>
   </>;
 }
