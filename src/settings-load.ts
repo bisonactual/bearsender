@@ -6,11 +6,16 @@
 // signals for the Settings screen and the console's autocomplete. The values go to the machine store.
 
 import { signal, batch } from '@preact/signals';
-import { state, DTYPE_MAP } from './state';
 import { log } from './console';
 import * as command from './command';
 import * as machine from './stores/machine';
 import * as connection from './stores/connection';
+
+// $ESH's type names, as the dtype numbers $ES uses.
+const DTYPE_MAP: Record<string, number> = {
+  'bool': 0, 'boolean': 0, 'bitfield': 1, 'xbitfield': 2, 'radiobuttons': 3, 'radio': 3, 'axismask': 4,
+  'integer': 5, 'int': 5, 'float': 6, 'decimal': 6, 'string': 7, 'text': 7, 'password': 8, 'ipv4': 9,
+};
 
 export interface SettingGroup { id: number; parentId: number; name: string; }
 /** dtype: 0 bool, 1 bitfield, 2 exclusive bitfield, 3 radio, 4 axis mask, 5 integer, 6 decimal, 7 string, 8 password, 9 IPv4. */
@@ -48,11 +53,10 @@ export async function loadSettings(): Promise<void> {
     reading.value = false;
     return;
   }
-  state.settingsValues = { ...state.settingsValues, ...v };
   batch(() => {
     groups.value = g;
     defs.value = d;
-    machine.settings.value = { ...state.settingsValues };
+    machine.settings.value = { ...machine.settings.peek(), ...v };
     loaded.value = true;
     readNote.value = null;
     reading.value = false;

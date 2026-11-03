@@ -10,7 +10,6 @@ import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as settings from '../settings';
 import type { SettingDef } from '../settings';
-import { state } from '../state';
 import { errorText } from '../errors';
 import * as ui from './ui';
 import { ZonesTab } from './ZonesTab';
@@ -37,7 +36,7 @@ function groupList(): { id: number; name: string; depth: number }[] {
 
 function Bits({ def, value, set, mode }: { def: SettingDef; value: string; set: (v: string) => void; mode: 'bits' | 'exclusive' | 'radio' | 'axes' }) {
   const cur = parseInt(value) || 0;
-  const labels = mode === 'axes' && !def.formatLabels.length ? state.controllerAxes.map(a => a + ' axis') : def.formatLabels;
+  const labels = mode === 'axes' && !def.formatLabels.length ? machine.axes.value.map(a => a + ' axis') : def.formatLabels;
   return (
     <div class="fs-gs-bits" role={mode === 'radio' ? 'radiogroup' : 'group'} aria-label={def.name}>
       {labels.map((label, bit) => {

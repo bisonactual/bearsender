@@ -25,17 +25,16 @@
 // Start reads the modes first ($G): the program is read from them, and they are kept with the job
 // (stores/starts.ts) for a resume. With "Run lines after M30" off, the job ends at its first M2/M30.
 
-import { state } from './state';
 import { byteLen } from './ui';
 import { log } from './console';
 import { rtSend } from './connection';
 import * as command from './command';
-import { updateProgress } from './gcode';
 import { frActive, frEnabled, frJobLines, frJobStamp } from './flight-recorder';
 import { cleanLine } from './flight-recorder-resume';
 import { errorText } from './errors';
 import { rereadAfterReset } from './offsets';
 import * as job from './stores/job';
+import * as connection from './stores/connection';
 import * as messages from './stores/messages';
 import * as machine from './stores/machine';
 import * as jobOptions from './stores/options';
@@ -63,6 +62,9 @@ interface Run {
 }
 
 let run: Run | null = null;
+// A job is being sent, and held by HOLD; updateRunButtons copies both into the job store.
+let running = false;
+let paused = false;
 let starting = false;   // waiting for Start's $G, or the recorder's answer to the job stamp
 // After an error: the hold is sent again while the controller reports Run, until it has taken, for
 // HOLD_AGAIN ms. grblHAL ignores a feed hold that comes before the cycle has started (seen on the sim:
@@ -74,7 +76,7 @@ function newRun(lines: SendLine[]): Run {
   const r: Run = { lines, head: 0, inFlight: 0, ended: false, atM6: 'no', m6Line: 0, lastSystem: false, source: null! };
   r.source = {
     next(room) {
-      if (r.ended || !state.running || state.paused || r.atM6 !== 'no' || r.head >= r.lines.length) return null;
+      if (r.ended || !running || paused || r.atM6 !== 'no' || r.head >= r.lines.length) return null;
       const next = r.lines[r.head];
       const system = /^[$[]/.test(next.text);
       if (r.inFlight && (system || r.lastSystem)) return null;
@@ -83,10 +85,8 @@ function newRun(lines: SendLine[]): Run {
       if (bytes > room) return null;
       r.lastSystem = system;
       r.head++;
-      state.lineHead = r.head;
       r.inFlight++;
       if (next.line > 0) job.sentLine.value = next.line;
-      updateProgress(next.line, state.gcodeLines.length);
       // The sending keeps its own M6 check, so the hold doesn't depend on the interpreter having read this far.
       if (TOOL_CHANGE.test(cleanLine(next.text))) { r.atM6 = 'sent'; r.m6Line = next.line; }
       return next;
@@ -126,7 +126,7 @@ function newRun(lines: SendLine[]): Run {
 function end(r: Run): void {
   r.ended = true;
   command.endStream(r.source);
-  if (run === r) { state.running = false; state.paused = false; job.heldAtM6.value = false; }
+  if (run === r) { running = false; paused = false; job.heldAtM6.value = false; }
   updateRunButtons();
 }
 
@@ -202,11 +202,11 @@ export function untilProgramEnd(lines: SendLine[]): SendLine[] {
 }
 
 export function startJob(): void {
-  if (!state.connected) { log('err', 'Not connected'); return; }
-  if (state.gcodeLines.length === 0) { log('err', 'No file loaded'); return; }
-  if (state.running && !state.paused) return;
-  if (state.paused) {
-    state.paused = false;
+  if (!connection.connected.peek()) { log('err', 'Not connected'); return; }
+  if (job.lines.peek().length === 0) { log('err', 'No file loaded'); return; }
+  if (running && !paused) return;
+  if (paused) {
+    paused = false;
     rtSend('~');
     log('info', 'Resumed');
     updateRunButtons();
@@ -218,22 +218,22 @@ export function startJob(): void {
   // sim refused the first $ command after homing (error:71) and took the next, so a refusal gets one more try.
   // Stop, RESET or a lost link while $G is pending revokes this Start, as does another file loaded.
   starting = true;
-  const live = command.intent(), lines = state.gcodeLines;
+  const live = command.intent(), lines = job.lines.peek();
   const modes = () => command.send('$G', { quiet: true }).catch(e => { if (e instanceof command.CommandFailed) return null; throw e; });
   modes().then(r => r?.result === 'error' && live() ? modes() : r).then(reply => {
     starting = false;
-    if (!live() || state.gcodeLines !== lines) {
+    if (!live() || job.lines.peek() !== lines) {
       log('info', 'Start: nothing was sent. ' + (live() ? 'Another file was loaded' : 'Stop, RESET, a reset or the link going') + ' came while $G was answered; press Start again.');
       return;
     }
-    if (!state.connected || state.running) return;
+    if (!connection.connected.peek() || running) return;
     const words = reply?.result === 'ok' ? [...machine.modal.value] : null;
     if (!words) log('err', 'Start: $G got no answer, so the modes the job starts from aren\'t known: the program was read from the last known, and a resume will assume G21 G90 G17 G94.');
     program.readNow();
-    starts.keep(state.gcodeLines, job.file.value ?? '—', words);
+    starts.keep(job.lines.peek(), job.file.value ?? '—', words);
     const recorded = frActive();
     if (frEnabled() && !recorded) log('info', '✈ The flight recorder is on, but this controller has no Flight Recorder plugin. Running without a record.');
-    log('info', 'Starting job: ' + state.gcodeLines.length + ' lines  (RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes)' +
+    log('info', 'Starting job: ' + job.lines.peek().length + ' lines  (RX buffer: ' + command.rxBufferSize() + ' bytes)' +
         (recorded ? '  flight recorder on' : '') + (words ? '  modes ' + words.filter(w => w.startsWith('G')).join(' ') : ''));
     if (recorded) streamLines(untilProgramEnd(frJobLines()), true, { stamp: frJobStamp() });
     else streamLines(untilProgramEnd(plainLines()), false, {});
@@ -268,14 +268,12 @@ export function streamLines(lines: SendLine[], numbered: boolean, opts: { stamp?
 }
 
 function begin(lines: SendLine[], numbered: boolean, resumedAt?: number): void {
-  if (!state.connected) return;
+  if (!connection.connected.peek()) return;
   if (run && !run.ended) end(run);
   holdUntilHeld = 0;
   job.started(numbered, resumedAt);
   job.halt.value = null;
-  state.running = true; state.paused = false;
-  state.sendLines = lines; state.jobNumbered = numbered;
-  state.lineHead = 0; state.segmentIndex = 0;
+  running = true; paused = false;
   run = newRun([...lines, { text: BARRIER, line: 0 }]);
   updateRunButtons();
   command.stream(run.source);
@@ -287,7 +285,7 @@ function stripComment(line: string): string {
 
 function plainLines(): SendLine[] {
   const lines: SendLine[] = [];
-  state.gcodeLines.forEach((raw, i) => {
+  job.lines.peek().forEach((raw, i) => {
     const text = stripComment(raw).trim().toUpperCase();
     if (text) lines.push({ text, line: i + 1 });
   });
@@ -296,12 +294,12 @@ function plainLines(): SendLine[] {
 
 /** HOLD: the job's own pause, or a feed hold of whatever the machine is doing. */
 export function pauseJob(): void {
-  if (!state.running) { rtSend('!'); log('info', 'Feed hold sent'); return; }
-  state.paused = !state.paused;
-  rtSend(state.paused ? '!' : '~');
-  log('info', state.paused ? 'Feed hold sent' : 'Cycle resume sent');
+  if (!running) { rtSend('!'); log('info', 'Feed hold sent'); return; }
+  paused = !paused;
+  rtSend(paused ? '!' : '~');
+  log('info', paused ? 'Feed hold sent' : 'Cycle resume sent');
   updateRunButtons();
-  if (!state.paused) command.pump();
+  if (!paused) command.pump();
 }
 
 /** RESUME at a tool change: the cycle start, once every reply is in (command.ts). At an M6 BearSender
@@ -351,7 +349,7 @@ let stopping: { timer: ReturnType<typeof setTimeout> } | null = null;
 
 /** STOP: ends the job, whether or not BearSender is sending one, and stops the machine. */
 export function stopJob(): void {
-  if (!state.connected) return;
+  if (!connection.connected.peek()) return;
   // A Start, stamp, warmup or Resume waiting on a reply doesn't go ahead after this.
   command.revokePending('Stop');
   if (run && !run.ended) {
@@ -359,7 +357,6 @@ export function stopJob(): void {
     log('info', 'Job stopped');
     job.finished('stopped');
   }
-  state.lineHead = 0;
   holdUntilHeld = 0;
   updateRunButtons();
   stopMachine();
@@ -399,22 +396,24 @@ function finishStop(timedOut: boolean): void {
   } else log('info', 'Stopped: soft reset sent');
 }
 
+/** The link went (connection.ts): no job is being sent any more. */
+export function clearRunFlags(): void { running = false; paused = false; }
+
 export function updateRunButtons(): void {
-  job.running.value = state.running;
-  job.paused.value = state.paused;
+  job.running.value = running;
+  job.paused.value = paused;
 }
 
 /** RESET: at once, moving or not. */
 export function sendReset(): void {
-  if (!state.connected) return;
+  if (!connection.connected.peek()) return;
   command.revokePending('RESET');
   if (stopping) { clearTimeout(stopping.timer); stopping = null; job.stopping.value = false; }
   if (run && !run.ended) { end(run); job.finished('stopped'); }
   holdUntilHeld = 0;
-  state.running = false; state.paused = false;
+  running = false; paused = false;
   rtSend('\x18');
   rereadAfterReset();
-  state.lineHead = 0;
   log('info', 'Soft reset');
   updateRunButtons();
 }
@@ -425,7 +424,6 @@ export function sendHome(): void { import('./connection').then(c => c.sendCmd('$
 export function goToXY0(): void { import('./jog').then(j => j.goToXY0()); }
 
 export function setWCS(code: string): void {
-  state.activeWcs = code;
   import('./connection').then(c => {
     c.sendCmd(code);
     log('info', 'WCS set to ' + code);

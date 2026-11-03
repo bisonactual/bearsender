@@ -2,7 +2,6 @@
 // WCS Coordinate Offset Table
 // ═══════════════════════════════════════════════
 
-import { state } from './state';
 import { log } from './console';
 import { sendCmd } from './connection';
 import * as command from './command';
@@ -10,6 +9,8 @@ import { lsGet, lsSet } from './ui';
 import { refreshWcsMarkers } from './viewport';
 import { reportMm } from './units';
 import * as machine from './stores/machine';
+import * as connection from './stores/connection';
+import * as job from './stores/job';
 
 // ── Coordinate systems in display order ──────────────────────────────────────
 
@@ -36,23 +37,24 @@ const OFFSET_KEYS = new Set(['G54','G55','G56','G57','G58','G59',
 /** Reads the work offsets ($#), and says whether it got them. The [TLO:] line in its reply is a push
  *  message (see below). */
 export async function loadOffsets(): Promise<boolean> {
-  if (!state.connected) { log('err', 'Not connected'); return false; }
+  if (!connection.connected.peek()) { log('err', 'Not connected'); return false; }
   let reply: command.Reply;
   try { reply = await command.send('$#'); }
   catch (e) { if (e instanceof command.CommandFailed) return false; throw e; }
+  const read: Record<string, machine.Vec3> = {};
   for (const raw of reply.lines) {
     // [G54:x,y,z] [G55:...] [G28:...]; [PRB:] is the last probe's, not an offset
     const m = raw.match(/^\[([A-Z0-9.]+):([^\]]+)\]$/);
     if (!m || !OFFSET_KEYS.has(m[1])) continue;
     const vals = m[2].split(',').map(v => reportMm(Number(v)));
     // Store normalised: x, y, z (pad with 0 if fewer axes reported)
-    state.wcsOffsets[m[1]] = { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
+    read[m[1]] = { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
   }
   if (reply.result !== 'ok') return false;
   // The table first, then the flag, so whoever waits for the flag finds the table in.
-  renderOffsetsTable();
+  setOffsets(read);
   machine.offsetsRead.value = true;
-  if (!machine.offsetsAtConnect.value) machine.offsetsAtConnect.value = { ...state.wcsOffsets };
+  if (!machine.offsetsAtConnect.value) machine.offsetsAtConnect.value = { ...machine.offsets.peek() };
   _staleAfterReset = false;
   refreshLoadedProgramPreviewIfNeeded();
   return true;
@@ -78,23 +80,20 @@ export function offsetsUnread(): boolean { return !machine.offsetsRead.value || 
 command.on('tlo', raw => {
   log('info', raw);
   const vals = raw.slice(5, -1).split(',').map(v => reportMm(Number(v)));
-  state.tloOffset = vals.length === 1 ? vals[0] : (vals[2] ?? vals[0]);
-  state.tloActive = state.tloOffset !== 0;
   machine.tloVector.value = vals.length === 1 ? { x: 0, y: 0, z: vals[0] } : { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
-  machine.tlo.value = state.tloOffset;
-  renderOffsetsTable();
+  machine.tlo.value = vals.length === 1 ? vals[0] : (vals[2] ?? vals[0]);
 });
 
 function refreshLoadedProgramPreviewIfNeeded(): void {
-  if (!state.gcodeLines.length) return;
+  if (!job.lines.peek().length) return;
   import('./gcode').then(g => g.refreshLoadedProgramPreview());
 }
 
 // ── The store ─────────────────────────────────────────────────────────────────
 
-/** Puts the offsets read or written into the store the views read, and the 3D view's markers. */
-export function renderOffsetsTable(): void {
-  machine.offsets.value = { ...state.wcsOffsets };
+/** Offsets read or written, into the store the views read, and the 3D view's markers. */
+function setOffsets(changed: Record<string, machine.Vec3>): void {
+  machine.offsets.value = { ...machine.offsets.peek(), ...changed };
   refreshWcsMarkers();
 }
 
@@ -103,47 +102,41 @@ export function renderOffsetsTable(): void {
 
 /** G10 L2 P<n>, in mm: a work offset as typed. The G28/G30 rows have no write (A6). */
 export function writeOffset(code: string, vals: { x: number; y: number; z: number }): void {
-  if (!state.connected) { log('err', 'Not connected'); return; }
+  if (!connection.connected.peek()) { log('err', 'Not connected'); return; }
   const entry = WCS_ENTRIES.find(e => e.code === code);
   if (!entry || !entry.id) return;
   sendCmd(`G21G10L2P${entry.id}X${vals.x.toFixed(4)}Y${vals.y.toFixed(4)}Z${vals.z.toFixed(4)}`);
-  state.wcsOffsets[code] = { x: vals.x, y: vals.y, z: vals.z };
-  renderOffsetsTable();
+  setOffsets({ [code]: { x: vals.x, y: vals.y, z: vals.z } });
   refreshLoadedProgramPreviewIfNeeded();
   log('info', `Offset written: ${code} X${vals.x.toFixed(3)} Y${vals.y.toFixed(3)} Z${vals.z.toFixed(3)}`);
 }
 
 export function zeroOffset(code: string): void {
-  if (!state.connected) { log('err', 'Not connected'); return; }
+  if (!connection.connected.peek()) { log('err', 'Not connected'); return; }
   const entry = WCS_ENTRIES.find(e => e.code === code);
   if (!entry || !entry.id) return;
   sendCmd(`G10L2P${entry.id}X0Y0Z0`);
-  state.wcsOffsets[code] = { x: 0, y: 0, z: 0 };
-  renderOffsetsTable();
+  setOffsets({ [code]: { x: 0, y: 0, z: 0 } });
   refreshLoadedProgramPreviewIfNeeded();
   log('info', `Offset zeroed: ${code}`);
 }
 
 /** The offset set to where the machine is now. */
 export function setToCurrentPos(code: string): void {
-  if (!state.connected) { log('err', 'Not connected'); return; }
+  if (!connection.connected.peek()) { log('err', 'Not connected'); return; }
   const entry = WCS_ENTRIES.find(e => e.code === code);
   if (!entry || !entry.id) return;
   // The machine position, in mm (parser.ts), even when the controller reports WPos.
   const { x, y, z } = machine.mpos.value;
   sendCmd(`G21G10L2P${entry.id}X${x.toFixed(4)}Y${y.toFixed(4)}Z${z.toFixed(4)}`);
-  state.wcsOffsets[code] = { x, y, z };
-  renderOffsetsTable();
+  setOffsets({ [code]: { x, y, z } });
   refreshLoadedProgramPreviewIfNeeded();
   log('info', `Offset set to machine pos: ${code} X${x.toFixed(3)} Y${y.toFixed(3)} Z${z.toFixed(3)}`);
 }
 
 /** G49: cancels the tool length offset. */
 export function cancelTlo(): void {
-  if (!state.connected) { log('err', 'Not connected'); return; }
+  if (!connection.connected.peek()) { log('err', 'Not connected'); return; }
   sendCmd('G49');
-  state.tloOffset = 0;
-  state.tloActive = false;
   machine.tlo.value = 0;
-  renderOffsetsTable();
 }

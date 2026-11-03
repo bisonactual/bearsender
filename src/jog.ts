@@ -6,13 +6,21 @@
 
 import { signal, effect } from '@preact/signals';
 import * as THREE from 'three';
-import { state, KB_JOG_MAP, KEYBOARD_JOG_DIST } from './state';
 import { isInputFocused, lsGet, lsSet } from './ui';
 import { sendCmd, rtSend, setJogging } from './connection';
 import { scene, toolGroup } from './viewport';
 import * as command from './command';
 import * as connection from './stores/connection';
 import * as machine from './stores/machine';
+import * as job from './stores/job';
+
+// Arrow keys and Page Up/Down jog while held: a long jog, cancelled on release.
+const KB_JOG_MAP: Record<string, string> = {
+  'ArrowLeft': 'X-', 'ArrowRight': 'X+',
+  'ArrowDown': 'Y-', 'ArrowUp': 'Y+',
+  'PageDown': 'Z-', 'PageUp': 'Z+',
+};
+const KEYBOARD_JOG_DIST = 100000;
 
 // ── What the views show ───────────────────────────────────────────────────────
 
@@ -317,7 +325,7 @@ let kbKey: string | null = null;
 
 export function initKeyboardJog(): void {
   document.addEventListener('keydown', e => {
-    if (!connection.connected.value || state.running) return;
+    if (!connection.connected.value || job.running.peek()) return;
     if (isInputFocused()) return;
     const dir = KB_JOG_MAP[e.key];
     if (!dir) return;

@@ -5,15 +5,15 @@
 // The transports only. Every line and every real-time byte goes through the command layer
 // (command.ts), which matches the replies.
 
-import { state, POLL_NORM } from './state';
 import { lsGet } from './ui';
 import { log } from './console';
 import * as command from './command';
-import { updateRunButtons } from './streaming';
+import { updateRunButtons, clearRunFlags } from './streaming';
 import { ezResetPluginState, ezCheckPlugin, ezConnected } from './exclusion-zones';
 import { frEnabled, frCheckPlugin, frConnected, frDisconnected } from './flight-recorder';
 import { loadSettings, forgetSettings } from './settings';
-import { loadOffsets, renderOffsetsTable } from './offsets';
+import { loadOffsets } from './offsets';
+import { resetMachineState } from './parser';
 import { readSetupState } from './app/asks';
 import { batch } from '@preact/signals';
 import * as connection from './stores/connection';
@@ -21,21 +21,33 @@ import * as machine from './stores/machine';
 import * as job from './stores/job';
 import * as messages from './stores/messages';
 
+// The open link: a WebSocket, or a serial port with its reader and writer; what came in short of a line
+// end; the status poll; and whether a jog is under way (it polls faster).
+let ws: WebSocket | null = null;
+let serialPort: any = null;
+let serialWriter: any = null;
+let serialReader: any = null;
+let serialAbort: AbortController | null = null;
+let rxBuf = '';
+let statusInterval: ReturnType<typeof setInterval> | null = null;
+let jogging = false;
+const POLL_NORM = 100;
+
 // ── Poll rate ─────────────────────────────────────────────────────────────────
 export function setPollRate(ms: number): void {
-  if (state.statusInterval) clearInterval(state.statusInterval);
-  state.statusInterval = setInterval(() => { if (state.connected) rtSend('?'); }, ms);
+  if (statusInterval) clearInterval(statusInterval);
+  statusInterval = setInterval(() => { if (connection.connected.peek()) rtSend('?'); }, ms);
 }
 
 export function setJogging(active: boolean): void {
-  if (state._isJogging === active) return;
-  state._isJogging = active;
-  if (state.connected) setPollRate(active ? 50 : POLL_NORM);
+  if (jogging === active) return;
+  jogging = active;
+  if (connection.connected.peek()) setPollRate(active ? 50 : POLL_NORM);
 }
 
 // ── Top-level connect/disconnect ──────────────────────────────────────────────
 export function toggleConnect(): void {
-  state.connected ? disconnect() : connect();
+  connection.connected.peek() ? disconnect() : connect();
 }
 
 function connect(): void {
@@ -57,23 +69,23 @@ function connectWs(): void {
   setStatus('connecting');
   log('info', 'Connecting to ' + url + '…');
   try {
-    state.ws = new WebSocket(url);
-    state.ws.onopen = onOpen;
-    state.ws.onmessage = onMessage;
-    state.ws.onclose = onClose;
-    state.ws.onerror = () => { log('err', 'WebSocket error — check URL and that the controller is reachable'); };
+    ws = new WebSocket(url);
+    ws.onopen = onOpen;
+    ws.onmessage = onMessage;
+    ws.onclose = onClose;
+    ws.onerror = () => { log('err', 'WebSocket error — check URL and that the controller is reachable'); };
   } catch (e: any) { log('err', 'Connection failed: ' + e.message); setStatus('disconnected'); }
 }
 
-function disconnectWs(): void { if (state.ws) state.ws.close(); }
+function disconnectWs(): void { if (ws) ws.close(); }
 
 function feedBuffer(chunk: string): void {
-  state._rxBuf += chunk;
+  rxBuf += chunk;
   batch(() => {
     let nl;
-    while ((nl = state._rxBuf.indexOf('\n')) !== -1) {
-      const line = state._rxBuf.slice(0, nl).replace(/\r$/, '').trim();
-      state._rxBuf = state._rxBuf.slice(nl + 1);
+    while ((nl = rxBuf.indexOf('\n')) !== -1) {
+      const line = rxBuf.slice(0, nl).replace(/\r$/, '').trim();
+      rxBuf = rxBuf.slice(nl + 1);
       if (line) command.receive(line);
     }
   });
@@ -92,24 +104,24 @@ async function connectSerial(): Promise<void> {
   try {
     setStatus('connecting');
     log('info', 'Opening port picker…');
-    state.serialPort = await (navigator as any).serial.requestPort();
+    serialPort = await (navigator as any).serial.requestPort();
     const link = connection.settings.value;
     const baud = parseInt(link.baud) || 115200;
     const dataBits = parseInt(link.dataBits) || 8;
     const stopBits = parseInt(link.stopBits) || 1;
     const parity = link.parity || 'none';
-    await state.serialPort.open({ baudRate: baud, dataBits, stopBits, parity });
+    await serialPort.open({ baudRate: baud, dataBits, stopBits, parity });
 
-    const info = state.serialPort.getInfo();
+    const info = serialPort.getInfo();
     const label = info.usbVendorId
       ? `USB ${info.usbVendorId.toString(16).toUpperCase()}:${(info.usbProductId || 0).toString(16).toUpperCase()} @ ${baud}`
       : `Serial @ ${baud}`;
     connection.transport.value = 'serial';
     connection.address.value = label;
 
-    state.serialAbort = new AbortController();
-    state.serialWriter = state.serialPort.writable.getWriter();
-    state.serialReader = state.serialPort.readable.getReader();
+    serialAbort = new AbortController();
+    serialWriter = serialPort.writable.getWriter();
+    serialReader = serialPort.readable.getReader();
 
     serialReadLoop();
     onOpen();
@@ -117,37 +129,36 @@ async function connectSerial(): Promise<void> {
   } catch (e: any) {
     if (e.name !== 'NotFoundError') log('err', 'Serial error: ' + e.message);
     setStatus('disconnected');
-    state.serialPort = null; state.serialWriter = null; state.serialReader = null;
+    serialPort = null; serialWriter = null; serialReader = null;
   }
 }
 
 async function serialReadLoop(): Promise<void> {
   try {
     while (true) {
-      const { value, done } = await state.serialReader.read();
+      const { value, done } = await serialReader.read();
       if (done) break;
       feedBuffer(new TextDecoder().decode(value));
     }
   } catch (e: any) {
     if (e.name !== 'AbortError') log('err', 'Serial read error: ' + e.message);
   } finally {
-    if (state.connected) onClose();
+    if (connection.connected.peek()) onClose();
   }
 }
 
 async function disconnectSerial(): Promise<void> {
   try {
-    if (state.serialReader) { await state.serialReader.cancel(); state.serialReader.releaseLock(); state.serialReader = null; }
-    if (state.serialWriter) { state.serialWriter.releaseLock(); state.serialWriter = null; }
-    if (state.serialPort) { await state.serialPort.close(); state.serialPort = null; }
+    if (serialReader) { await serialReader.cancel(); serialReader.releaseLock(); serialReader = null; }
+    if (serialWriter) { serialWriter.releaseLock(); serialWriter = null; }
+    if (serialPort) { await serialPort.close(); serialPort = null; }
   } catch (_) { /* ignore close errors */ }
   onClose();
 }
 
 // ── Shared open / close handlers ─────────────────────────────────────────────
 function onOpen(): void {
-  state.connected = true;
-  state._rxBuf = '';
+  rxBuf = '';
   setStatus('connected');
   log('info', connection.settings.value.mode === 'serial' ? 'Serial connected' : 'WebSocket connected');
   messages.push('link', 'Connected to ' + connection.address.value + '.');
@@ -157,8 +168,6 @@ function onOpen(): void {
   // the line in step first, waiting as long as the controller takes to answer.
   command.connected(write, { reset: !frEnabled() });
   afterConnect();
-  const fb = document.getElementById('limitsFrameBtn') as HTMLButtonElement | null;
-  if (fb && state.progLimits) fb.disabled = false;
 }
 
 /** What is read from the controller on connecting, one command after another. */
@@ -188,15 +197,14 @@ function readBuildInfo(lines: string[]): void {
     if (line.startsWith('[VER:')) connection.firmware.value = line.slice(5, -1).split(':')[0];
     const opt = line.match(/^\[OPT:[^,]*,(\d+),(\d+)/);
     if (opt && parseInt(opt[2]) > 0) {
-      state.RX_BUFFER_SIZE = parseInt(opt[2]);
-      command.setRxBufferSize(state.RX_BUFFER_SIZE);
-      log('info', 'RX buffer: ' + state.RX_BUFFER_SIZE + ' bytes  planner blocks: ' + opt[1]);
+      const size = parseInt(opt[2]);
+      command.setRxBufferSize(size);
+      log('info', 'RX buffer: ' + size + ' bytes  planner blocks: ' + opt[1]);
     }
     const axes = line.match(/^\[AXS:\d+:([A-Z]+)\]/);
     if (axes) {
-      state.controllerAxes = axes[1].split('');
-      machine.axes.value = state.controllerAxes;
-      log('info', 'Axes: ' + state.controllerAxes.join(','));
+      machine.axes.value = axes[1].split('');
+      log('info', 'Axes: ' + machine.axes.value.join(','));
     }
     ezCheckPlugin(line);
     frCheckPlugin(line);
@@ -209,17 +217,16 @@ command.onSync(s => {
     : 'Waiting for the controller to answer.');
   if (s.gaveUp) log('err', 'The controller has not answered for 90 s. Reset it to carry on.');
 });
-command.onReply(() => updateBufDisplay());
 
 function onClose(): void {
-  const wasRunning = state.running;
-  state.connected = false;
+  const wasRunning = job.running.peek();
+  setStatus('disconnected');
   command.disconnected();
   setStatus('disconnected');
   log('info', 'Disconnected');
   messages.push('link', 'Disconnected.');
-  if (state.statusInterval) clearInterval(state.statusInterval);
-  state.running = false; state.paused = false;
+  if (statusInterval) clearInterval(statusInterval);
+  clearRunFlags();
   if (wasRunning) job.finished('link lost');
   batch(() => {
     machine.state.value = '';
@@ -242,13 +249,7 @@ function onClose(): void {
     connection.firmware.value = '';
   });
   updateRunButtons();
-  const fb = document.getElementById('limitsFrameBtn') as HTMLButtonElement | null;
-  if (fb) fb.disabled = true;
-  state.machineHomed = false; state._prevMachineStateSl = ''; _updateHomeBtnHomed();
-  state.wcsOffsets = {};
-  state.tloOffset = 0;
-  state.tloActive = false;
-  renderOffsetsTable();
+  resetMachineState();
   ezResetPluginState();
   forgetSettings();
   frDisconnected();
@@ -259,12 +260,12 @@ function onClose(): void {
 /** Writes to the open link. Only the command layer calls it. */
 function write(data: string): boolean {
   if (connection.settings.value.mode === 'serial') {
-    if (!state.serialWriter) return false;
-    state.serialWriter.write(new TextEncoder().encode(data)).catch(() => {});
+    if (!serialWriter) return false;
+    serialWriter.write(new TextEncoder().encode(data)).catch(() => {});
     return true;
   }
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return false;
-  state.ws.send(data);
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(data);
   return true;
 }
 
@@ -273,7 +274,7 @@ export function rtSend(char: string): void { command.realtime(char); }
 
 /** Sends a line (or several, one per line) that nobody waits for. command.send() gives the reply. */
 export function sendCmd(cmd: string): void {
-  if (!state.connected) { log('err', 'Not connected'); return; }
+  if (!connection.connected.peek()) { log('err', 'Not connected'); return; }
   command.post(cmd);
 }
 
@@ -282,13 +283,4 @@ export function setStatus(s: 'disconnected' | 'connecting' | 'connected'): void 
   connection.status.value = s;
 }
 
-export function updateBufDisplay(): void {
-  const el = document.getElementById('bufVal');
-  if (el) el.textContent = 'RX: ' + command.stats().bytes + '/' + state.RX_BUFFER_SIZE + 'B';
-}
 
-/** Homed after a homing cycle. Otherwise the store follows the controller's own H: field (and an
- *  alarm clears it until a full report says otherwise: parser.ts). */
-export function _updateHomeBtnHomed(): void {
-  if (state.machineHomed) machine.homed.value = true;
-}

@@ -6,7 +6,6 @@
 // the job options in stores/options.ts, the 3D view's extents in viewport.ts.
 
 import { signal, effect } from '@preact/signals';
-import { OPT_COLOR_DEFAULTS, OPT_COLOR_CSS_VARS } from './state';
 import { lsGet, lsSet } from './ui';
 import { rebuildSteps, setMaxSpeeds } from './jog';
 import { vpRefreshColors } from './viewport';
@@ -17,6 +16,16 @@ export const autoloadSettings = signal(lsGet('fs-opt-autoload-settings', false))
 effect(() => lsSet('fs-opt-autoload-settings', autoloadSettings.value));
 
 // ── Colours ───────────────────────────────────────────────────────────────────
+/** The theme's colours, and the CSS variable each sets. */
+const OPT_COLOR_DEFAULTS: Record<string, string> = {
+  text: '#f1f5f9', text2: '#94a3b8', bg: '#0f0e0c', surface: '#1a1814', accent: '#ff8c42', tabActive: '#ff8c42',
+  vpCut: '#00d4ff', vpRapid: '#ff4444', vpExecuted: '#00ff88', vpTool: '#ffd740',
+};
+const OPT_COLOR_CSS_VARS: Record<string, string> = {
+  text: '--text', text2: '--text2', bg: '--bg', surface: '--surface', accent: '--accent', tabActive: '--tab-active',
+  vpCut: '--vp-cut', vpRapid: '--vp-rapid', vpExecuted: '--vp-executed', vpTool: '--vp-tool',
+};
+
 export const COLOR_ROWS: [string, string][] = [
   ['text', 'Primary Text'], ['text2', 'Secondary Text'], ['bg', 'Background'], ['surface', 'Surface'],
   ['accent', 'Accent'], ['tabActive', 'Active Tab'],

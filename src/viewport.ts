@@ -6,7 +6,7 @@
 // at any time. It is drawn on the canvas of the job screen's Preview (src/app/Preview.tsx), from the
 // G-code interpreter's moves: machine coordinates, arcs sampled as curves.
 
-import { state, VP_STORAGE_KEY } from './state';
+import * as machine from './stores/machine';
 import { lsGet, lsSet } from './ui';
 import { ezUpdateSpriteScales } from './exclusion-zones';
 import { sampleMove } from './gcode/index';
@@ -18,6 +18,14 @@ import * as THREE from 'three';
 export let renderer: any;
 export let scene: any;
 export let camera: any;
+// The workspace bounds (Settings, Options) and the projection, kept in this browser; the toolhead shown.
+const VP_STORAGE_KEY = 'fs-viewport-extents';
+const vp = { xMin: -300, xMax: 0, yMin: -300, yMax: 0, ortho: false };
+let showToolhead = true;
+
+/** The bounds and projection now, for Settings, Options. */
+export function vpExtents(): typeof vp { return { ...vp }; }
+
 let perspCamera: any;
 let orthoCamera: any;
 export let gridHelper: any = null;
@@ -61,7 +69,7 @@ export function initViewport(): void {
 
   vpLoadExtents();
 
-  camera = state.vpOrtho ? orthoCamera : perspCamera;
+  camera = vp.ortho ? orthoCamera : perspCamera;
   camera.position.set(80, 60, 100);
   camera.lookAt(0, 0, 0);
 
@@ -141,7 +149,7 @@ export function updateCamera(): void {
   const x = target.x + spherical.radius * sp * st;
   const y = target.y + spherical.radius * cp;
   const z = target.z + spherical.radius * sp * ct;
-  if (state.vpOrtho) {
+  if (vp.ortho) {
     orthoCamera.position.set(x, y, z);
     orthoCamera.up.set(0, 1, 0);
     orthoCamera.lookAt(target);
@@ -165,7 +173,7 @@ function syncOrthoFrustum(): void {
 }
 
 export function setProjection(ortho: boolean): void {
-  state.vpOrtho = ortho;
+  vp.ortho = ortho;
   camera = ortho ? orthoCamera : perspCamera;
   updateCamera();
   vpSaveExtents();
@@ -181,7 +189,7 @@ function screenToWorld(clientX: number, clientY: number): any {
   camera.getWorldDirection(viewDir);
 
   let origin: any, dir: any;
-  if (state.vpOrtho) {
+  if (vp.ortho) {
     // Ortho: unproject near plane to get ray origin; direction is camera forward
     origin = new THREE.Vector3(ndcX, ndcY, -1).unproject(camera);
     dir = viewDir.clone();
@@ -300,14 +308,14 @@ function setupTouchControls(canvas: HTMLCanvasElement): void {
 export function vpLoadExtents(): void {
   const d = lsGet<any>(VP_STORAGE_KEY, null);
   if (d) {
-    state.vpXMin = d.xMin ?? -300; state.vpXMax = d.xMax ?? 0;
-    state.vpYMin = d.yMin ?? -300; state.vpYMax = d.yMax ?? 0;
-    if (d.ortho !== undefined) state.vpOrtho = !!d.ortho;
+    vp.xMin = d.xMin ?? -300; vp.xMax = d.xMax ?? 0;
+    vp.yMin = d.yMin ?? -300; vp.yMax = d.yMax ?? 0;
+    if (d.ortho !== undefined) vp.ortho = !!d.ortho;
   }
 }
 
 export function vpSaveExtents(): void {
-  lsSet(VP_STORAGE_KEY, { xMin: state.vpXMin, xMax: state.vpXMax, yMin: state.vpYMin, yMax: state.vpYMax, ortho: state.vpOrtho });
+  lsSet(VP_STORAGE_KEY, { xMin: vp.xMin, xMax: vp.xMax, yMin: vp.yMin, yMax: vp.yMax, ortho: vp.ortho });
 }
 
 // ── Grid label sprite ─────────────────────────────────────────────────────────
@@ -341,8 +349,8 @@ export function rebuildViewportGrid(): void {
   _gridLabels.forEach(s => { scene.remove(s); s.material.map?.dispose(); s.material.dispose(); });
   _gridLabels = [];
 
-  const threeXMin = state.vpXMin, threeXMax = state.vpXMax;
-  const threeZMin = -state.vpYMax, threeZMax = -state.vpYMin;
+  const threeXMin = vp.xMin, threeXMax = vp.xMax;
+  const threeZMin = -vp.yMax, threeZMax = -vp.yMin;
   const sizeX = Math.abs(threeXMax - threeXMin) || 200;
   const sizeZ = Math.abs(threeZMax - threeZMin) || 200;
   const cx = (threeXMin + threeXMax) / 2;
@@ -431,7 +439,7 @@ function buildWcsMarkers(): void {
   const axLen = 12;
   const wcsKeys = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59'];
   for (const wcs of wcsKeys) {
-    const off = state.wcsOffsets[wcs];
+    const off = machine.offsets.peek()[wcs];
     if (!off) continue;
     // THREE coords: X = machineX, Y = machineZ, Z = -machineY
     const ox = off.x, oy = off.z, oz = -off.y;
@@ -482,8 +490,6 @@ function buildWcsMarkers(): void {
 export function toggleWcsMarkers(): void {
   _wcsMarkersVisible = !_wcsMarkersVisible;
   buildWcsMarkers();
-  const btn = document.getElementById('btnWcsVis');
-  if (btn) btn.textContent = _wcsMarkersVisible ? 'WCS ●' : 'WCS ○';
 }
 
 export function refreshWcsMarkers(): void {
@@ -514,10 +520,8 @@ export function fitView(): void {
 }
 
 export function toggleToolhead(): void {
-  state.showToolhead = !state.showToolhead;
-  toolGroup.visible = state.showToolhead;
-  const btn = document.getElementById('btnToolhead');
-  if (btn) btn.textContent = state.showToolhead ? 'TOOL ●' : 'TOOL ○';
+  showToolhead = !showToolhead;
+  toolGroup.visible = showToolhead;
 }
 
 // ── Toolpath ──────────────────────────────────────────────────────────────────
@@ -599,7 +603,7 @@ export function vpRefreshColors(): void {
 export function vpSetExtents(xMin: number, xMax: number, yMin: number, yMax: number): boolean {
   if (isNaN(xMin) || isNaN(xMax) || isNaN(yMin) || isNaN(yMax)) return false;
   if (xMin >= xMax || yMin >= yMax) return false;
-  state.vpXMin = xMin; state.vpXMax = xMax; state.vpYMin = yMin; state.vpYMax = yMax;
+  vp.xMin = xMin; vp.xMax = xMax; vp.yMin = yMin; vp.yMax = yMax;
   vpSaveExtents();
   rebuildViewportGrid();
   return true;

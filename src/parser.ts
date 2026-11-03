@@ -5,19 +5,18 @@
 // What the controller sends unasked, from the command layer's subscriptions, and what any
 // matched reply tells the stores. Replies to a command are read by whoever sent it.
 
-import { state } from './state';
 import { log } from './console';
-import { _updateHomeBtnHomed, rtSend } from './connection';
+import { rtSend } from './connection';
 import { endRunOnAlarm } from './streaming';
 import { reportMm } from './units';
 import { toolGroup } from './viewport';
 import { ezParseStatus } from './exclusion-zones';
-import { emit, type StatusReport } from './bus';
 import { loadOffsets, offsetsUnread } from './offsets';
 import * as command from './command';
 import { batch } from '@preact/signals';
 import * as machine from './stores/machine';
 import * as job from './stores/job';
+import * as connection from './stores/connection';
 import * as messages from './stores/messages';
 
 export function initParser(): void {
@@ -42,7 +41,7 @@ function noteStartupLines(reply: command.Reply): void {
   const c = reply.command.toUpperCase().replace(/\s+/g, '');
   if (c === '$N') {
     machine.startupLines.value = reply.lines.map(l => l.match(/^\$N\d+=(.*)$/)?.[1]?.trim() ?? '').filter(Boolean);
-  } else if (/^\$N\d+=/.test(c) && !state.running) command.send('$N', { quiet: true }).catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
+  } else if (/^\$N\d+=/.test(c) && !job.running.peek()) command.send('$N', { quiet: true }).catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
 }
 
 // The modes the next job starts from ($G), for the program's reading (stores/program.ts). grblHAL
@@ -57,12 +56,12 @@ export function readModesSoon(): void {
   if (modesTimer) clearTimeout(modesTimer);
   modesTimer = setTimeout(() => {
     modesTimer = null;
-    if (state.connected && !state.running) command.send('$G', { quiet: true }).catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
+    if (connection.connected.peek() && !job.running.peek()) command.send('$G', { quiet: true }).catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
   }, 300);
 }
 
 function noteModeChange(command: string): void {
-  if (!state.running && !command.startsWith('$') && MODAL.test(command.toUpperCase().replace(/\s+/g, ''))) readModesSoon();
+  if (!job.running.peek() && !command.startsWith('$') && MODAL.test(command.toUpperCase().replace(/\s+/g, ''))) readModesSoon();
 }
 
 function onAlarm(raw: string): void {
@@ -74,7 +73,6 @@ function onAlarm(raw: string): void {
   });
   messages.push('alarm', alarmText(raw.slice(6)));
   setMachineState('ALARM');
-  emit<StatusReport>('status', new Set(['state']), { machineState: 'ALARM' });
   endRunOnAlarm();
   // The full report says whether the machine is still homed; the next plain one would look unchanged.
   rtSend('\x87');
@@ -82,9 +80,6 @@ function onAlarm(raw: string): void {
 
 function parseStatusReport(s: string): void {
   const parts = s.split('|');
-  const report: StatusReport = { machineState: parts[0] };
-  const tags = new Set<string>(['state']);
-
   setMachineState(parts[0]);
   // A full report (0x87) on each change of state: it carries the alarm code, H (homed), T (tool) and WCO,
   // which the plain report leaves out.
@@ -92,7 +87,8 @@ function parseStatusReport(s: string): void {
   machine.state.value = parts[0];
   if (!parts[0].startsWith('Alarm')) machine.alarm.value = null;
   else if (parts[0].includes(':')) machine.alarm.value = parseInt(parts[0].split(':')[1]) || machine.alarm.value;
-  let hasPn = false;
+  let pins = '';
+  let overrides = false;
   // Positions in mm whatever $13 says. The report gives MPos, or WPos with WCO now or earlier.
   const vec = (vals: string[]): machine.Vec3 => ({ x: reportMm(parseFloat(vals[0]) || 0), y: reportMm(parseFloat(vals[1]) || 0), z: reportMm(parseFloat(vals[2]) || 0) });
   // The axes after Z: A, B and C in degrees as reported, U, V and W in mm like X, Y and Z.
@@ -117,69 +113,51 @@ function parseStatusReport(s: string): void {
     if (key === 'WCO') { machine.wco.value = vec(vals); machine.wcoExtra.value = rest(vals); }
     if (key === 'H') machine.homed.value = vals[0] === '1';
     if (key === 'FS' || key === 'F') {
-      report.fs = { feed: vals[0] || '0', spindle: vals[1] || '0' };
-      tags.add('fs');
       machine.feed.value = reportMm(parseFloat(vals[0]) || 0);
       machine.spindle.value = parseFloat(vals[1]) || 0;
     }
     if (key === 'T') {
       const tn = parseInt(vals[0]);
       if (!isNaN(tn)) {
-        report.tool = tn;
-        tags.add('tool');
         machine.tool.value = tn;
       }
     }
     if (key === 'Ln') {
       const ln = parseInt(vals[0]);
-      report.ln = ln;
-      tags.add('ln');
       // The Preview follows it (src/app/Preview.tsx).
       job.reportedLine.value = ln;
     }
     if (key === 'Bf') {
-      report.bf = { blocks: vals[0], bytes: vals[1] };
-      tags.add('bf');
       machine.buffer.value = { blocks: parseInt(vals[0]) || 0, bytes: parseInt(vals[1]) || 0 };
     }
     if (key === 'A') accessories = vals[0] ?? '';
     if (key === 'Ov') {
       const feed = parseInt(vals[0]), rapid = parseInt(vals[1]), spin = parseInt(vals[2]);
       if (!isNaN(feed) && !isNaN(rapid) && !isNaN(spin)) {
-        report.ov = { feed, rapid, spindle: spin };
-        tags.add('ov');
+        overrides = true;
         machine.overrides.value = { feed, rapid, spindle: spin };
       }
     }
     if (key === 'Ct') {
       const ct = parseInt(vals[0]);
       if (!isNaN(ct)) {
-        report.tool = ct;
-        tags.add('tool');
         machine.tool.value = ct;
       }
     }
     if (key === 'WCS') {
       const wcs = vals[0] && vals[0].toUpperCase();
-      report.wcs = wcs;
-      tags.add('wcs');
       if (wcs) machine.wcs.value = wcs;
     }
     if (key === 'Pn') {
-      hasPn = true;
-      report.pins = vals[0] || '';
-      tags.add('pins');
+      pins = vals[0] || '';
     }
     if (key === 'EZ') {
-      report.bear = vals[0] || '';
-      tags.add('bear');
-      ezParseStatus(report.bear);
+      ezParseStatus(vals[0] || '');
     }
   }
-  if (!hasPn) { report.pins = ''; tags.add('pins'); }
   if (accessories !== null) machine.accessories.value = accessories;
-  else if (tags.has('ov')) machine.accessories.value = '';
-  machine.pins.value = report.pins ?? '';
+  else if (overrides) machine.accessories.value = '';
+  machine.pins.value = pins;
   // A report in WPos: the machine position is the work position plus the offset in force (WCO, which
   // has G92 and the tool length offset in it). Until a WCO has come it isn't known: ask for one.
   if (wpos && !mpos) {
@@ -191,40 +169,42 @@ function parseStatusReport(s: string): void {
     }
     else rtSend('\x87');
   }
-  // The store, the old state fields and the bus all get the machine position, never the work one.
+  // The store gets the machine position, never the work one.
   if (mpos) {
     machine.mpos.value = mpos;
     if (mposExtra) machine.mposExtra.value = mposExtra;
-    state.machineX = mpos.x; state.machineY = mpos.y; state.machineZ = mpos.z;
-    report.mpos = { ...mpos };
-    tags.add('mpos');
     toolGroup.position.set(mpos.x, mpos.z, -mpos.y);
   }
-
-  emit('status', tags, report);
 }
+
+// The machine state the last report gave, lowercase, to tell a change: homed after homing, offsets
+// after the power-up alarm, the modes after a move.
+let prevState = '';
+
+/** The link went (connection.ts): the next report is the first. */
+export function resetMachineState(): void { prevState = ''; }
 
 export function setMachineState(s: string): void {
   const sl = s.toLowerCase().split(':')[0];
   // An alarm: not homed until the controller's H: says otherwise (the full report asked for on ALARM:).
-  if (sl === 'alarm' && state._prevMachineStateSl !== 'alarm') { state.machineHomed = false; machine.homed.value = false; _updateHomeBtnHomed(); }
-  if (sl === 'idle' && state._prevMachineStateSl === 'home') { state.machineHomed = true; _updateHomeBtnHomed(); }
+  if (sl === 'alarm' && prevState !== 'alarm') machine.homed.value = false;
+  if (sl === 'idle' && prevState === 'home') machine.homed.value = true;
   // $# can be refused in the power-up alarm, so the offsets read on connect may not have come: read them
   // once the machine is idle (homed or unlocked), and so after a reset. The sim refused the first $
   // command after homing (error:71) and took the next, so a refusal gets one more try.
-  if (sl === 'idle' && state._prevMachineStateSl !== 'idle' && offsetsUnread() && state.connected) {
-    loadOffsets().then(ok => { if (!ok) setTimeout(() => { if (state.connected && offsetsUnread()) loadOffsets(); }, 1000); });
+  if (sl === 'idle' && prevState !== 'idle' && offsetsUnread() && connection.connected.peek()) {
+    loadOffsets().then(ok => { if (!ok) setTimeout(() => { if (connection.connected.peek() && offsetsUnread()) loadOffsets(); }, 1000); });
   }
   // At rest after moving, an alarm or homing: what the next job starts from may have changed.
-  if (sl === 'idle' && state._prevMachineStateSl && state._prevMachineStateSl !== 'idle' && state.connected && !state.running) readModesSoon();
-  state._prevMachineStateSl = sl;
+  if (sl === 'idle' && prevState && prevState !== 'idle' && connection.connected.peek() && !job.running.peek()) readModesSoon();
+  prevState = sl;
 }
 
 const WCS_BY_P: Record<number, string> = { 1: 'G54', 2: 'G55', 3: 'G56', 4: 'G57', 5: 'G58', 6: 'G59', 7: 'G59.1', 8: 'G59.2', 9: 'G59.3' };
 
 /** After a command that writes a work offset or the tool length: read $# again, and ask for WCO. */
 function noteOffsetWrite(command: string): void {
-  if (state.running) return;
+  if (job.running.peek()) return;
   const c = command.toUpperCase().replace(/\s+/g, '');
   const g10 = c.match(/G0*10L0*(20|2)(?!\d)(?:P0*(\d+))?/);
   const g92 = /G92(?![.\d])/.test(c);

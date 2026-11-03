@@ -14,11 +14,36 @@ import * as machine from '../stores/machine';
 import * as connection from '../stores/connection';
 import { atLine } from './mode';
 import { attachViewport, showProgram, showExecuted, setView, fitView, toggleToolhead, toolGroup } from '../viewport';
-import { Legacy } from './Legacy';
+import { overlay, stepPreview3D, playPreview3D, clearPreview3D } from '../probing/probe-preview-3d';
 
 const VIEWS: [string, string][] = [['iso', 'ISO'], ['top', 'TOP'], ['front', 'FRONT'], ['side', 'SIDE']];
 const num = (v: number) => v.toLocaleString('en-GB');
 const arcCount = computed(() => program.view.value?.program.moves.reduce((n, m) => n + (m.kind === 'arc' ? 1 : 0), 0) ?? 0);
+
+/** The probe or surfacing preview over the 3D view: the step's machine position and name, stepped or played. */
+function ProbeOverlay() {
+  const o = overlay.value;
+  if (!o) return null;
+  return (
+    <div class="fs-pv-probe">
+      <div class="pp-overlay" style={{ display: 'flex' }}>
+        <div class="pp-dro">
+          {(['x', 'y', 'z'] as const).map(a => (
+            <div class="pp-dro-row"><span class="pp-axis">{a.toUpperCase()}</span><span class="pp-val">{o[a].toFixed(3)}</span></div>
+          ))}
+          <div class="pp-label">{o.label}</div>
+        </div>
+        <div class="pp-controls">
+          <button type="button" class="pp-btn" title="Previous step" disabled={o.step <= 0} onClick={() => stepPreview3D(-1)}>◀</button>
+          <button type="button" class="pp-btn pp-btn-play" title={o.playing ? 'Pause' : 'Play'} onClick={() => playPreview3D()}>{o.playing ? '⏸' : '▶'}</button>
+          <button type="button" class="pp-btn" title="Next step" disabled={o.step >= o.total - 1} onClick={() => stepPreview3D(1)}>▶|</button>
+          <span class="pp-counter">{o.step + 1} / {o.total}</span>
+          <button type="button" class="pp-btn pp-btn-close" title="Close preview" onClick={() => clearPreview3D()}>✕</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function Preview() {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -78,7 +103,7 @@ export function Preview() {
                 {connection.connected.value ? <>tool at machine X {pos.x.toFixed(3)} Y {pos.y.toFixed(3)} Z {pos.z.toFixed(3)}</> : 'connect to see the tool'}
               </>}
         </div>
-        <Legacy class="fs-pv-probe" ids={['probePreviewOverlay']} />
+        <ProbeOverlay />
       </div>
     </div>
   );

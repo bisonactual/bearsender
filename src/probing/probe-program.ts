@@ -18,12 +18,12 @@
 // stopped); the routine owns the machine until then. Once its result is being written, Cancel has
 // nothing left to stop and isn't taken: a Cancel that is taken means nothing was written.
 
-import { state } from '../state';
 import { log } from '../console';
 import { stopMachine, isStopping } from '../streaming';
 import { reportMm } from '../units';
 import * as command from '../command';
 import * as machine from '../stores/machine';
+import * as connection from '../stores/connection';
 import { progress as warmupProgress } from '../warmup';
 import { Stop, Miss, afterMiss } from './io';
 import type { Io, Point, StepType } from './io';
@@ -60,16 +60,12 @@ interface ProbeResult {
 
 /** The work offset in use, from the status report (a program or the console may have changed it). */
 export function getActiveWcs(): string {
-  return machine.wcs.value || (state as any).activeWcs || 'G54';
-}
-
-export function isProbingRunning(): boolean {
-  return _running;
+  return machine.wcs.value || 'G54';
 }
 
 /** Why a probing routine wouldn't start now, or null if it would. */
 export function probingRefusal(): string | null {
-  if (!state.connected) return 'Not connected';
+  if (!connection.connected.peek()) return 'Not connected';
   if (_running) return 'Probing already in progress';
   if (warmupProgress.value) return 'The machine warmup is running, so nothing was sent. Stop it, or let it end.';
   // Sent now, a probe would wait unread in the controller and run after the Resume, in the job.
@@ -295,12 +291,8 @@ export function machineIo(P: ProbeSettings, onStep: (type: StepType, label: stri
 
 /** Where the machine is now, in machine coordinates: where a routine starts. */
 export function machineAt(): Point {
-  return { x: (state as any).machineX, y: (state as any).machineY, z: (state as any).machineZ };
-}
-
-/** The old per-routine settings (the dead modules' and the old tab's fields) as the one set. */
-export function settingsOf(cfg: any): ProbeSettings {
-  return { tip: cfg.probeDiameter ?? 0, fast: cfg.probeFeedRate, slow: cfg.latchFeedRate, back: cfg.latchDistance, clear: cfg.xyClr ?? 0, search: cfg.probeDistance };
+  const m = machine.mpos.peek();
+  return { x: m.x, y: m.y, z: m.z };
 }
 
 // ── Tool length ───────────────────────────────────────────────────────────────
@@ -327,45 +319,6 @@ export async function toolsetter(io: Io, sp: Point, ts: Point, c: { toolsetterDe
   await io.move(sp.x, sp.y, null, 'Back over the start');
   await io.move(null, null, sp.z, 'Down to the start height', 'result');
   return r;
-}
-
-/** The old entry (the dead modules): runs either, and logs as before. */
-export async function runToolLengthProbe(seq: any): Promise<ProbeResult | null> {
-  (window as any).clearPreview3D?.();
-  const io = machineIo(settingsOf({ ...seq, xyClr: 0, probeDiameter: 0 }));
-  return runProbing(async () => {
-    if (seq.mode === 'toolsetter' && (seq.toolsetterX === undefined || seq.toolsetterY === undefined || seq.toolsetterZ === undefined)) {
-      log('err', '✗ Toolsetter: G59.3 position not set — configure it in the Offsets tab');
-      return null;
-    }
-    try {
-      const sp = machineAt();
-      const r = seq.mode === 'toolsetter'
-        ? await toolsetter(io, sp, { x: seq.toolsetterX, y: seq.toolsetterY, z: seq.toolsetterZ }, seq)
-        : await touchPlate(io, sp, seq);
-      log('info', `✓ ${seq.mode === 'toolsetter' ? 'Toolsetter' : 'Touch plate'} probe: Z=${r.z.toFixed(4)}`);
-      return { ...r, success: true };
-    } catch (e) {
-      if (e instanceof Miss) log('err', `✗ Probe: ${e.message}`);
-      else if (!(e instanceof Stop)) throw e;
-      return null;
-    }
-  });
-}
-
-/** A touch with explicit feeds (the old entry, for the dead modules). */
-export async function probeAxis(
-  axis: string, direction: number,
-  probeFeedRate: number, latchFeedRate: number,
-  probeDistance: number, latchDistance: number
-): Promise<ProbeResult | null> {
-  try {
-    const io = machineIo({ tip: 0, fast: probeFeedRate, slow: latchFeedRate, back: latchDistance, clear: 0, search: probeDistance });
-    return { ...await io.touch(axis as 'X' | 'Y' | 'Z', direction, probeDistance, 'surface'), success: true };
-  } catch (e) {
-    if (e instanceof Miss || e instanceof Stop) return null;
-    throw e;
-  }
 }
 
 export async function rapidToMPos(x: number | null, y: number | null, z: number | null): Promise<boolean> {

@@ -10,7 +10,6 @@ import { initViewport } from './viewport';
 import { loadFile } from './gcode';
 import { updateRunButtons } from './streaming';
 import { initKeyboardJog } from './jog';
-import { stepPreview3D, playPreview3D, clearPreview3D } from './probing/probe-preview-3d';
 import { optLoadColors, optApplyJogSteps } from './options';
 import { initZones } from './exclusion-zones';
 import { initFlightRecorderTab } from './flight-recorder';
@@ -23,12 +22,8 @@ function on(id: string, evt: string, fn: (e: any) => void): void {
   if (el) el.addEventListener(evt, fn);
 }
 
-// The file picker (LOAD JOB), and the probe preview's controls (its overlay is still the old markup in #legacy).
+// The file picker (LOAD JOB).
 on('fileInput', 'change', (e) => { loadFile(e.target as HTMLInputElement); (e.target as HTMLInputElement).value = ''; });
-on('ppStepBck', 'click', () => stepPreview3D(-1));
-on('ppStepFwd', 'click', () => stepPreview3D(1));
-on('ppPlay', 'click', () => playPreview3D());
-on('ppClose', 'click', () => clearPreview3D());
 
 // The command layer, and its last 3000 events (lines sent and received, syncs), for debugging from the console.
 w.command = command;

@@ -2,7 +2,6 @@
 // Rotation measurement probe logic
 // ═══════════════════════════════════════════════
 
-import { state } from '../state';
 import { log } from '../console';
 import { processGcode } from '../gcode';
 import { lexLine } from '../gcode/lexer';
@@ -104,7 +103,7 @@ const MOTION = [0, 1, 2, 3, 38.2, 38.3, 38.4, 38.5, 80, 81, 82, 83, 84, 85, 86, 
  *  any move sets it), numbers before any G20 or G21 in a program that changes units, a line that can't be
  *  read. Then nothing is replaced, and what can't be turned is returned, in words; empty when it was. */
 export function applyRotationToGcode(angleDeg: number): string[] {
-  const lines = (state as any).gcodeLines as string[] | undefined;
+  const lines = job.lines.peek();
   if (!lines || lines.length === 0) return ['No program is loaded.'];
   const angleRad = angleDeg * Math.PI / 180;
   const cos = Math.cos(angleRad);

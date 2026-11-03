@@ -5,7 +5,6 @@
 // The Settings screen's ZONES tab shows these signals (src/app/ZonesTab.tsx).
 
 import { signal, effect } from '@preact/signals';
-import { state } from './state';
 import { log } from './console';
 import * as command from './command';
 import { scene } from './viewport';
@@ -50,10 +49,8 @@ export function ezResetPluginState(): void {
   zones.value = [];
   inside.value = false;
   // Clear stale ATCI travel limits so they don't persist across connections
-  delete state.settingsValues[130];
-  delete state.settingsValues[131];
-  delete state.settingsValues[132];
-  machine.settings.value = { ...state.settingsValues };
+  const { 130: _x, 131: _y, 132: _z, ...rest } = machine.settings.peek();
+  machine.settings.value = rest;
 }
 
 // ── Flags ─────────────────────────────────────────────────────────────────────

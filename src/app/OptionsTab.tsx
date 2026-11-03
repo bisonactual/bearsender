@@ -10,11 +10,10 @@ import type { LinkSettings } from '../stores/connection';
 import * as flight from '../stores/flight';
 import * as jobOptions from '../stores/options';
 import * as opt from '../options';
-import { state } from '../state';
 import { lsGet, lsSet } from '../ui';
 import { log } from '../console';
 import { frSetEnabled } from '../flight-recorder';
-import { vpSetExtents, setProjection } from '../viewport';
+import { vpSetExtents, setProjection, vpExtents } from '../viewport';
 import { NumIn } from './SetupScreen';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -108,8 +107,9 @@ function Connection() {
 }
 
 function ViewExtents() {
-  const [v, setV] = useState({ xMin: String(state.vpXMin), xMax: String(state.vpXMax), yMin: String(state.vpYMin), yMax: String(state.vpYMax) });
-  const [ortho, setOrtho] = useState(state.vpOrtho);
+  const now = vpExtents();
+  const [v, setV] = useState({ xMin: String(now.xMin), xMax: String(now.xMax), yMin: String(now.yMin), yMax: String(now.yMax) });
+  const [ortho, setOrtho] = useState(now.ortho);
   const field = (k: keyof typeof v, label: string) => (
     <Field label={label}>
       <input type="number" step="10" class="fs-in fs-mono" value={v[k]} onInput={e => {

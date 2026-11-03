@@ -5,7 +5,7 @@
 // Pure functions, no DOM. Same rules as the Flight-Recorder repo's test sender
 // (tools/stream.py) and its docs/COMMANDS.md:
 //   - every line goes out as N<line> + the line, where <line> counts the loaded
-//     file's lines (state.gcodeLines, so blank lines don't count)
+//     file's lines (job.lines, so blank lines don't count)
 //   - the job is stamped first with $FLIGHT=<CRC-32 of the file>
 //   - to resume, work out the modal state up to the recorded line and where each
 //     axis was, put the file's tool length offset back, go up to the lift height

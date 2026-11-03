@@ -12,14 +12,12 @@
 //   - offers to resume when it finds a job that was cut short by a lost connection or
 //     a controller restart, once the same file is loaded
 
-import { state } from './state';
 import { log } from './console';
 import { sendCmd } from './connection';
 import * as command from './command';
 import { lsGet, lsSet, esc } from './ui';
 import { streamLines, type SendLine } from './streaming';
 import { errorText } from './errors';
-import { on as onBus } from './bus';
 import { jobId, numberedLine, resumeState, describeState, resumePreamble, resumeStart, ResumeRefused, type Lift } from './flight-recorder-resume';
 import type { ModalState } from './gcode/index';
 import { batch, effect, untracked } from '@preact/signals';
@@ -96,7 +94,7 @@ export function frActive(): boolean { return frEnabled() && _pluginDetected && !
 export function frSetEnabled(enabled: boolean): void {
   lsSet('fs-fr-enabled', enabled);
   log('info', enabled ? '✈ Flight recorder on' : '✈ Flight recorder off');
-  if (enabled && state.connected && _pluginDetected) queryController().catch(ignoreFailed);
+  if (enabled && connection.connected.peek() && _pluginDetected) queryController().catch(ignoreFailed);
   renderFlightTab();
 }
 
@@ -111,12 +109,12 @@ export async function frConnected(): Promise<void> {
 
 /** Reads the record again ($FLIGHT), unless a job is running. */
 export function frReadRecord(): void {
-  if (state.connected && _pluginDetected && !_noStorage && !state.running) command.send('$FLIGHT').catch(ignoreFailed);
+  if (connection.connected.peek() && _pluginDetected && !_noStorage && !job.running.peek()) command.send('$FLIGHT').catch(ignoreFailed);
 }
 
 /** Clears the event log on the controller ($EVENTSCLEAR). */
 export function frClearEvents(): void {
-  if (state.connected && _pluginDetected) { sendCmd('$EVENTSCLEAR'); _events = []; renderEvents(); }
+  if (connection.connected.peek() && _pluginDetected) { sendCmd('$EVENTSCLEAR'); _events = []; renderEvents(); }
 }
 
 export function frDisconnected(): void {
@@ -201,13 +199,13 @@ function parseRecord(line: string): FlightRecord | null {
 
 /** The job stamp, sent and answered before any line of the job (streaming.ts). */
 export function frJobStamp(): string {
-  return '$FLIGHT=' + jobId(state.gcodeLines) + (_undercut ? ',1' : '');
+  return '$FLIGHT=' + jobId(job.lines.peek()) + (_undercut ? ',1' : '');
 }
 
 /** The loaded file as sent with the recorder on, after the stamp: every line numbered. */
 export function frJobLines(): SendLine[] {
   const lines: SendLine[] = [];
-  state.gcodeLines.forEach((raw, i) => {
+  job.lines.peek().forEach((raw, i) => {
     const text = numberedLine(raw, i + 1);
     if (text) lines.push({ text, line: i + 1 });
   });
@@ -233,11 +231,11 @@ function resumable(record: FlightRecord | null): boolean {
 }
 
 function loadedFileMatches(record: FlightRecord): boolean {
-  return state.gcodeLines.length > 0 && jobId(state.gcodeLines) === record.job;
+  return job.lines.peek().length > 0 && jobId(job.lines.peek()) === record.job;
 }
 
 function maybeOfferResume(): void {
-  if (!frEnabled() || !_record || !resumable(_record) || !UNEXPECTED.has(_record.why) || state.running) return;
+  if (!frEnabled() || !_record || !resumable(_record) || !UNEXPECTED.has(_record.why) || job.running.peek()) return;
   const key = recordKey(_record);
   if (key === _promptedFor) return;
   _promptedFor = key;
@@ -253,7 +251,7 @@ type PlanResult = ResumePlan | { waiting: string } | { held: string } | { refuse
 
 /** The recorder's own retract height, $792 mm below machine zero. */
 function retractZ(): number {
-  const depth = parseFloat(state.settingsValues[792] ?? '');
+  const depth = parseFloat(machine.settings.peek()[792] ?? '');
   return isNaN(depth) ? -20 : -depth;
 }
 
@@ -300,7 +298,7 @@ function resumeModal(record: FlightRecord): ModalState | string {
   const key = record.job + ':' + record.ln + ':' + JSON.stringify(ctx);
   if (_stateCache?.key === key) return _stateCache.s;
   let s: ModalState | string;
-  try { s = resumeState(programText(state.gcodeLines), record.ln, ctx); }
+  try { s = resumeState(programText(job.lines.peek()), record.ln, ctx); }
   catch (e) { if (!(e instanceof ResumeRefused)) throw e; s = e.message; }
   _stateCache = { key, s };
   return s;
@@ -312,7 +310,7 @@ let _pressing = false;   // RESUME is reading $# and $TTLIST again
 /** The plan from what is known now. `tableRead` is how RESUME's fresh $TTLIST went: null when it came
  *  in, why not when it didn't, undefined before RESUME. */
 function buildPlan(record: FlightRecord, tableRead?: string | null): PlanResult {
-  if (!state.connected) return { waiting: 'Connect to the controller: the moves back in show here once its offsets and tool length are read.' };
+  if (!connection.connected.peek()) return { waiting: 'Connect to the controller: the moves back in show here once its offsets and tool length are read.' };
   // The moves back in go to machine positions, which take the work offsets and the tool length: the plan
   // waits for this connection's $# (the record can come first).
   if (!machine.offsetsRead.value || !machine.offsets.value[record.wcs]) {
@@ -326,7 +324,7 @@ function buildPlan(record: FlightRecord, tableRead?: string | null): PlanResult 
   if (tableRead && s.lengthOffset.mode === 'G43' && s.lengthOffset.h !== null)
     return { held: `The tool table didn't read ($TTLIST: ${tableRead}), and the way back in uses T${s.lengthOffset.h}'s length from it (G43 H${s.lengthOffset.h} at this line), so nothing was sent: with an old length it would come down to the wrong height. Press RESUME to read it again.` };
   try {
-    const start = resumeStart(state.gcodeLines, record.ln, s.motion);
+    const start = resumeStart(job.lines.peek(), record.ln, s.motion);
     const l = lift();
     const way: Lift = { liftZ: l.z, currentZ: machine.mpos.value.z };
     const preamble = resumePreamble(record.job, !!(record.flags & FLAG_NO_RETRACT), s, way);
@@ -382,14 +380,14 @@ let _request: object | null = null;
 async function pressResume(record: FlightRecord): Promise<void> {
   if (_pressing || !readyToResume()) return;
   _pressing = true;
-  const request = _request = {}, live = command.intent(), lines = state.gcodeLines;
+  const request = _request = {}, live = command.intent(), lines = job.lines.peek();
   updateResumeDialog();
   const el = document.getElementById('frPlan');
   if (el) el.insertAdjacentHTML('afterbegin', '<div class="fr-step-text">Reading the offsets, the tool length and the tool table again ($#, $TTLIST)…</div>');
   const read = await loadOffsets();
   const tableRead = await loadToolTable();
   _pressing = false;
-  if (_request !== request || !live() || _record !== record || state.gcodeLines !== lines) {
+  if (_request !== request || !live() || _record !== record || job.lines.peek() !== lines) {
     log('info', '✈ Resume: nothing was sent. ' + (_request !== request ? 'NOT NOW closed the dialog' : !live() ? 'Stop, RESET, a reset or the link going came' : 'the record or the loaded file changed') + ' while $# and $TTLIST were read.');
     updateResumeDialog();
     return;
@@ -411,8 +409,8 @@ function startResume(record: FlightRecord, plan: ResumePlan): void {
   const [stamp, ...moves] = plan.preamble;
   const lines: SendLine[] = moves.map(text => ({ text, line }));
   lines.push({ text: plan.first, line });
-  for (let i = plan.index + 1; i < state.gcodeLines.length; i++) {
-    const text = numberedLine(state.gcodeLines[i], i + 1);
+  for (let i = plan.index + 1; i < job.lines.peek().length; i++) {
+    const text = numberedLine(job.lines.peek()[i], i + 1);
     if (text) lines.push({ text, line: i + 1 });
   }
   log('info', `✈ Resuming job ${record.job} from line ${line}`);
@@ -440,7 +438,7 @@ async function discardRecord(fromDialog: boolean): Promise<void> {
   }
 }
 
-function machineState(): string { return (state._prevMachineStateSl || '').toLowerCase(); }
+function machineState(): string { return machine.stateName.peek(); }
 
 export function frOpenResume(): void {
   const modal = document.getElementById('frModal');
@@ -460,7 +458,7 @@ export function frOpenResume(): void {
   if (!loadedFileMatches(record)) {
     body.innerHTML = summary +
       `<div class="fr-step"><div class="fr-step-title">Open the file it was running</div>` +
-      `<div class="fr-step-text">${state.gcodeLines.length ? 'The file that is loaded is a different one. ' : ''}` +
+      `<div class="fr-step-text">${job.lines.peek().length ? 'The file that is loaded is a different one. ' : ''}` +
       `Open the same G-code file and this will carry on from there.</div>` +
       `<div class="fr-step-actions"><button class="tb-btn primary" data-fr="open">📂 OPEN FILE</button></div></div>` +
       `<div class="fr-modal-actions"><button class="tb-btn danger" data-fr="discard">DISCARD RECORD</button>` +
@@ -516,7 +514,7 @@ function wireModal(record: FlightRecord): void {
 }
 
 function readyToResume(): boolean {
-  return state.connected && !state.running && !_pressing && machineState() === 'idle' && _toolChecked;
+  return connection.connected.peek() && !job.running.peek() && !_pressing && machineState() === 'idle' && _toolChecked;
 }
 
 /** Keeps the machine state and the RESUME button up to date while the dialog is open. */
@@ -555,7 +553,7 @@ function renderEvents(): void {
 
 /** Reads the record and the recorder's settings again. */
 export function frRefresh(): void {
-  if (state.connected && _pluginDetected) queryController().catch(ignoreFailed);
+  if (connection.connected.peek() && _pluginDetected) queryController().catch(ignoreFailed);
 }
 
 /** "Uses undercut tools", for the loaded job. */
@@ -569,7 +567,7 @@ export function frWriteSetting(id: number, value: string): void {
 
 /** Reads the last 100 events from the controller, unless a job is running. */
 export async function frLoadEvents(): Promise<void> {
-  if (!state.connected || !_pluginDetected || _noStorage || _eventsLoading || state.running) return;
+  if (!connection.connected.peek() || !_pluginDetected || _noStorage || _eventsLoading || job.running.peek()) return;
   _events = [];
   _eventsLoading = true;
   renderEvents();
@@ -585,6 +583,7 @@ export function initFlightRecorderTab(): void {
   const on = (id: string, fn: () => void) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   on('frModalClose', () => closeModal());
 
-  onBus('status', ['state'], () => updateResumeDialog());
+  // The dialog's machine line and RESUME follow the machine's state, the link and the job.
+  effect(() => { void machine.stateName.value; void connection.connected.value; void job.running.value; untracked(() => updateResumeDialog()); });
   renderFlightTab();
 }

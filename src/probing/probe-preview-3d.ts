@@ -2,7 +2,8 @@
 // 3D preview in viewport
 // ═══════════════════════════════════════════════
 
-import { state } from '../state';
+import { signal } from '@preact/signals';
+import * as machine from '../stores/machine';
 import { scene, cutLines, rapidLines, executedLine } from '../viewport';
 import type { Waypoint } from '../surfacing';
 
@@ -17,6 +18,11 @@ let _pathGroup: any = null;
 let _probeGhost: any = null;
 
 const STEP_INTERVAL = 400;
+
+export interface Overlay { step: number; total: number; playing: boolean; x: number; y: number; z: number; label: string; }
+/** What the Preview's overlay shows (src/app/Preview.tsx): the step, its machine position and name; null with
+ *  no preview. */
+export const overlay = signal<Overlay | null>(null);
 
 const SEG_COLOR: Record<string, number> = {
   rapid: 0x3B82F6,    // blue
@@ -36,9 +42,7 @@ function buildPathLines(wps: Waypoint[], upTo: number): void {
     _pathGroup.traverse((c: any) => { c.geometry?.dispose(); c.material?.dispose(); });
   }
   _pathGroup = new THREE.Group();
-  const ox = (state as any).machineX;
-  const oy = (state as any).machineY;
-  const oz = (state as any).machineZ;
+  const { x: ox, y: oy, z: oz } = machine.mpos.peek();
 
   for (let i = 1; i < wps.length; i++) {
     const a = wps[i - 1], b = wps[i];
@@ -86,7 +90,7 @@ function updateGhost(wp: Waypoint): void {
     _probeGhost.add(body);
     scene.add(_probeGhost);
   }
-  const ox = (state as any).machineX, oy = (state as any).machineY, oz = (state as any).machineZ;
+  const { x: ox, y: oy, z: oz } = machine.mpos.peek();
   _probeGhost.position.copy(toThree(ox + wp.x, oy + wp.y, oz + wp.z));
 }
 
@@ -113,9 +117,7 @@ export function loadPreview3D(wps: Waypoint[]): void {
   dimToolpath(true);
   buildPathLines(_waypoints, _step);
   updateGhost(_waypoints[0]);
-  showOverlay(true);
-  updateOverlayDRO();
-  updateOverlayControls();
+  publish();
   playPreview3D();
 }
 
@@ -135,7 +137,7 @@ export function clearPreview3D(): void {
   dimToolpath(false);
   _waypoints = [];
   _step = 0;
-  showOverlay(false);
+  publish();
 }
 
 export function stepPreview3D(dir: number): void {
@@ -143,8 +145,7 @@ export function stepPreview3D(dir: number): void {
   _step = Math.max(0, Math.min(_waypoints.length - 1, _step + dir));
   buildPathLines(_waypoints, _step);
   updateGhost(_waypoints[_step]);
-  updateOverlayDRO();
-  updateOverlayControls();
+  publish();
 }
 
 export function playPreview3D(): void {
@@ -152,52 +153,28 @@ export function playPreview3D(): void {
   if (_playing) { stopPlay(); return; }
   if (_step >= _waypoints.length - 1) _step = 0;
   _playing = true;
-  updateOverlayControls();
+  publish();
   _playTimer = setInterval(() => {
     _step++;
     buildPathLines(_waypoints, _step);
     updateGhost(_waypoints[_step]);
-    updateOverlayDRO();
-    if (_step >= _waypoints.length - 1) {
-      stopPlay();
-    } else {
-      updateOverlayControls();
-    }
+    if (_step >= _waypoints.length - 1) stopPlay();
+    else publish();
   }, STEP_INTERVAL);
 }
 
 function stopPlay(): void {
   if (_playTimer) { clearInterval(_playTimer); _playTimer = null; }
   _playing = false;
-  updateOverlayControls();
+  publish();
 }
 
-function showOverlay(visible: boolean): void {
-  const overlay = document.getElementById('probePreviewOverlay');
-  if (overlay) overlay.style.display = visible ? 'flex' : 'none';
-}
-
-function updateOverlayDRO(): void {
+/** The overlay's state now, or null when no preview shows. */
+function publish(): void {
   const wp = _waypoints[_step];
-  if (!wp) return;
-  const ox = (state as any).machineX, oy = (state as any).machineY, oz = (state as any).machineZ;
-  const el = (id: string) => document.getElementById(id);
-  const droX = el('ppDroX'), droY = el('ppDroY'), droZ = el('ppDroZ'), droL = el('ppDroLabel');
-  if (droX) droX.textContent = (ox + wp.x).toFixed(3);
-  if (droY) droY.textContent = (oy + wp.y).toFixed(3);
-  if (droZ) droZ.textContent = (oz + wp.z).toFixed(3);
-  if (droL) droL.textContent = wp.label || typeLabel(wp.type);
-}
-
-function updateOverlayControls(): void {
-  const bck = document.getElementById('ppStepBck') as HTMLButtonElement | null;
-  const fwd = document.getElementById('ppStepFwd') as HTMLButtonElement | null;
-  const play = document.getElementById('ppPlay');
-  const ctr = document.getElementById('ppCounter');
-  if (bck) bck.disabled = _step <= 0;
-  if (fwd) fwd.disabled = _step >= _waypoints.length - 1;
-  if (play) play.textContent = _playing ? '⏸' : '▶';
-  if (ctr) ctr.textContent = _waypoints.length ? `${_step + 1} / ${_waypoints.length}` : '—';
+  if (!wp) { overlay.value = null; return; }
+  const o = machine.mpos.peek();
+  overlay.value = { step: _step, total: _waypoints.length, playing: _playing, x: o.x + wp.x, y: o.y + wp.y, z: o.z + wp.z, label: wp.label || typeLabel(wp.type) };
 }
 
 function typeLabel(type: string): string {
