@@ -36,7 +36,7 @@ const mm = (v: number) => (Math.round(v * 1000) / 1000).toLocaleString('en-GB', 
 const clock = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 const pad = (n: number) => String(n).padStart(2, '0');
 /** h:mm:ss; an estimate gets a ~. */
-const dur = (ms: number, measured: boolean) => (measured ? '' : '~') + job.fmtDuration(ms);
+const dur = (ms: number, measured: boolean) => (measured ? '' : '~') + job.formatDuration(ms);
 /** Time from the start: +40s, +12m, +1:05. */
 function rel(ms: number): string {
   const m = Math.floor(ms / 60_000);
@@ -63,12 +63,12 @@ export function tintOf(tool: number | null): { tint: string; bar: string } {
   return TINTS[Math.max(0, tintOrder.value.indexOf(tool)) % TINTS.length];
 }
 
-// ── Current Job strip ─────────────────────────────────────────────────────────
+// Current Job strip
 
 function jobNow(): string {
   const file = job.file.value;
   if (!file) return 'No job loaded';
-  if (!program.view.value) return program.reading.value ? 'Reading the program…' : 'Loaded';
+  if (!program.view.value) return program.isReading.value ? 'Reading the program…' : 'Loaded';
   const sections = rows.value;
   const section = sections[sectionIndex.value];
   const where = section ? [section.name, toolLabel(section.tool)].filter(Boolean).join(' · ') : '';
@@ -76,10 +76,10 @@ function jobNow(): string {
   if (m === 'running' || m === 'hold') return where || 'Running';
   if (m === 'change') { const s = awaitedSection.value; return 'Waiting for ' + (s ? toolLabel(s.tool) : 'the next tool'); }
   if (m === 'alarm' || stoppedShort.value) return 'Stopped' + (where ? ' in ' + where : '');
-  if (job.result.value === 'completed') return 'Completed in ' + job.fmtDuration(job.elapsedMs.value);
+  if (job.result.value === 'completed') return 'Completed in ' + job.formatDuration(job.elapsedMs.value);
   const tools = new Set(sections.map(s => s.tool).filter(t => t !== null)).size;
   const p = plan.value;
-  const time = p.run ? ' · about ' + job.fmtDuration(p.totalMs) + ' from the last run' : p.totalMs ? ' · ~' + job.fmtDuration(p.totalMs) + ' estimated' : '';
+  const time = p.run ? ' · about ' + job.formatDuration(p.totalMs) + ' from the last run' : p.totalMs ? ' · ~' + job.formatDuration(p.totalMs) + ' estimated' : '';
   return 'Ready · ' + (tools ? tools + (tools === 1 ? ' tool' : ' tools') : 'no tool named') + ' · ' + num(job.lines.value.length) + ' lines' + time;
 }
 
@@ -114,7 +114,7 @@ function CurrentJob() {
         </div>
       </div>
       <div class="fs-times">
-        <div><div class="fs-cap">ELAPSED</div><div class="fs-time">{job.fmtDuration(job.elapsedMs.value)}</div></div>
+        <div><div class="fs-cap">ELAPSED</div><div class="fs-time">{job.formatDuration(job.elapsedMs.value)}</div></div>
         <div title={p.allMeasured ? 'The rest of this file\'s last whole run, tool changes not counted' : 'From the G-code: a lower bound'}>
           <div class="fs-cap">LEFT, EST.</div><div class="fs-time is-dim">{p.rowsMs ? dur(p.leftMs, p.allMeasured) : '—'}</div>
         </div>
@@ -273,8 +273,8 @@ function JobsList() {
   const isLive = live();
   const ran = job.startedAt.value !== null;
   const id = job.fileId.value;
-  const progRun = job.result.value === 'completed' ? job.fmtDuration(job.elapsedMs.value)
-    : p.times.length ? dur(p.totalMs, !!p.run) : program.reading.value ? '…' : '—';
+  const progRun = job.result.value === 'completed' ? job.formatDuration(job.elapsedMs.value)
+    : p.times.length ? dur(p.totalMs, !!p.run) : program.isReading.value ? '…' : '—';
   // Where the queue starts: after the loaded job, from the start (ready) or from now (running).
   const queueStart = !file ? 0 : isLive ? starts.endMs : ran ? null : p.totalMs;
   return (
@@ -293,7 +293,7 @@ function JobsList() {
               <span class="fs-c-name"><span class="fs-chev-gap" /><span class="fs-prog-name">{last.name}</span></span>
               <span class="fs-c-status">{RESULT_WORDS[last.result]}</span>
               <span class="fs-c-at fs-mono">{clock(last.endedAt)}</span>
-              <span class="fs-c-run fs-mono">{job.fmtDuration(last.runtimeMs)}</span>
+              <span class="fs-c-run fs-mono">{job.formatDuration(last.runtimeMs)}</span>
               <span class="fs-c-bell" />
             </div>
           )}
@@ -320,7 +320,7 @@ function JobsList() {
               : ran ? (t.start !== null ? clock(t.start) : '—')
               : k === 0 ? 'start' : rel(starts.rows[k]);
             // This run's time for a tool it has finished; otherwise the last whole run's, or the estimate.
-            const runtime = t.start !== null && t.end !== null ? job.fmtDuration(t.end - t.start) : dur(t.ms, t.measured);
+            const runtime = t.start !== null && t.end !== null ? job.formatDuration(t.end - t.start) : dur(t.ms, t.measured);
             return (
               <div class={'fs-jobs-row is-tool' + (st.live ? ' is-live' : '') + (st.dim ? ' is-dim' : '')}>
                 <ToolCells tool={s.tool} desc={toolLabel(s.tool).replace(/^T\d+( · )?/, '') || s.name} missing={missing} />

@@ -1,8 +1,5 @@
-// ═══════════════════════════════════════════════
-// Options store — BearSender's own choices for jobs and the resume, kept in this browser
-// ═══════════════════════════════════════════════
-//
-// Set in Options (index.html, wired in options.ts). The owner chose each default:
+// BearSender's own choices for jobs and the resume, kept in this browser and set in Settings, Options.
+// The defaults:
 //   - "Hold at every M6" off: the job holds only where the controller really changes tools. An M6 for
 //     the tool already loaded, or one the controller ignores ($341=4), carries on.
 //   - "Run lines after M30" off: the job ends at the first M2/M30, and the lines after it aren't sent.

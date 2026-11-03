@@ -1,9 +1,5 @@
-// ═══════════════════════════════════════════════
-// Macros store — the operator's own macros, kept in this browser
-// ═══════════════════════════════════════════════
-//
-// A macro is a name and some lines of G-code or $ commands. They live on this computer, in the browser,
-// like the queue and the options: nothing is stored on the controller.
+// The operator's macros: a name and some lines of G-code or $ commands each, kept in this browser like
+// the queue and the options. Nothing is stored on the controller.
 
 import { signal, effect } from '@preact/signals';
 import { lsGet, lsSet } from '../ui';

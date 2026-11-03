@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Starts store — the modes each job started from, for a resume
-// ═══════════════════════════════════════════════
+// The modes each job started from, for a resume.
 //
 // Kept per file contents (the job id, the CRC the flight recorder uses), in this browser next to the
 // runtimes. Start reads $G (streaming.ts) and keeps its words here for a run from the top. A resume

@@ -294,17 +294,17 @@ function MessageLine() {
   else if (job.stopping.value) text = <>Stopping: the reset goes once the machine has stopped.</>;
   else if (warmup.progress.value) {
     const w = warmup.progress.value;
-    text = <>Machine warmup, {w.cold ? 'from cold' : 'normal'}: {w.step < 0 ? 'going to the start point' : <>step {w.step + 1} of {w.steps.length} at <strong>{num(w.steps[w.step].rpm)} rpm</strong></>}, {job.fmtDuration(w.leftMs)} left. Hold and Stop act on it; Stop stops the spindle.</>;
+    text = <>Machine warmup, {w.cold ? 'from cold' : 'normal'}: {w.step < 0 ? 'going to the start point' : <>step {w.step + 1} of {w.steps.length} at <strong>{num(w.steps[w.step].rpm)} rpm</strong></>}, {job.formatDuration(w.leftMs)} left. Hold and Stop act on it; Stop stops the spindle.</>;
   }
   else if (job.notice.value) text = <>{job.notice.value}</>;
   else if (!file) text = <>No job loaded. Press <strong>Load Job</strong> to open a G-code file.</>;
-  else if (job.result.value === 'completed') text = <><strong>{file}</strong> completed in {job.fmtDuration(job.elapsedMs.value)}.</>;
+  else if (job.result.value === 'completed') text = <><strong>{file}</strong> completed in {job.formatDuration(job.elapsedMs.value)}.</>;
   else if (job.result.value === 'error' && halt) {
-    text = <><strong>{file}</strong> halted after {job.fmtDuration(job.elapsedMs.value)}. {halt.why}. Fix the program, then press Start to run it again from the top.</>;
+    text = <><strong>{file}</strong> halted after {job.formatDuration(job.elapsedMs.value)}. {halt.why}. Fix the program, then press Start to run it again from the top.</>;
   } else if (job.result.value) {
     const how: Record<string, string> = { stopped: 'was stopped', error: 'halted on an error', alarm: 'was stopped by an alarm', 'link lost': 'stopped when the connection was lost' };
     const at = job.executingLine.value;
-    text = <><strong>{file}</strong> {how[job.result.value]}{at ? ' at line ' + num(at) : ''}, after {job.fmtDuration(job.elapsedMs.value)}. The record is in the Recorder panel; press Start to run it again from the top.</>;
+    text = <><strong>{file}</strong> {how[job.result.value]}{at ? ' at line ' + num(at) : ''}, after {job.formatDuration(job.elapsedMs.value)}. The record is in the Recorder panel; press Start to run it again from the top.</>;
   }
   else if (job.fromQueueAfter.value) {
     // The queue loaded the next job when the last completed; nothing moves until Start.

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Machine store — what the controller reports
-// ═══════════════════════════════════════════════
+// What the controller reports, and what follows from it.
 
 import { signal, computed } from '@preact/signals';
 
@@ -18,9 +16,9 @@ export const wcs = signal('G54');
 /** The $# table, read on connect. */
 export const offsets = signal<Record<string, Vec3>>({});
 export const offsetsRead = signal(false);
-/** The $# table as first read after connecting, to tell what was set this session. */
+/** The $# table as first read after connecting, to tell what was set since. */
 export const offsetsAtConnect = signal<Record<string, Vec3> | null>(null);
-/** How each work offset was last written this session: probed (G10 L2, G92) or zeroed (G10 L20). */
+/** How each work offset was last written since connecting: probed (G10 L2, G92) or zeroed (G10 L20). */
 export const offsetWrites = signal<Record<string, 'probed' | 'zeroed'>>({});
 /** The tool length offset from $# ([TLO:]), null until read. */
 export const tlo = signal<number | null>(null);

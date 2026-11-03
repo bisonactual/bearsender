@@ -144,12 +144,12 @@ export function WarmupCards() {
     : [[SummaryCard, () => <RoutineCard which="normal" />, () => <RoutineCard which="cold" />], [MotionCard, StartPointCard]]} />;
 }
 
-// ── Progress ──────────────────────────────────────────────────────────────────
+// Progress
 
 function progressText(p: wu.Progress): string {
   const routine = p.cold ? 'From cold' : 'Normal';
   if (p.step < 0) return routine + ': going to the start point';
-  return `${routine}: step ${p.step + 1} of ${p.steps.length} at ${num(p.steps[p.step].rpm)} rpm${p.held ? ', held' : ''}, ${job.fmtDuration(p.leftMs)} left`;
+  return `${routine}: step ${p.step + 1} of ${p.steps.length} at ${num(p.steps[p.step].rpm)} rpm${p.held ? ', held' : ''}, ${job.formatDuration(p.leftMs)} left`;
 }
 
 /** In place of the Current Job strip while the warmup runs. */
@@ -169,7 +169,7 @@ export function WarmupStrip() {
           <div class="fs-bar-sections">
             {p.steps.map((s, k) => (
               <div class={k === p.step ? 'is-now' : ''} style={{ flex: Math.max(1, Math.round(s.secs)) + ' 1 0', background: k <= p.step ? '#29403e' : '#2a271e' }}
-                title={num(s.rpm) + ' rpm, ' + job.fmtDuration(s.secs * 1000)}>{num(s.rpm)}</div>
+                title={num(s.rpm) + ' rpm, ' + job.formatDuration(s.secs * 1000)}>{num(s.rpm)}</div>
             ))}
           </div>
           <div class="fs-bar-done" style={{ width: pct.toFixed(1) + '%' }} />
@@ -177,15 +177,15 @@ export function WarmupStrip() {
         <div class="fs-note">Progress by time, from the step times in Setup, Spindle warmup. Hold and Stop act on it; Stop stops the spindle.</div>
       </div>
       <div class="fs-times">
-        <div><div class="fs-cap">ELAPSED</div><div class="fs-time">{job.fmtDuration(p.elapsedMs)}</div></div>
-        <div><div class="fs-cap">LEFT, EST.</div><div class="fs-time is-dim">~{job.fmtDuration(p.leftMs)}</div></div>
+        <div><div class="fs-cap">ELAPSED</div><div class="fs-time">{job.formatDuration(p.elapsedMs)}</div></div>
+        <div><div class="fs-cap">LEFT, EST.</div><div class="fs-time is-dim">~{job.formatDuration(p.leftMs)}</div></div>
         <div><div class="fs-cap">SPINDLE</div><div class="fs-time is-dim">{num(machine.spindle.value)}</div></div>
       </div>
     </section>
   );
 }
 
-// ── The button ────────────────────────────────────────────────────────────────
+// The button
 
 const HOLD_MS = 5000;
 

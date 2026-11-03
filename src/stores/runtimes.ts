@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Runtimes store — how long each file took when it really ran
-// ═══════════════════════════════════════════════
+// How long each file took when it really ran.
 //
 // Kept per file contents (the job id, the CRC the flight recorder uses), so an edited file of the
 // same name never shows another file's times. A run counts when it ran whole from the top and
@@ -82,7 +80,7 @@ effect(() => {
     const { spans } = rowSpans(v.rows, job.changes.value, started, ended);
     const before = measured.value[id];
     const r: Runtime = {
-      id, name: job.file.value ?? '—', at: ended, totalMs: ended - started,
+      id, name: job.file.value ?? '-', at: ended, totalMs: ended - started,
       rowMs: spans.map(s => s.start !== null && s.end !== null ? s.end - s.start : null),
       runs: (before?.runs ?? 0) + 1,
     };

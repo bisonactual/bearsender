@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Program store — the loaded file as the G-code interpreter reads it
-// ═══════════════════════════════════════════════
+// The loaded file as the G-code interpreter reads it.
 //
 // Everything that reads the program goes through src/gcode: the Preview, the Jobs list's tools and
 // times, the Setup list's travel and tools, and the resume. It is read again whenever what it
@@ -260,7 +258,7 @@ export function read(lines: string[], ctx: InterpreterContext = context()): Prog
 /** The loaded program, read; null with no file, or until it has been read. */
 export const view = signal<ProgramView | null>(null);
 /** Reading is under way (it takes about a second for 28,000 moves). */
-export const reading = signal(false);
+export const isReading = signal(false);
 
 /** Read again at once, for those who changed something the program depends on (offsets.ts). */
 export function reread(): void { schedule(true); }
@@ -282,16 +280,16 @@ let readStart = '';
 
 function readIfStale(force: boolean): void {
   const lines = job.lines.peek();
-  if (!lines.length) { view.value = null; reading.value = false; readFor = null; return; }
+  if (!lines.length) { view.value = null; isReading.value = false; readFor = null; return; }
   const key = contextKey.peek(), start = startKey();
-  if (!force && lines === readFor && key === readKey && start === readStart) { reading.value = false; return; }
+  if (!force && lines === readFor && key === readKey && start === readStart) { isReading.value = false; return; }
   // Not while the file runs: the tool changes and offset reads would make it read again mid-job,
   // and the rows must stay the run's. It reads once the run ends (the effect below watches it).
-  if (lines === readFor && job.running.peek()) { reading.value = false; return; }
+  if (lines === readFor && job.running.peek()) { isReading.value = false; return; }
   const v = read(lines);
   readFor = lines; readKey = key; readStart = start;
   view.value = v;
-  reading.value = false;
+  isReading.value = false;
   log('info', `Program read: ${v.program.moves.length.toLocaleString('en-GB')} moves, ${v.rows.length} tool${v.rows.length === 1 ? '' : 's'}, ` +
     `about ${Math.round(v.estSeconds)} s of motion, in ${Math.round(v.readMs)} ms` + (v.stopped ? `; stops at line ${v.stopped.line}: ${v.stopped.message}` : ''));
 }
@@ -308,7 +306,7 @@ effect(() => {
   contextKey.value;
   job.running.value;
   const start = JSON.stringify(startAt.value);
-  if (lines !== readFor) { view.value = null; reading.value = lines.length > 0; }
+  if (lines !== readFor) { view.value = null; isReading.value = lines.length > 0; }
   // Only the start moved (a jog, a move while idle): read once it has stayed put a moment.
   const moved = start !== lastStart && lines === readFor;
   lastStart = start;

@@ -245,7 +245,7 @@ function startRun(isCold: boolean, p: Plan, lines: string[]): void {
       const stepIndex = r.plan.steps.findIndex(s => s.line === line.line - 1);
       // grblHAL answers M3 once the moves before it have run, so its ok is the step starting.
       if (stepIndex >= 0) { r.step = stepIndex; r.stepAt = Date.now(); r.heldMs = 0; }
-      if (line.line === r.lines.length) endRun(r, 'Machine warmup done (' + (r.cold ? 'from cold' : 'normal') + ', ' + job.fmtDuration(Date.now() - r.startedAt) + ')', false);
+      if (line.line === r.lines.length) endRun(r, 'Machine warmup done (' + (r.cold ? 'from cold' : 'normal') + ', ' + job.formatDuration(Date.now() - r.startedAt) + ')', false);
     },
     dropped(why) {
       if (r.hasEnded) return;
@@ -264,7 +264,7 @@ function startRun(isCold: boolean, p: Plan, lines: string[]): void {
     },
   };
   currentRun = r;
-  log('info', `Machine warmup (${isCold ? 'from cold' : 'normal'}): ${p.steps.map(s => s.rpm).join(', ')} rpm, about ${job.fmtDuration(p.secs * 1000)}; ${lines.length} lines`);
+  log('info', `Machine warmup (${isCold ? 'from cold' : 'normal'}): ${p.steps.map(s => s.rpm).join(', ')} rpm, about ${job.formatDuration(p.secs * 1000)}; ${lines.length} lines`);
   lastTick = Date.now();
   ticker = setInterval(tick, 500);
   tick();

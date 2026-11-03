@@ -1,10 +1,8 @@
-// ═══════════════════════════════════════════════
-// Queue store — the jobs waiting after the loaded one
-// ═══════════════════════════════════════════════
+// The jobs waiting after the loaded one.
 //
 // Kept in this browser's IndexedDB with the loaded program, so both survive a reload. When a job
 // completes and another is queued, the next one is loaded and waits for Start: nothing moves until
-// the operator presses it (the owner: "Load next, wait for Start"). That promotion is one transaction:
+// the operator presses it. That promotion is one transaction:
 // a reload finds either the job before, with the next still queued, or the next loaded and out of the
 // queue. Adds go one after another, in the order they were asked for. What was kept is checked when
 // it is read back: an entry that can't be read is dropped and reported, and the rest kept.

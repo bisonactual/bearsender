@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// IndexedDB — what BearSender keeps in this browser
-// ═══════════════════════════════════════════════
+// IndexedDB: what BearSender keeps in this browser.
 //
 // The queue, the loaded program, the runtimes from real runs and the modes each job started from.
 // Files are too big for localStorage, and each browser keeps its own: other people using the hosted

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Camera store — the camera chosen in this browser, fed by camera.ts
-// ═══════════════════════════════════════════════
+// The camera chosen in this browser (camera.ts sets it).
 
 import { signal, effect } from '@preact/signals';
 import { lsGet, lsSet } from '../ui';

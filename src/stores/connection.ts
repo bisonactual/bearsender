@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Connection store — the link to the controller
-// ═══════════════════════════════════════════════
+// The link to the controller: its state, and how CONNECT links up.
 
 import { signal, computed, effect } from '@preact/signals';
 import { lsGet, lsSet } from '../ui';

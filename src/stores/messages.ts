@@ -1,8 +1,5 @@
-// ═══════════════════════════════════════════════
-// Messages store — [MSG:] lines, alarms, errors, job events
-// ═══════════════════════════════════════════════
-//
-// Not the raw console: only what the operator should read.
+// The message line's history: [MSG:] lines, alarms, errors and job events. Not the raw console, only
+// what the operator should read.
 
 import { signal } from '@preact/signals';
 

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Flight recorder store — fed by flight-recorder.ts
-// ═══════════════════════════════════════════════
+// What the flight recorder knows, for the screens (flight-recorder.ts sets it).
 
 import { signal } from '@preact/signals';
 import type { FlightRecord } from '../flight-recorder';
