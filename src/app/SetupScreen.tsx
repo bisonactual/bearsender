@@ -92,10 +92,10 @@ export function PositionCard() {
   );
 }
 
-// ── Jogging ───────────────────────────────────────────────────────────────────
+// Jogging
 
 export function JogButton({ dir, label, class: cls }: { dir: string; label: string; class?: string }) {
-  const v = jog.dirVec(dir);
+  const v = jog.directionVector(dir);
   const axis = v.z ? 'is-z' : v.x && v.y ? 'is-diag' : v.x ? 'is-x' : 'is-y';
   const lit = jog.keyDir.value === dir;
   return (
@@ -316,15 +316,15 @@ export function LimitsCard() {
   );
 }
 
-// ── Surfacing ─────────────────────────────────────────────────────────────────
+// Surfacing
 
-const sfCfg = signal<surfacing.SurfacingConfig>(surfacing.loadCfg());
+const sfCfg = signal<surfacing.SurfacingConfig>(surfacing.loadSurfacingConfig());
 
 function SurfacingCard() {
   const c = sfCfg.value;
   const set = <K extends keyof surfacing.SurfacingConfig>(k: K, v: surfacing.SurfacingConfig[K]) => {
     sfCfg.value = { ...sfCfg.value, [k]: v };
-    surfacing.saveCfg(sfCfg.value);
+    surfacing.saveSurfacingConfig(sfCfg.value);
   };
   const field = (k: keyof surfacing.SurfacingConfig, label: string, step: number, min?: number, max?: number) => (
     <label class="fs-field"><span>{label}</span><NumIn value={c[k] as number} step={step} min={min} max={max} label={label} set={v => set(k, v as any)} /></label>

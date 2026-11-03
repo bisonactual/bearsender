@@ -6,7 +6,7 @@ import { rtSend } from './connection';
 import { endRunOnAlarm } from './streaming';
 import { reportMm } from './units';
 import { toolGroup } from './viewport';
-import { ezParseStatus } from './exclusion-zones';
+import { parseZoneStatus } from './exclusion-zones';
 import { loadOffsets, offsetsUnread } from './offsets';
 import * as command from './command';
 import { batch } from '@preact/signals';
@@ -155,7 +155,7 @@ function parseStatusReport(report: string): void {
       pins = vals[0] || '';
     }
     if (key === 'EZ') {
-      ezParseStatus(vals[0] || '');
+      parseZoneStatus(vals[0] || '');
     }
   }
   if (accessories !== null) machine.accessories.value = accessories;

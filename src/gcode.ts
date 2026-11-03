@@ -1,10 +1,5 @@
-// ═══════════════════════════════════════════════
-// G-CODE FILES — loading, and the program limits module
-// ═══════════════════════════════════════════════
-//
-// What the program does comes from the G-code interpreter (src/gcode, through stores/program.ts);
-// this file loads files, and puts the interpreter's extents in the job store for the limits card and
-// framing (src/frame.ts).
+// Loading G-code files, and the program's extents for the limits card and FRAME (src/frame.ts). What
+// the program does comes from the G-code interpreter (src/gcode, through stores/program.ts).
 
 import { effect } from '@preact/signals';
 import { log } from './console';
@@ -26,11 +21,9 @@ export function refreshLoadedProgramPreview(): void {
   program.reread();
 }
 
-// ═══════════════════════════════════════════════
-// PROGRAM LIMITS
-// ═══════════════════════════════════════════════
+// The program's extents
 
-/** The interpreter's bounds in the old module's shape (job.AxisRange). */
+/** The interpreter's bounds as the job store keeps them (job.AxisRange). */
 function axisRange(b: Bounds): job.AxisRange {
   const has = (a: 'x' | 'y' | 'z') => b.min[a] !== null;
   return {
@@ -41,7 +34,7 @@ function axisRange(b: Bounds): job.AxisRange {
 
 /** The program's own motion (program.ts programExtent): overall in machine coordinates; per work offset in
  *  that offset's coordinates, in the order the program uses them. */
-function computeProgLimits(v: program.ProgramView | null): void {
+function computeProgramLimits(v: program.ProgramView | null): void {
   if (!v || !v.program.moves.length) { job.limits.value = null; return; }
   const per = v.extent.perWorkOffset;
   const order = Object.keys(per) as (keyof typeof per)[];
@@ -50,9 +43,8 @@ function computeProgLimits(v: program.ProgramView | null): void {
   job.limits.value = { overall: axisRange(v.extent.machine), perWcs, order };
 }
 
-effect(() => computeProgLimits(program.view.value));
+effect(() => computeProgramLimits(program.view.value));
 
-// ── File loading ──────────────────────────────────────────────────────────────
 export function loadFile(input: HTMLInputElement): void {
   const file = input.files?.[0]; if (!file) return;
   const reader = new FileReader();

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Surfacing (Planer) — G-code for fly-cutting / surface planing, and its preview waypoints
-// ═══════════════════════════════════════════════
+// Surfacing: the G-code that planes a surface (fly-cutting), and its preview waypoints.
 
 import { lsGet, lsSet } from './ui';
 import * as machine from './stores/machine';
@@ -31,8 +29,8 @@ export const DEFAULTS: SurfacingConfig = {
   startPos: 'current',
 };
 
-export function loadCfg(): SurfacingConfig { return { ...DEFAULTS, ...lsGet(SAVE_KEY, {}) }; }
-export function saveCfg(c: SurfacingConfig): void { lsSet(SAVE_KEY, c); }
+export function loadSurfacingConfig(): SurfacingConfig { return { ...DEFAULTS, ...lsGet(SAVE_KEY, {}) }; }
+export function saveSurfacingConfig(c: SurfacingConfig): void { lsSet(SAVE_KEY, c); }
 
 export interface Waypoint { x: number; y: number; z: number; type: string; label: string; }
 
@@ -43,68 +41,67 @@ export function generateWaypoints(cfg: SurfacingConfig): Waypoint[] {
   const isZigzagX = pattern === 'zigzagX';
   const isSpiral = pattern === 'spiral';
 
-  // Origin corner offset
+  // Where the origin corner puts the area
   let startX = 0, startY = 0;
   if (origin === 'bottom-right') startX = -xSize;
   else if (origin === 'top-left') startY = -ySize;
   else if (origin === 'top-right') { startX = -xSize; startY = -ySize; }
   else if (origin === 'center') { startX = -xSize / 2; startY = -ySize / 2; }
 
-  // WCS offset — shift everything to the selected WCS zero
-  const sp = resolveStartOffset(cfg);
-  startX += sp.x;
-  startY += sp.y;
+  // Measured from the chosen work offset's zero
+  const startOffset = resolveStartOffset(cfg);
+  startX += startOffset.x;
+  startY += startOffset.y;
 
-  const ax = startX - overrun, ay = startY - overrun;
-  const aw = xSize + overrun * 2, ah = ySize + overrun * 2;
-  const wps: Waypoint[] = [{ x: ax, y: ay, z: 0, type: 'start', label: 'Start' }];
+  const areaX = startX - overrun, areaY = startY - overrun;
+  const areaW = xSize + overrun * 2, areaH = ySize + overrun * 2;
+  const waypoints: Waypoint[] = [{ x: areaX, y: areaY, z: 0, type: 'start', label: 'Start' }];
 
   let currentDepth = 0;
-  for (let dp = 0; dp < numDepthPasses; dp++) {
+  for (let depthPass = 0; depthPass < numDepthPasses; depthPass++) {
     currentDepth = Math.min(currentDepth + depthPerPass, targetDepth);
     const z = -currentDepth;
-    wps.push({ x: ax, y: ay, z: 0, type: 'rapid', label: `Move to start` });
-    wps.push({ x: ax, y: ay, z, type: 'probe', label: `Pass ${dp + 1} Z${z.toFixed(2)}` });
+    waypoints.push({ x: areaX, y: areaY, z: 0, type: 'rapid', label: `Move to start` });
+    waypoints.push({ x: areaX, y: areaY, z, type: 'probe', label: `Pass ${depthPass + 1} Z${z.toFixed(2)}` });
 
     if (isSpiral) {
-      let left = ax, right = ax + aw, top = ay, bottom = ay + ah;
+      let left = areaX, right = areaX + areaW, top = areaY, bottom = areaY + areaH;
       const step = Math.max(stepover, 0.1);
       while (right - left > 0 && bottom - top > 0) {
-        wps.push({ x: right, y: top, z, type: 'probe', label: 'Spiral cut' });
+        waypoints.push({ x: right, y: top, z, type: 'probe', label: 'Spiral cut' });
         top += step; if (top >= bottom) break;
-        wps.push({ x: right, y: bottom, z, type: 'probe', label: 'Spiral cut' });
+        waypoints.push({ x: right, y: bottom, z, type: 'probe', label: 'Spiral cut' });
         right -= step; if (left >= right) break;
-        wps.push({ x: left, y: bottom, z, type: 'probe', label: 'Spiral cut' });
+        waypoints.push({ x: left, y: bottom, z, type: 'probe', label: 'Spiral cut' });
         bottom -= step; if (top >= bottom) break;
-        wps.push({ x: left, y: top, z, type: 'probe', label: 'Spiral cut' });
+        waypoints.push({ x: left, y: top, z, type: 'probe', label: 'Spiral cut' });
         left += step; if (left >= right) break;
       }
     } else {
-      const stepDim = isZigzagX ? aw : ah;
+      const stepDim = isZigzagX ? areaW : areaH;
       const numPasses = Math.ceil(stepDim / stepover) + 1;
       let dir = 1;
       for (let p = 0; p < numPasses; p++) {
         if (isZigzagX) {
-          const yp = ay + p * stepover;
-          wps.push({ x: dir === 1 ? ax + aw : ax, y: yp, z, type: 'probe', label: `Row ${p + 1}` });
+          const yp = areaY + p * stepover;
+          waypoints.push({ x: dir === 1 ? areaX + areaW : areaX, y: yp, z, type: 'probe', label: `Row ${p + 1}` });
         } else {
-          const xp = ax + p * stepover;
-          wps.push({ x: xp, y: dir === 1 ? ay + ah : ay, z, type: 'probe', label: `Col ${p + 1}` });
+          const xp = areaX + p * stepover;
+          waypoints.push({ x: xp, y: dir === 1 ? areaY + areaH : areaY, z, type: 'probe', label: `Col ${p + 1}` });
         }
         dir *= -1;
       }
     }
-    wps.push({ x: wps[wps.length - 1].x, y: wps[wps.length - 1].y, z: 0, type: 'retract', label: 'Retract' });
+    waypoints.push({ x: waypoints[waypoints.length - 1].x, y: waypoints[waypoints.length - 1].y, z: 0, type: 'retract', label: 'Retract' });
   }
-  return wps;
+  return waypoints;
 }
 
-/** Resolve the start position offset based on config */
+/** How far the chosen work offset's zero is from the machine now, in X and Y (0 for "current"). */
 function resolveStartOffset(cfg: SurfacingConfig): { x: number; y: number } {
   if (cfg.startPos === 'current') return { x: 0, y: 0 };
   const wcs = machine.offsets.value[cfg.startPos];
   if (!wcs) return { x: 0, y: 0 };
-  // WCS offset is where zero is in machine coords — we want to position relative to it
   const m = machine.mpos.value;
   return { x: wcs.x - m.x, y: wcs.y - m.y };
 }
@@ -118,83 +115,83 @@ export function generateGcode(cfg: SurfacingConfig): string {
   const isZigzagX = pattern === 'zigzagX';
   const isSpiral = pattern === 'spiral';
 
-  // Origin offset
+  // Where the origin corner puts the area
   let startX = 0, startY = 0;
   if (origin === 'bottom-right') startX = -xSize;
   else if (origin === 'top-left') startY = -ySize;
   else if (origin === 'top-right') { startX = -xSize; startY = -ySize; }
   else if (origin === 'center') { startX = -xSize / 2; startY = -ySize / 2; }
 
-  const ax = startX - overrun;
-  const ay = startY - overrun;
-  const aw = xSize + overrun * 2;
-  const ah = ySize + overrun * 2;
+  const areaX = startX - overrun;
+  const areaY = startY - overrun;
+  const areaW = xSize + overrun * 2;
+  const areaH = ySize + overrun * 2;
 
-  const g: string[] = [];
-  g.push('(Surfacing Operation)');
-  g.push(`(Area: ${xSize} x ${ySize} mm, Depth: ${targetDepth} mm in ${numDepthPasses} passes)`);
-  g.push(`(Bit: ${bitDiameter} mm, Stepover: ${stepoverPct}%, Overrun: ${overrun} mm)`);
-  g.push(`(Feed: ${feedRate} mm/min, Plunge: ${plungeRate} mm/min, RPM: ${spindleRpm})`);
-  g.push('');
-  g.push('G21 ; Metric');
-  g.push('G90 ; Absolute');
-  g.push('G94 ; Feed/min');
+  const lines: string[] = [];
+  lines.push('(Surfacing Operation)');
+  lines.push(`(Area: ${xSize} x ${ySize} mm, Depth: ${targetDepth} mm in ${numDepthPasses} passes)`);
+  lines.push(`(Bit: ${bitDiameter} mm, Stepover: ${stepoverPct}%, Overrun: ${overrun} mm)`);
+  lines.push(`(Feed: ${feedRate} mm/min, Plunge: ${plungeRate} mm/min, RPM: ${spindleRpm})`);
+  lines.push('');
+  lines.push('G21 ; Metric');
+  lines.push('G90 ; Absolute');
+  lines.push('G94 ; Feed/min');
   if (cfg.startPos !== 'current') {
-    g.push(`${cfg.startPos} ; Select WCS`);
+    lines.push(`${cfg.startPos} ; Select WCS`);
   }
-  g.push('');
-  g.push('G53 G0 Z0');
-  g.push(`G0 X${ax.toFixed(3)} Y${ay.toFixed(3)}`);
-  if (spindleRpm > 0) g.push(`M3 S${spindleRpm}`);
-  if (spindleDelay > 0) g.push(`G4 P${spindleDelay}`);
-  g.push('G0 Z5.000');
-  g.push('');
+  lines.push('');
+  lines.push('G53 G0 Z0');
+  lines.push(`G0 X${areaX.toFixed(3)} Y${areaY.toFixed(3)}`);
+  if (spindleRpm > 0) lines.push(`M3 S${spindleRpm}`);
+  if (spindleDelay > 0) lines.push(`G4 P${spindleDelay}`);
+  lines.push('G0 Z5.000');
+  lines.push('');
 
   let currentDepth = 0;
-  for (let dp = 0; dp < numDepthPasses; dp++) {
+  for (let depthPass = 0; depthPass < numDepthPasses; depthPass++) {
     currentDepth = Math.min(currentDepth + depthPerPass, targetDepth);
     const z = -currentDepth;
-    g.push(`(Pass ${dp + 1}/${numDepthPasses} Z${z.toFixed(3)})`);
-    g.push(`G0 X${ax.toFixed(3)} Y${ay.toFixed(3)}`);
-    g.push(`G1 Z${z.toFixed(3)} F${plungeRate}`);
+    lines.push(`(Pass ${depthPass + 1}/${numDepthPasses} Z${z.toFixed(3)})`);
+    lines.push(`G0 X${areaX.toFixed(3)} Y${areaY.toFixed(3)}`);
+    lines.push(`G1 Z${z.toFixed(3)} F${plungeRate}`);
 
     if (isSpiral) {
-      let left = ax, right = ax + aw, top = ay, bottom = ay + ah;
+      let left = areaX, right = areaX + areaW, top = areaY, bottom = areaY + areaH;
       const step = Math.max(stepover, 0.1);
       while (right - left > 0 && bottom - top > 0) {
-        g.push(`G1 X${right.toFixed(3)} Y${top.toFixed(3)} F${feedRate}`);
+        lines.push(`G1 X${right.toFixed(3)} Y${top.toFixed(3)} F${feedRate}`);
         top += step; if (top >= bottom) break;
-        g.push(`G1 X${right.toFixed(3)} Y${bottom.toFixed(3)} F${feedRate}`);
+        lines.push(`G1 X${right.toFixed(3)} Y${bottom.toFixed(3)} F${feedRate}`);
         right -= step; if (left >= right) break;
-        g.push(`G1 X${left.toFixed(3)} Y${bottom.toFixed(3)} F${feedRate}`);
+        lines.push(`G1 X${left.toFixed(3)} Y${bottom.toFixed(3)} F${feedRate}`);
         bottom -= step; if (top >= bottom) break;
-        g.push(`G1 X${left.toFixed(3)} Y${top.toFixed(3)} F${feedRate}`);
+        lines.push(`G1 X${left.toFixed(3)} Y${top.toFixed(3)} F${feedRate}`);
         left += step; if (left >= right) break;
-        g.push(`G1 X${left.toFixed(3)} Y${top.toFixed(3)} F${feedRate}`);
+        lines.push(`G1 X${left.toFixed(3)} Y${top.toFixed(3)} F${feedRate}`);
       }
     } else {
-      const stepDim = isZigzagX ? aw : ah;
+      const stepDim = isZigzagX ? areaW : areaH;
       const numPasses = Math.ceil(stepDim / stepover) + 1;
       let dir = 1;
       for (let p = 0; p < numPasses; p++) {
         if (isZigzagX) {
-          const yp = ay + p * stepover;
-          if (p > 0) g.push(`G1 Y${yp.toFixed(3)} F${feedRate}`);
-          g.push(`G1 X${(dir === 1 ? ax + aw : ax).toFixed(3)} F${feedRate}`);
+          const yp = areaY + p * stepover;
+          if (p > 0) lines.push(`G1 Y${yp.toFixed(3)} F${feedRate}`);
+          lines.push(`G1 X${(dir === 1 ? areaX + areaW : areaX).toFixed(3)} F${feedRate}`);
         } else {
-          const xp = ax + p * stepover;
-          if (p > 0) g.push(`G1 X${xp.toFixed(3)} F${feedRate}`);
-          g.push(`G1 Y${(dir === 1 ? ay + ah : ay).toFixed(3)} F${feedRate}`);
+          const xp = areaX + p * stepover;
+          if (p > 0) lines.push(`G1 X${xp.toFixed(3)} F${feedRate}`);
+          lines.push(`G1 Y${(dir === 1 ? areaY + areaH : areaY).toFixed(3)} F${feedRate}`);
         }
         dir *= -1;
       }
     }
-    g.push('G0 Z5.000');
-    g.push('');
+    lines.push('G0 Z5.000');
+    lines.push('');
   }
 
-  g.push('G53 G0 Z0');
-  if (spindleRpm > 0) g.push('M5');
-  g.push('M30');
-  return g.join('\n');
+  lines.push('G53 G0 Z0');
+  if (spindleRpm > 0) lines.push('M5');
+  lines.push('M30');
+  return lines.join('\n');
 }

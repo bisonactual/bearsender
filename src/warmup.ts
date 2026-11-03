@@ -1,24 +1,20 @@
-// ═══════════════════════════════════════════════
-// MACHINE WARMUP — the spindle run up in steps at a start point, with or without a motion pattern
-// ═══════════════════════════════════════════════
+// The machine warmup: the spindle run up in steps at a start point, with or without a motion pattern.
+// It streams through the command layer like a job but isn't one: no Jobs row, no runtime, no next job
+// from the queue, and no flight recorder stamp or line numbers (the recorder only records a job
+// stamped with $FLIGHT=). The controller times the steps (G4) and ends with M5.
 //
-// The warmup is a stream of its own through the command layer, like a job but not one: it has no
-// Jobs list row and no runtime, doesn't take the queue's next job, and sends no flight recorder stamp
-// or line numbers (the recorder keeps a record only of a job stamped with $FLIGHT=). The controller
-// times the steps (G4) and ends with M5.
+// The whole warmup is sized to fit in the controller's input (the RX buffer from $I), so all of it, M5
+// included, is sent at the start and the controller can finish it alone. The input is what counts, not
+// the planner: a new spindle speed and a dwell each wait for the moves before them, so what follows
+// waits in the input. Where the pattern's passes don't fit, each step runs fewer and dwells the rest
+// of its time, and the Setup tab says so. That still doesn't stop the spindle after a lost link: the
+// controller drops its unread input when the WebSocket client goes (seen on the sim), so the M5 waiting
+// there never runs.
 //
-// The whole warmup fits in the controller's input (the RX buffer from $I), so all of it, M5 included,
-// is sent as soon as it starts (the owner's choice, 3 Nov). The input is what counts, not the planner as
-// well: a new spindle speed and a dwell each wait for the moves before them to finish, so what follows
-// waits in the input. Where the motion pattern's passes don't fit, each step runs fewer passes and
-// dwells the rest of its time, and the Setup tab says so. That alone doesn't stop the spindle after a
-// lost link: on the sim, the controller drops the input it hasn't run yet when the WebSocket client goes,
-// so the M5 waiting there never runs (review 3 fixes, run W2).
-//
-// The way to the start point: Z up first, to the higher of the point's Z and where the tool is, then
-// over to the point's X and Y, then to its Z. Every move is G53, in mm and mm/min (G21 G94 first, so an
-// inverse-time G93 left by a program doesn't scale the feed). Then each step sets the speed and dwells,
-// or runs the motion pattern, for its time. M5 ends it; G93 and G20 are put back if they were set.
+// The way to the start point: Z up first, to the higher of the point's Z and the tool's, then over to
+// X and Y, then to the point's Z. Every move is G53, in mm and mm/min (G21 G94 first, so a G93 left by
+// a program doesn't scale the feed). Then each step sets the speed and dwells, or runs the pattern,
+// for its time. M5 ends it, and G93 and G20 are put back if they were set.
 //
 // Hold and Stop are the bottom bar's, as for a job: Stop is the hold, then the reset once the machine
 // has stopped (streaming.ts), and the reset stops the spindle.
@@ -47,22 +43,23 @@ export const PATTERNS: [Pattern, string][] = [
   ['xy', 'Back and forth in X, then Y'], ['box', 'Round the rectangle'],
 ];
 
-function kept<T extends object>(key: string, fallback: T) {
+/** A signal kept in localStorage under `key`, its saved fields over the defaults. */
+function savedSignal<T extends object>(key: string, fallback: T) {
   const s = signal<T>({ ...fallback, ...lsGet<Partial<T>>(key, {}) });
   effect(() => lsSet(key, s.value));
   return s;
 }
 
-export const normal = kept<Routine>('fs-warmup-normal', { start: 6000, max: 18000, steps: 3, minutes: 2 });
-export const cold = kept<Routine>('fs-warmup-cold', { start: 6000, max: 24000, steps: 4, minutes: 2 });
-export const motion = kept<Motion>('fs-warmup-motion', { pattern: 'none', xRange: 300, yRange: 300, feed: 1500 });
-/** The owner's start point: "well off the sensors but safe". */
-export const point = kept<Point>('fs-warmup-point', { x: -5, y: -5, z: -5 });
+export const normal = savedSignal<Routine>('fs-warmup-normal', { start: 6000, max: 18000, steps: 3, minutes: 2 });
+export const cold = savedSignal<Routine>('fs-warmup-cold', { start: 6000, max: 24000, steps: 4, minutes: 2 });
+export const motion = savedSignal<Motion>('fs-warmup-motion', { pattern: 'none', xRange: 300, yRange: 300, feed: 1500 });
+/** The start point, by default well off the sensors but safe. */
+export const point = savedSignal<Point>('fs-warmup-point', { x: -5, y: -5, z: -5 });
 /** The operator's switch: the button runs the from-cold routine. */
 export const fromCold = signal<boolean>(lsGet('fs-warmup-from-cold', false));
 effect(() => lsSet('fs-warmup-from-cold', fromCold.value));
 
-// ── The program ───────────────────────────────────────────────────────────────
+// The program
 
 /** The steps' speeds, evenly spaced from the starting speed to the target. One step runs at the target. */
 export function speeds(r: Routine): number[] {
@@ -98,19 +95,19 @@ export interface Step { line: number; rpm: number; secs: number; }
  *  `fits`: all of it fits in that room. */
 export interface Plan { lines: string[]; steps: Step[]; secs: number; fit: { wanted: number; sent: number } | null; fits: boolean; }
 
-const n = (v: number) => String(Math.round(v * 1000) / 1000);
+const round3 = (v: number) => String(Math.round(v * 1000) / 1000);
 /** The bytes the lines take in the controller's input, a newline each. */
 export const bytes = (lines: string[]) => lines.reduce((t, l) => t + byteLen(l + '\n'), 0);
 
-/** The way to a machine point from where the tool is (machine Z): Z up first, to the higher of the two, so
- *  it never goes down while crossing; then over to X and Y; then to the point's Z. G53, in the units in
- *  force, so the first line wants G21 in front. PARK goes the same way (park.ts). */
+/** The way to a machine point from the tool's machine Z: Z up first, to the higher of the two, so it
+ *  never goes down while crossing, then over to X and Y, then to the point's Z. G53 in the units in
+ *  force, so the first line needs G21 in front. PARK goes the same way (park.ts). */
 export function wayTo(p: Point, fromZ: number): string[] {
-  return [`G53G0Z${n(Math.max(p.z, fromZ))}`, `G53G0X${n(p.x)}Y${n(p.y)}`, `G53G0Z${n(p.z)}`];
+  return [`G53G0Z${round3(Math.max(p.z, fromZ))}`, `G53G0X${round3(p.x)}Y${round3(p.y)}`, `G53G0Z${round3(p.z)}`];
 }
 
 /** The lines with at most `cap` passes a step, and the passes a step's time wants. */
-function build(r: Routine, m: Motion, p: Point, fromZ: number, cap: number): { lines: string[]; steps: Step[]; wanted: number } {
+function buildLines(r: Routine, m: Motion, p: Point, fromZ: number, cap: number): { lines: string[]; steps: Step[]; wanted: number } {
   const lines = wayTo(p, fromZ);
   lines[0] = 'G21G94' + lines[0];
   const pts = pass(m, p);
@@ -121,13 +118,13 @@ function build(r: Routine, m: Motion, p: Point, fromZ: number, cap: number): { l
     const secs = Math.max(0, r.minutes * 60);
     steps.push({ line: lines.length, rpm, secs });
     lines.push(`M3S${rpm}`);
-    if (!each) { lines.push(`G4P${n(secs)}`); continue; }
+    if (!each) { lines.push(`G4P${round3(secs)}`); continue; }
     wanted = Math.min(MAX_PASSES, Math.max(1, Math.floor(secs / each)));
     const passes = Math.min(wanted, cap);
     let first = true;
-    for (let k = 0; k < passes; k++) for (const pt of pts) { lines.push(`G53G1X${n(pt.x)}Y${n(pt.y)}${first ? 'F' + n(m.feed) : ''}`); first = false; }
+    for (let k = 0; k < passes; k++) for (const pt of pts) { lines.push(`G53G1X${round3(pt.x)}Y${round3(pt.y)}${first ? 'F' + round3(m.feed) : ''}`); first = false; }
     const rest = secs - passes * each;
-    if (rest >= 0.5) lines.push(`G4P${n(rest)}`);
+    if (rest >= 0.5) lines.push(`G4P${round3(rest)}`);
     steps[steps.length - 1].secs = Math.max(secs, passes * each);
   }
   lines.push('M5');
@@ -136,12 +133,12 @@ function build(r: Routine, m: Motion, p: Point, fromZ: number, cap: number): { l
 
 /** The warmup's lines, from where the tool is (machine Z), in at most `room` bytes: the passes a step
  *  are cut until they fit, and each step dwells the rest of its time. */
-export function plan(r: Routine, m: Motion, p: Point, fromZ: number, room = Infinity): Plan {
-  let b = build(r, m, p, fromZ, MAX_PASSES);
+export function plan(r: Routine, m: Motion, p: Point, fromZ: number, inputRoom = Infinity): Plan {
+  let b = buildLines(r, m, p, fromZ, MAX_PASSES);
   let cap = b.wanted;
-  while (cap > 0 && bytes(b.lines) > room) b = build(r, m, p, fromZ, --cap);
+  while (cap > 0 && bytes(b.lines) > inputRoom) b = buildLines(r, m, p, fromZ, --cap);
   return { lines: b.lines, steps: b.steps, secs: b.steps.reduce((t, s) => t + s.secs, 0),
-    fit: passSecs(m) ? { wanted: b.wanted, sent: cap } : null, fits: bytes(b.lines) <= room };
+    fit: passSecs(m) ? { wanted: b.wanted, sent: cap } : null, fits: bytes(b.lines) <= inputRoom };
 }
 
 /** The routine's time in s, the way to the start point not counted. */
@@ -155,16 +152,16 @@ export function fitted(r: Routine, m: Motion): Plan {
 }
 
 /** What goes after the routine: G93 and G20 put back if $G showed them, and the barrier. */
-function tail(words: string[] | null): string[] {
+function closingLines(words: string[] | null): string[] {
   return [...(words?.includes('G93') ? ['G93'] : []), ...(words?.includes('G20') ? ['G20'] : []), 'G4P0'];
 }
 
 /** The room the routine has in the controller's input, with what goes after it. */
 export function room(words: string[] | null = machine.modal.peek()): number {
-  return command.rxBufferSize() - 1 - bytes(tail(words));
+  return command.rxBufferSize() - 1 - bytes(closingLines(words));
 }
 
-// ── Running it ────────────────────────────────────────────────────────────────
+// Running it
 
 interface Run {
   cold: boolean;
@@ -172,8 +169,8 @@ interface Run {
   plan: Plan;
   lines: string[];
   source: command.JobSource;
-  head: number;
-  ended: boolean;
+  nextIndex: number;
+  hasEnded: boolean;
   step: number;       // the step running, -1 on the way to the start point
   stepAt: number;     // when it started
   heldMs: number;     // held since then
@@ -185,7 +182,7 @@ export interface Progress { cold: boolean; pattern: Pattern; steps: Step[]; step
 /** What the progress shows while a warmup runs; null otherwise. */
 export const progress = signal<Progress | null>(null);
 
-let run: Run | null = null;
+let currentRun: Run | null = null;
 let starting = false;
 let ticker: ReturnType<typeof setInterval> | null = null;
 let lastTick = 0;
@@ -200,7 +197,7 @@ export function whyNot(): string | null {
   return null;
 }
 
-export function running(): boolean { return !!run && !run.ended; }
+export function isRunning(): boolean { return !!currentRun && !currentRun.hasEnded; }
 
 /** MACHINE WARMUP, held for 5 s: the routine the switch picks. */
 export function start(): void {
@@ -208,66 +205,65 @@ export function start(): void {
   if (why) { log('err', 'Machine warmup: nothing was sent (' + why + ')'); return; }
   starting = true;
   const isCold = fromCold.peek();
-  // The modes first, to put G93 and G20 back after. The sim refused the first $ command after homing
-  // (error:71) and took the next, so a refusal gets one more try, as Start does. Stop, RESET, a reset
-  // or the link going while $G is answered revokes the warmup (command.intent).
-  const live = command.intent();
-  const modes = () => command.send('$G', { quiet: true }).catch(e => { if (e instanceof command.CommandFailed) return null; throw e; });
-  modes().then(r => r?.result === 'error' && live() ? modes() : r).then(reply => {
+  // The modes first, to put G93 and G20 back after. A refused $G is tried once more, as Start does
+  // (error:71 after homing). Stop, RESET, a reset or a lost link meanwhile cancels the warmup.
+  const stillWanted = command.intent();
+  const readModes = () => command.send('$G', { quiet: true }).catch(e => { if (e instanceof command.CommandFailed) return null; throw e; });
+  readModes().then(r => r?.result === 'error' && stillWanted() ? readModes() : r).then(reply => {
     starting = false;
-    if (!live()) { log('info', 'Machine warmup: nothing was sent. Stop, RESET, a reset or the link going came while $G was answered.'); return; }
+    if (!stillWanted()) { log('info', 'Machine warmup: nothing was sent. Stop, RESET, a reset or the link going came while $G was answered.'); return; }
     const why = whyNot();
     if (why) { log('err', 'Machine warmup: nothing was sent (' + why + ')'); return; }
-    const words = reply?.result === 'ok' ? [...machine.modal.peek()] : null;
-    if (!words) log('err', 'Machine warmup: $G got no answer, so the modes it found aren\'t known; it leaves G21 G94 in force.');
-    const p = plan(isCold ? cold.peek() : normal.peek(), motion.peek(), point.peek(), machine.mpos.peek().z, room(words));
-    if (p.fit && p.fit.sent < p.fit.wanted) log('info', `Machine warmup: ${p.fit.sent} of the ${p.fit.wanted} passes a step, to fit in the controller's ${command.rxBufferSize()}-byte input; each step dwells the rest of its time.`);
-    if (!p.fits) log('err', `Machine warmup: it doesn't fit in the controller's ${command.rxBufferSize()}-byte input even without motion, so its M5 goes only when there is room: if the link drops before then, the spindle keeps running.`);
+    const modes = reply?.result === 'ok' ? [...machine.modal.peek()] : null;
+    if (!modes) log('err', 'Machine warmup: $G got no answer, so the modes it found aren\'t known; it leaves G21 G94 in force.');
+    const warmupPlan = plan(isCold ? cold.peek() : normal.peek(), motion.peek(), point.peek(), machine.mpos.peek().z, room(modes));
+    if (warmupPlan.fit && warmupPlan.fit.sent < warmupPlan.fit.wanted) log('info', `Machine warmup: ${warmupPlan.fit.sent} of the ${warmupPlan.fit.wanted} passes a step, to fit in the controller's ${command.rxBufferSize()}-byte input; each step dwells the rest of its time.`);
+    if (!warmupPlan.fits) log('err', `Machine warmup: it doesn't fit in the controller's ${command.rxBufferSize()}-byte input even without motion, so its M5 goes only when there is room: if the link drops before then, the spindle keeps running.`);
     // Its ok comes once the planner is empty: the machine has stopped.
-    begin(isCold, p, [...p.lines, ...tail(words)]);
+    startRun(isCold, warmupPlan, [...warmupPlan.lines, ...closingLines(modes)]);
   });
 }
 
-function begin(isCold: boolean, p: Plan, lines: string[]): void {
-  const r: Run = { cold: isCold, pattern: motion.peek().pattern, plan: p, lines, head: 0, ended: false, step: -1, stepAt: Date.now(), heldMs: 0, startedAt: Date.now(), source: null! };
+function startRun(isCold: boolean, p: Plan, lines: string[]): void {
+  const r: Run = { cold: isCold, pattern: motion.peek().pattern, plan: p, lines, nextIndex: 0, hasEnded: false, step: -1, stepAt: Date.now(), heldMs: 0, startedAt: Date.now(), source: null! };
   r.source = {
     next(room) {
-      if (r.ended || r.head >= r.lines.length) return null;
-      const text = r.lines[r.head];
+      if (r.hasEnded || r.nextIndex >= r.lines.length) return null;
+      const text = r.lines[r.nextIndex];
       if (byteLen(text + '\n') > room) return null;
-      r.head++;
-      return { text, line: r.head };
+      r.nextIndex++;
+      return { text, line: r.nextIndex };
     },
     replied(line, reply) {
-      if (r.ended) return;
+      if (r.hasEnded) return;
       if (reply.result === 'error') {
         const why = errorText(reply.code);
-        end(r, `Machine warmup stopped: the controller refused ${line.text} (error:${reply.code}${why ? ', ' + why : ''}). Stop was sent: the hold, then the reset, which stops the spindle.`, true);
+        endRun(r, `Machine warmup stopped: the controller refused ${line.text} (error:${reply.code}${why ? ', ' + why : ''}). Stop was sent: the hold, then the reset, which stops the spindle.`, true);
         stopJob();
         return;
       }
-      const k = r.plan.steps.findIndex(s => s.line === line.line - 1);
+      const stepIndex = r.plan.steps.findIndex(s => s.line === line.line - 1);
       // grblHAL answers M3 once the moves before it have run, so its ok is the step starting.
-      if (k >= 0) { r.step = k; r.stepAt = Date.now(); r.heldMs = 0; }
-      if (line.line === r.lines.length) end(r, 'Machine warmup done (' + (r.cold ? 'from cold' : 'normal') + ', ' + job.fmtDuration(Date.now() - r.startedAt) + ')', false);
+      if (stepIndex >= 0) { r.step = stepIndex; r.stepAt = Date.now(); r.heldMs = 0; }
+      if (line.line === r.lines.length) endRun(r, 'Machine warmup done (' + (r.cold ? 'from cold' : 'normal') + ', ' + job.fmtDuration(Date.now() - r.startedAt) + ')', false);
     },
     dropped(why) {
-      if (r.ended) return;
+      if (r.hasEnded) return;
       if (why === 'reset' || why === 'alarm') {
-        end(r, `Machine warmup ended: the controller was ${why === 'reset' ? 'reset' : 'stopped by an alarm'}, which stops the spindle.`, true);
+        endRun(r, `Machine warmup ended: the controller was ${why === 'reset' ? 'reset' : 'stopped by an alarm'}, which stops the spindle.`, true);
       } else if (why === 'disconnected') {
-        const left = r.lines.length - r.head;
-        end(r, left
-          ? `Machine warmup: the link was lost with ${left} of its lines not sent, so the spindle may still be running. Check the machine.`
+        const unsent = r.lines.length - r.nextIndex;
+        endRun(r, unsent
+          ? `Machine warmup: the link was lost with ${unsent} of its lines not sent, so the spindle may still be running. Check the machine.`
           : 'Machine warmup: the link was lost. All of its lines had been sent, but a controller can drop what it hasn\'t run yet when the link goes (the sim does), so the spindle may still be running. Check the machine.', true);
       } else {
         // A jog cancel empties the controller's input, so the rest of the warmup is gone: stop the spindle.
-        end(r, `Machine warmup ended: the controller's input was emptied (${why}), so the rest of it was lost. M5 was sent to stop the spindle.`, true);
+        endRun(r, `Machine warmup ended: the controller's input was emptied (${why}), so the rest of it was lost. M5 was sent to stop the spindle.`, true);
         command.post('M5');
       }
     },
   };
-  run = r;
+  currentRun = r;
   log('info', `Machine warmup (${isCold ? 'from cold' : 'normal'}): ${p.steps.map(s => s.rpm).join(', ')} rpm, about ${job.fmtDuration(p.secs * 1000)}; ${lines.length} lines`);
   lastTick = Date.now();
   ticker = setInterval(tick, 500);
@@ -275,10 +271,10 @@ function begin(isCold: boolean, p: Plan, lines: string[]): void {
   command.stream(r.source);
 }
 
-function end(r: Run, text: string, warn: boolean): void {
-  r.ended = true;
+function endRun(r: Run, text: string, warn: boolean): void {
+  r.hasEnded = true;
   command.endStream(r.source);
-  if (run === r) run = null;
+  if (currentRun === r) currentRun = null;
   if (ticker) { clearInterval(ticker); ticker = null; }
   progress.value = null;
   log(warn ? 'err' : 'info', text);
@@ -287,12 +283,12 @@ function end(r: Run, text: string, warn: boolean): void {
 
 /** STOP while the warmup runs: nothing more is sent, then the hold and the reset, as for a job. */
 export function stop(): void {
-  if (run) end(run, 'Machine warmup stopped: the hold, then the reset, which stops the spindle.', false);
+  if (currentRun) endRun(currentRun, 'Machine warmup stopped: the hold, then the reset, which stops the spindle.', false);
   stopJob();
 }
 
 function tick(): void {
-  const r = run;
+  const r = currentRun;
   if (!r) return;
   const now = Date.now();
   const held = ['hold', 'door'].includes(machine.stateName.peek());

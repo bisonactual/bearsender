@@ -5,7 +5,7 @@ import { lsGet } from './ui';
 import { log } from './console';
 import * as command from './command';
 import { publishRunState, clearRunFlags } from './streaming';
-import { ezResetPluginState, ezCheckPlugin, ezConnected } from './exclusion-zones';
+import { resetZonePlugins, detectZonePlugins, readZonesOnConnect } from './exclusion-zones';
 import { isRecorderEnabled, detectRecorderPlugin, readRecorderOnConnect, resetRecorderState } from './flight-recorder';
 import { loadSettings, forgetSettings } from './settings';
 import { loadOffsets } from './offsets';
@@ -165,7 +165,7 @@ async function afterConnect(): Promise<void> {
     // Report units first: positions and offsets are converted to mm by it (units.ts).
     () => command.send('$13', { quiet: true }),
     readRecorderOnConnect,
-    ezConnected,
+    readZonesOnConnect,
     async () => { if (lsGet('fs-opt-autoload-settings', false)) await loadSettings(); },
     // $# is refused in the power-up alarm, so loadOffsets needs the state first.
     waitForFirstStatus,
@@ -201,7 +201,7 @@ function readBuildInfo(lines: string[]): void {
       machine.axes.value = axes[1].split('');
       log('info', 'Axes: ' + machine.axes.value.join(','));
     }
-    ezCheckPlugin(line);
+    detectZonePlugins(line);
     detectRecorderPlugin(line);
   }
 }
@@ -244,7 +244,7 @@ function onClose(): void {
   });
   publishRunState();
   resetMachineState();
-  ezResetPluginState();
+  resetZonePlugins();
   forgetSettings();
   resetRecorderState();
 }

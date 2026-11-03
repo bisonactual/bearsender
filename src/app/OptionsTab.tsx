@@ -14,7 +14,7 @@ import * as opt from '../options';
 import { lsGet, lsSet } from '../ui';
 import { log } from '../console';
 import { setRecorderEnabled } from '../flight-recorder';
-import { vpSetExtents, setProjection, vpExtents } from '../viewport';
+import { setViewportExtents, setProjection, viewportExtents } from '../viewport';
 import { NumIn } from './SetupScreen';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -108,7 +108,7 @@ function Connection() {
 }
 
 function ViewExtents() {
-  const now = vpExtents();
+  const now = viewportExtents();
   const [v, setV] = useState({ xMin: String(now.xMin), xMax: String(now.xMax), yMin: String(now.yMin), yMax: String(now.yMax) });
   const [ortho, setOrtho] = useState(now.ortho);
   const field = (k: keyof typeof v, label: string) => (
@@ -116,7 +116,7 @@ function ViewExtents() {
       <input type="number" step="10" class="fs-in fs-mono" value={v[k]} onInput={e => {
         const next = { ...v, [k]: (e.target as HTMLInputElement).value };
         setV(next);
-        vpSetExtents(parseFloat(next.xMin), parseFloat(next.xMax), parseFloat(next.yMin), parseFloat(next.yMax));
+        setViewportExtents(parseFloat(next.xMin), parseFloat(next.xMax), parseFloat(next.yMin), parseFloat(next.yMax));
       }} />
     </Field>
   );
@@ -165,9 +165,9 @@ function Theme() {
   const c = opt.colors.value;
   return (
     <>
-      {opt.COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.optApplyColor(k, v)} reset={() => opt.optResetColor(k)} />)}
-      {opt.VP_COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.optApplyColor(k, v)} reset={() => opt.optResetColor(k)} />)}
-      <button type="button" class="fs-btn fs-btn-sm fs-self-start" onClick={() => opt.optResetAllColors()}>RESET ALL COLOURS</button>
+      {opt.COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.applyColor(k, v)} reset={() => opt.resetColor(k)} />)}
+      {opt.VP_COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.applyColor(k, v)} reset={() => opt.resetColor(k)} />)}
+      <button type="button" class="fs-btn fs-btn-sm fs-self-start" onClick={() => opt.resetAllColors()}>RESET ALL COLOURS</button>
     </>
   );
 }
@@ -192,7 +192,7 @@ function JogSteps() {
         <Field label="Max XY Speed (mm/min)"><NumIn label="Max XY Speed" value={parseInt(s.maxXY) || 3000} min={1} step={100} set={v => set('maxXY', String(v))} wide /></Field>
         <Field label="Max Z Speed (mm/min)"><NumIn label="Max Z Speed" value={parseInt(s.maxZ) || 500} min={1} step={50} set={v => set('maxZ', String(v))} wide /></Field>
       </div>
-      <button type="button" class="fs-btn fs-btn-sm fs-self-start" onClick={() => setBad(!opt.optApplyJogSteps())}>APPLY &amp; REBUILD BUTTONS</button>
+      <button type="button" class="fs-btn fs-btn-sm fs-self-start" onClick={() => setBad(!opt.applyJogSteps())}>APPLY &amp; REBUILD BUTTONS</button>
       {bad && <div class="fs-note fs-warn-text">Each list needs at least one step above 0; nothing was changed.</div>}
       <Check checked={opt.jogShowUnits.value} set={v => { opt.jogShowUnits.value = v; }}>Show mm units on distance buttons</Check>
     </>

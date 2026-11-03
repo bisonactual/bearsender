@@ -1,10 +1,7 @@
-// ═══════════════════════════════════════════════
-// Camera engine — the webcam, the crosshair over it, and the camera's offset from the spindle
-// ═══════════════════════════════════════════════
-//
-// The job screen's Camera tab (src/app/CameraPanel.tsx) hands over its video and canvas, and runs the
-// camera only while it shows. The offset is where the spindle goes to put the crosshair over the point the
-// spindle was over: MEASURE OFFSET takes it from two machine positions.
+// The camera: the webcam, the crosshair over it, and the camera's offset from the spindle. The job
+// screen's Camera tab (src/app/CameraPanel.tsx) hands over its video and canvas, and runs the camera
+// only while it shows. The offset is how far the machine moves to put the crosshair where the spindle
+// was; MEASURE OFFSET takes it from two machine positions.
 
 import { signal, effect } from '@preact/signals';
 import { lsGet, lsSet } from './ui';
@@ -15,16 +12,16 @@ import * as connection from './stores/connection';
 import * as camera from './stores/camera';
 
 export type CrossStyle = 'cross' | 'circle' | 'both' | 'dot';
-interface CamSettings { offsetX: number; offsetY: number; crossStyle: CrossStyle; crossColor: string; crossSize: number; zoom: number; }
+interface CameraSettings { offsetX: number; offsetY: number; crossStyle: CrossStyle; crossColor: string; crossSize: number; zoom: number; }
 
 /** The cameras this browser can see, once it has been allowed to. */
 export const devices = signal<{ id: string; label: string }[]>([]);
 /** The camera picked in the list ('' for the browser's default). */
 export const picked = signal<string>(camera.device.value ?? '');
 /** The overlay and the offset, kept in this browser. */
-export const view = signal<CamSettings>({
+export const view = signal<CameraSettings>({
   offsetX: 0, offsetY: 0, crossStyle: 'cross', crossColor: '#00d4ff', crossSize: 80, zoom: 1,
-  ...lsGet<Partial<CamSettings>>('flexisender_cam', {}),
+  ...lsGet<Partial<CameraSettings>>('flexisender_cam', {}),
 });
 effect(() => lsSet('flexisender_cam', view.value));
 /** The crosshair, as a fraction of the picture: 0.5, 0.5 is the middle. */
@@ -32,12 +29,12 @@ export const cross = signal({ x: 0.5, y: 0.5 });
 /** The spindle position MEASURE OFFSET took first, while it waits for CONFIRM OFFSET. */
 export const measuring = signal<{ x: number; y: number } | null>(null);
 
-export function setView(patch: Partial<CamSettings>): void { view.value = { ...view.value, ...patch }; }
+export function setView(patch: Partial<CameraSettings>): void { view.value = { ...view.value, ...patch }; }
 
 let video: HTMLVideoElement | null = null;
 let canvas: HTMLCanvasElement | null = null;
 let stream: MediaStream | null = null;
-let listed = false;
+let camerasListed = false;
 
 /** The Camera tab's video and canvas. */
 export function attachCamera(v: HTMLVideoElement, c: HTMLCanvasElement): () => void {
@@ -53,29 +50,29 @@ async function listCameras(): Promise<void> {
   const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
   devices.value = cams.map((d, i) => ({ id: d.deviceId, label: d.label || 'Camera ' + (i + 1) }));
   if (!picked.value && cams.length === 1) picked.value = cams[0].deviceId;
-  listed = true;
+  camerasListed = true;
 }
 
 // The Camera tab runs the camera only while it shows.
-let wanted = false;
+let isShown = false;
 let starting = false;
 
 /** The Camera tab is showing: start the camera chosen before, if it is plugged in. */
 export async function showCamera(): Promise<void> {
-  wanted = true;
-  if (!listed) await listCameras();
+  isShown = true;
+  if (!camerasListed) await listCameras();
   const id = camera.device.value;
-  if (!wanted || starting || camera.active.value || id === null) return;
+  if (!isShown || starting || camera.active.value || id === null) return;
   if (id && !devices.value.some(d => d.id === id)) return;
   picked.value = id;
   starting = true;
   try { await startCamera(); } finally { starting = false; }
-  if (!wanted) stopCamera();
+  if (!isShown) stopCamera();
 }
 
 /** The Camera tab is hidden: stop the camera. */
 export function hideCamera(): void {
-  wanted = false;
+  isShown = false;
   if (camera.active.value) stopCamera();
 }
 
@@ -91,7 +88,7 @@ export async function startCamera(): Promise<void> {
     camera.active.value = true;
     camera.device.value = id;
     resizeCanvas();
-    requestAnimationFrame(loop);
+    requestAnimationFrame(drawLoop);
   } catch (e: any) {
     log('err', 'Camera error: ' + e.message);
   }
@@ -109,10 +106,10 @@ function resizeCanvas(): void {
   canvas.height = video.offsetHeight;
 }
 
-function loop(): void {
+function drawLoop(): void {
   if (!camera.active.value) return;
   drawOverlay();
-  requestAnimationFrame(loop);
+  requestAnimationFrame(drawLoop);
 }
 
 /** The zoomed picture around the crosshair, and the crosshair. */
@@ -159,7 +156,7 @@ export function setCross(x: number, y: number): void {
   cross.value = { x: Math.max(0.05, Math.min(0.95, x)), y: Math.max(0.05, Math.min(0.95, y)) };
 }
 
-// ── The offset, and moves by it ───────────────────────────────────────────────
+// The offset, and moves by it
 
 /** First press: the spindle's position, over a mark. Second press, with the crosshair jogged over the same
  *  mark: the offset is how far the machine moved. */

@@ -8,7 +8,7 @@ import { initViewport } from './viewport';
 import { loadFile } from './gcode';
 import { publishRunState } from './streaming';
 import { initKeyboardJog } from './jog';
-import { optLoadColors, optApplyJogSteps } from './options';
+import { applySavedColors, applyJogSteps } from './options';
 import { initZones } from './exclusion-zones';
 import { initFlightRecorder } from './flight-recorder';
 import { App } from './app/App';
@@ -37,8 +37,8 @@ publishRunState();
 
 window.addEventListener('load', () => {
   // The kept theme, jog steps and zone drawing (Settings, Options).
-  optLoadColors();
-  optApplyJogSteps();
+  applySavedColors();
+  applyJogSteps();
   initZones();
   initFlightRecorder();
 });

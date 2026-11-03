@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Program limits and framing — the program's extents per work offset, and a rapid round them
-// ═══════════════════════════════════════════════
+// The program's extents per work offset, and FRAME: a rapid round them at safe Z.
 
 import { signal, computed, effect } from '@preact/signals';
 import { lsGet, lsSet } from './ui';
@@ -43,11 +41,10 @@ export const selected = computed<LimitsTab | null>(() => {
   return list.find(t => t.id === picked.value) ?? list.find(t => t.id === machine.wcs.value) ?? list[0];
 });
 
-// Hard limit: no absolute machine coordinate may exceed -1.
-// Returns list of violating axis names, or empty if all clear.
-function checkAbsoluteBounds(coords: { axis: string; absVal: number }[]): string[] {
-  const BAD_LIMIT = -1;
-  return coords.filter(c => c.absVal > BAD_LIMIT).map(c => `${c.axis} (${c.absVal.toFixed(3)})`);
+/** The axes whose machine coordinate would be above -1, with the value. */
+function aboveMachineLimit(coords: { axis: string; absVal: number }[]): string[] {
+  const LIMIT = -1;
+  return coords.filter(c => c.absVal > LIMIT).map(c => `${c.axis} (${c.absVal.toFixed(3)})`);
 }
 
 /** Why FRAME does nothing now, in a few words, or null. Its moves would go between a job's or the
@@ -64,8 +61,8 @@ export function whyNot(): string | null {
 
 /** Lifts to safe Z, then rapids round the selected work offset's X and Y extents. */
 export function frame(): void {
-  const sel = selected.value;
-  if (!connection.connected.value || !sel || !sel.frameable) return;
+  const tab = selected.value;
+  if (!connection.connected.value || !tab || !tab.frameable) return;
   const why = whyNot();
   if (why) { refusal.value = 'Not framed: ' + why + '.'; return; }
   const z = safeZ.value;
@@ -73,33 +70,32 @@ export function frame(): void {
 
   const ref = safeRef.value;
   const offsets = machine.offsets.value;
-  const off = offsets[sel.id] ?? { x: 0, y: 0, z: 0 };
-  const refOff = offsets[ref] ?? { x: 0, y: 0, z: 0 };
-  const { xMin, xMax, yMin, yMax } = sel.stats;
+  const wcsOffset = offsets[tab.id] ?? { x: 0, y: 0, z: 0 };
+  const refOffset = offsets[ref] ?? { x: 0, y: 0, z: 0 };
+  const { xMin, xMax, yMin, yMax } = tab.stats;
 
-  // Check every coordinate that will be commanded against the -1 limit
-  const violations = checkAbsoluteBounds([
-    { axis: 'X', absVal: xMax + off.x },
-    { axis: 'Y', absVal: yMax + off.y },
-    { axis: 'Z', absVal: ref === 'absolute' ? z : z + refOff.z },
+  const violations = aboveMachineLimit([
+    { axis: 'X', absVal: xMax + wcsOffset.x },
+    { axis: 'Y', absVal: yMax + wcsOffset.y },
+    { axis: 'Z', absVal: ref === 'absolute' ? z : z + refOffset.z },
   ]);
   if (violations.length) {
     refusal.value = `Not framed: it would go above −1 in machine coordinates on ${violations.join(', ')}. Check the work offset or the program.`;
-    log('err', `Frame BLOCKED — would exceed -1 in absolute machine space: ${violations.join(', ')}. Adjust WCS or program.`);
+    log('err', `Frame BLOCKED: would exceed -1 in absolute machine space: ${violations.join(', ')}. Adjust WCS or program.`);
     return;
   }
   refusal.value = null;
 
   // G21 G90 first: the frame is absolute mm, whatever a probe or a job left.
-  const zCmd = ref === 'absolute'
+  const liftLine = ref === 'absolute'
     ? `G21 G90 G53 G0 Z${z.toFixed(4)}`
-    : `G21 G90 G0 Z${(z + refOff.z - off.z).toFixed(4)}`;
-  const f = (v: number) => v.toFixed(4);
-  log('info', `Framing ${sel.id} — X[${xMin.toFixed(3)} → ${xMax.toFixed(3)}] Y[${yMin.toFixed(3)} → ${yMax.toFixed(3)}] SafeZ:${z} (${ref})`);
-  sendCmd(zCmd);
-  sendCmd(`G0 X${f(xMin)} Y${f(yMin)}`);
-  sendCmd(`G0 X${f(xMax)} Y${f(yMin)}`);
-  sendCmd(`G0 X${f(xMax)} Y${f(yMax)}`);
-  sendCmd(`G0 X${f(xMin)} Y${f(yMax)}`);
-  sendCmd(`G0 X${f(xMin)} Y${f(yMin)}`);
+    : `G21 G90 G0 Z${(z + refOffset.z - wcsOffset.z).toFixed(4)}`;
+  const fixed4 = (v: number) => v.toFixed(4);
+  log('info', `Framing ${tab.id}: X[${xMin.toFixed(3)} → ${xMax.toFixed(3)}] Y[${yMin.toFixed(3)} → ${yMax.toFixed(3)}] SafeZ:${z} (${ref})`);
+  sendCmd(liftLine);
+  sendCmd(`G0 X${fixed4(xMin)} Y${fixed4(yMin)}`);
+  sendCmd(`G0 X${fixed4(xMax)} Y${fixed4(yMin)}`);
+  sendCmd(`G0 X${fixed4(xMax)} Y${fixed4(yMax)}`);
+  sendCmd(`G0 X${fixed4(xMin)} Y${fixed4(yMax)}`);
+  sendCmd(`G0 X${fixed4(xMin)} Y${fixed4(yMin)}`);
 }
