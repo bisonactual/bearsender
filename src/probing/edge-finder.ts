@@ -47,11 +47,12 @@ async function probeSingleEdge(cfg: any, sp: { x: number; y: number; z: number }
   const axis = isX ? 'X' : 'Y';
   const dir = (edge === 'AD' || edge === 'AB') ? (cfg.mode === 'external' ? 1 : -1) : (cfg.mode === 'external' ? -1 : 1);
   log('info', `Edge finder: probing ${edge} (${axis} ${dir > 0 ? '+' : '-'})…`);
+  // It starts over the side (or near the wall), moves out past it at the start height, then goes down.
   const approachX = isX ? sp.x - dir * clr : null;
   const approachY = !isX ? sp.y - dir * clr : null;
-  await rapidToMPos(null, null, sp.z - cfg.depth);
   if (approachX !== null) await rapidToMPos(approachX, null, null);
   if (approachY !== null) await rapidToMPos(null, approachY, null);
+  await rapidToMPos(null, null, sp.z - cfg.depth);
   const result = await probeAxis(axis, dir, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
   if (!result) {
     await rapidToMPos(null, null, sp.z);
