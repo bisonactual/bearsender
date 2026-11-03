@@ -21,7 +21,10 @@ let warned = false;
 function failed(why: unknown): null {
   if (!warned) {
     warned = true;
-    push('error', `This browser won't keep the queue or the runtimes (${why instanceof Error ? why.message : String(why)}). They work until the page is reloaded.`);
+    // A DOMException from a request (ConstraintError, QuotaExceededError) can come with no message: its name says it.
+    const e = why as { message?: string; name?: string } | null;
+    const text = (typeof e === 'object' && e && (e.message || e.name)) || String(why);
+    push('error', `This browser won't keep the queue or the runtimes (${text}). They work until the page is reloaded.`);
   }
   return null;
 }
@@ -58,21 +61,29 @@ function request<T>(store: Store, mode: IDBTransactionMode, make: (s: IDBObjectS
 export interface Write { store: Store; key: string; value?: unknown; delete?: boolean; }
 
 /** Writes in one transaction: all of them or none. True once the browser has committed them; false if
- *  the transaction failed or was aborted (quota, storage blocked), with the one warning. */
+ *  the transaction was aborted (a request failed, quota, storage blocked), with the one warning. A failed
+ *  request's error event is left alone, so the browser aborts the transaction and undoes the writes
+ *  before it: cancelling it (preventDefault) would let the rest commit. A write that throws as it is
+ *  asked for (a value that can't be stored) aborts the transaction too. */
 export function write(writes: Write[]): Promise<boolean> {
   if (!writes.length) return Promise.resolve(true);
   return open().then(d => new Promise<boolean>(resolve => {
     if (!d) { resolve(false); return; }
+    let tx: IDBTransaction | null = null;
     try {
-      const tx = d.transaction([...new Set(writes.map(w => w.store))], 'readwrite');
-      tx.oncomplete = () => resolve(true);
-      tx.onabort = () => { failed(tx.error ?? 'the write was aborted'); resolve(false); };
-      tx.onerror = e => e.preventDefault();   // the abort that follows reports it
+      tx = d.transaction([...new Set(writes.map(w => w.store))], 'readwrite');
+      const t = tx;
+      t.oncomplete = () => resolve(true);
+      t.onabort = () => { failed(t.error ?? 'the write was aborted'); resolve(false); };
       for (const w of writes) {
-        const s = tx.objectStore(w.store);
+        const s = t.objectStore(w.store);
         if (w.delete) s.delete(w.key); else s.put(w.value, w.key);
       }
-    } catch (e) { failed(e); resolve(false); }
+    } catch (e) {
+      failed(e);
+      try { tx?.abort(); } catch (_) { /* already finished */ }
+      resolve(false);
+    }
   }));
 }
 
