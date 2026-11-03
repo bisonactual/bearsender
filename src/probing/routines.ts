@@ -10,7 +10,8 @@ import { sendCmd } from '../connection';
 import { lastError } from '../console';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
-import { cancelProbing, probingRefusal, getActiveWcs, runProbing, machineIo, machineAt, touchPlate, toolsetter, applyXYResult, applyZResult } from './probe-program';
+import { cancelProbing, probingRefusal, getActiveWcs, runProbing, machineIo, machineAt, touchPlate, toolsetter, writeZero, writeLine } from './probe-program';
+import type { ZeroWrite } from './probe-program';
 import { edge, SIDES } from './edge-finder';
 import type { EdgeCfg } from './edge-finder';
 import { centre } from './center-finder';
@@ -127,6 +128,8 @@ export interface Run {
 export const runs = signal<Partial<Record<Routine, Run>>>({});
 /** The routine running now, if any: one at a time. */
 export const running = signal<Routine | null>(null);
+/** Its moves are done and its result is being written: there is nothing left to cancel. */
+export const finishing = signal(false);
 /** The angle measured last, until it is applied: applying it twice would turn the program twice. */
 export const rotAngle = signal<number | null>(null);
 
@@ -162,14 +165,15 @@ export function readyText(r: Routine): string {
 }
 
 const f3 = (v: number) => (v < 0 ? '−' : '') + Math.abs(v).toFixed(3);
-const axesText = (p: { x?: number; y?: number; z?: number }) =>
-  (['x', 'y', 'z'] as const).filter(a => p[a] !== undefined).map(a => `${a.toUpperCase()} ${f3(p[a]!)}`).join(' ');
+const AXES = ['x', 'y', 'z'] as const;
+const axesText = (p: Partial<Point>) => AXES.filter(a => p[a] !== undefined).map(a => `${a.toUpperCase()} ${f3(p[a]!)}`).join(' ');
 
 let _cancelRequested = false;
 
 /** Runs a routine on the machine from where it is, following its steps; what it found, or null after
- *  saying why not. */
-async function exec<T>(r: Routine, plan: Plan | null, body: (io: Io, sp: Point) => Promise<T>): Promise<T | null> {
+ *  saying why not. `finish` writes the result while the routine still owns the machine, before its
+ *  modes are put back; a Cancel taken before then means it isn't run. */
+async function exec<T>(r: Routine, plan: Plan | null, body: (io: Io, sp: Point) => Promise<T>, finish?: (found: T) => Promise<void>): Promise<T | null> {
   const why = probingRefusal();
   if (why) { setRun(r, { phase: 'fail', plan: null, step: 0, label: '', start: null, text: why, lines: [] }); return null; }
   // Settings that can't be used are never sent: a negative back-off would rapid into the wall.
@@ -189,7 +193,11 @@ async function exec<T>(r: Routine, plan: Plan | null, body: (io: Io, sp: Point) 
     if (cur) setRun(r, { step: cur.step + 1, label });
   });
   try {
-    const v = await runProbing(() => body(io, sp));
+    const v = await runProbing(() => body(io, sp), finish && (async found => {
+      finishing.value = true;
+      setRun(r, { text: 'Writing the result…' });
+      await finish(found);
+    }));
     if (v === null) {
       const e = lastError.value;
       setRun(r, _cancelRequested ? { phase: 'cancelled', text: 'Cancelled before anything moved.' }
@@ -203,6 +211,7 @@ async function exec<T>(r: Routine, plan: Plan | null, body: (io: Io, sp: Point) 
     else { setRun(r, { phase: 'fail', text: String(e) }); throw e; }
     return null;
   } finally {
+    finishing.value = false;
     running.value = null;
   }
 }
@@ -216,23 +225,29 @@ function missText(r: Routine, e: Miss): string {
 
 function cancelText(sp: Point): string {
   const down = sp.z - machineAt().z;
-  return down > 0.05 ? `Cancelled. The probe stopped ${down.toFixed(1)} mm below where it started: raise Z before jogging sideways.`
-    : 'Cancelled. The probe stopped where it was.';
+  return `Cancelled: nothing was written. ${down > 0.05 ? `The probe stopped ${down.toFixed(1)} mm below where it started: raise Z before jogging sideways.` : 'The probe stopped where it was.'}`;
 }
 
+/** Cancel, while a routine still has moves to stop. Once its result is being written it isn't taken. */
 export function cancel(): void {
   const r = running.value;
-  if (!r) return;
+  if (!r || !cancelProbing()) return;
   _cancelRequested = true;
-  cancelProbing();
   setRun(r, { text: 'Cancelling…' });
 }
 
-/** What the old value of a work offset was, for "was". */
-const wasOf = (wcs: string, axes: ('x' | 'y' | 'z')[]) => {
-  const o = machine.offsets.value[wcs];
-  return o ? 'was ' + axes.map(a => `${a.toUpperCase()} ${f3(o[a])}`).join(' ') : undefined;
-};
+/** The result lines for a zero written: the values given G10 L2, the work offset's before, and the
+ *  offsets in force taken off them. */
+function zeroLines(wcs: string, w: ZeroWrite): ResultLine[] {
+  const axes = AXES.filter(a => w.wrote[a] !== undefined);
+  const lines: ResultLine[] = [{ k: wcs, v: axesText(w.wrote), old: w.was ? 'was ' + axesText(Object.fromEntries(axes.map(a => [a, w.was![a]]))) : undefined }];
+  const off = [['G92', w.g92], ['TLO', w.tlo]].flatMap(([name, v]) => {
+    const used = axes.filter(a => Math.abs((v as Point)[a]) > 5e-4);
+    return used.length ? [`${name} ${axesText(Object.fromEntries(used.map(a => [a, (v as Point)[a]])))}`] : [];
+  });
+  if (off.length) lines.push({ k: 'LESS', v: '', old: `${off.join(' and ')} in force, so the zero lands on what was found` });
+  return lines;
+}
 
 // ── Edge finder, centre finder, rotation ──────────────────────────────────────
 
@@ -241,37 +256,35 @@ export async function findEdge(plan: Plan | null): Promise<void> {
   if (!pick) { setRun('ef', { phase: 'fail', plan: null, start: null, lines: [], text: 'Pick a corner, a side or the top on the picture first.' }); return; }
   const c: EdgeCfg = { ...ef.value, edge: pick };
   const t = efTarget.value, wcs = t.wcs || getActiveWcs();
-  const f = await exec('ef', plan, (io, sp) => edge(io, sp, c, probe.value));
+  let wrote: ZeroWrite | null = null;
+  // The zero asked for, in machine coordinates: the sides found, and Z below the top by the plate and Z0's depth.
+  const zeroOf = (f: { x?: number; y?: number; z?: number }): Partial<Point> =>
+    ({ x: f.x, y: f.y, z: f.z !== undefined ? f.z - c.touchPlateHeight - c.workpieceHeight : undefined });
+  const f = await exec('ef', plan, (io, sp) => edge(io, sp, c, probe.value),
+    t.mode === 'G10' ? async found => { wrote = await writeZero(wcs, zeroOf(found)); } : undefined);
   if (!f) return;
-  const set = { x: f.x, y: f.y, z: f.z !== undefined ? f.z - c.touchPlateHeight - c.workpieceHeight : undefined };
-  const axes = (['x', 'y', 'z'] as const).filter(a => set[a] !== undefined);
   const lines: ResultLine[] = [{ k: 'FOUND', v: axesText({ x: f.x, y: f.y, z: f.z }), old: 'machine' }];
-  if (t.mode === 'G10') {
-    lines.push({ k: wcs, v: axesText(set), old: wasOf(wcs, axes) });
-    const opts = { mode: 'G10', wcs };
-    if (f.x !== undefined || f.y !== undefined) applyXYResult(f.x ?? 0, f.y ?? 0, f.x !== undefined && f.y !== undefined ? 'XY' : f.x !== undefined ? 'X' : 'Y', opts);
-    if (f.z !== undefined) applyZResult(f.z, c.touchPlateHeight, c.workpieceHeight, opts);
-  } else lines.push({ k: 'NOT SET', v: '', old: 'measure only' });
+  if (wrote) lines.push(...zeroLines(wcs, wrote));
+  else lines.push({ k: 'NOT SET', v: '', old: 'measure only' });
   if (f.zMissed) lines.push({ k: 'Z', v: '', old: `${f.zMissed.message}: X and Y ${t.mode === 'G10' ? 'written' : 'measured'} only` });
-  setRun('ef', { phase: 'ok', text: t.mode === 'G10' ? `Done. Written to ${wcs}.` : 'Measured. Nothing was written.', lines });
+  setRun('ef', { phase: 'ok', text: wrote ? `Done. Written to ${wcs}.` : 'Measured. Nothing was written.', lines });
 }
 
 export async function findCentre(plan: Plan | null): Promise<void> {
   const c = cf.value, t = cfTarget.value, wcs = t.wcs || getActiveWcs();
-  const f = await exec('cf', plan, (io, sp) => centre(io, sp, c, probe.value));
+  let wrote: ZeroWrite | null = null;
+  const zeroOf = (f: { x: number; y: number }): Partial<Point> => ({ x: c.axes !== 'Y' ? f.x : undefined, y: c.axes !== 'X' ? f.y : undefined });
+  const f = await exec('cf', plan, (io, sp) => centre(io, sp, c, probe.value),
+    t.mode === 'G10' ? async found => { wrote = await writeZero(wcs, zeroOf(found)); } : undefined);
   if (!f) return;
-  const set = { x: c.axes !== 'Y' ? f.x : undefined, y: c.axes !== 'X' ? f.y : undefined };
-  const axes = (['x', 'y'] as const).filter(a => set[a] !== undefined);
   const size = [f.sizeX, f.sizeY].filter((v): v is number => v !== null).map(v => v.toFixed(3)).join(' × ');
   const lines: ResultLine[] = [
-    { k: 'CENTRE', v: axesText(set), old: 'machine' },
+    { k: 'CENTRE', v: axesText(zeroOf(f)), old: 'machine' },
     { k: 'SIZE', v: `${c.centerMode === 'inside' ? 'bore' : 'boss'} ${size} mm${c.axes === 'XY' ? '' : ' in ' + c.axes}` },
   ];
-  if (t.mode === 'G10') {
-    lines.push({ k: wcs, v: axesText(set), old: wasOf(wcs, axes) });
-    applyXYResult(f.x, f.y, c.axes, { mode: 'G10', wcs });
-  } else lines.push({ k: 'NOT SET', v: '', old: 'measure only' });
-  setRun('cf', { phase: 'ok', text: t.mode === 'G10' ? `Done. Written to ${wcs}.` : 'Measured. Nothing was written.', lines });
+  if (wrote) lines.push(...zeroLines(wcs, wrote));
+  else lines.push({ k: 'NOT SET', v: '', old: 'measure only' });
+  setRun('cf', { phase: 'ok', text: wrote ? `Done. Written to ${wcs}.` : 'Measured. Nothing was written.', lines });
 }
 
 export async function measureRotation(plan: Plan | null): Promise<void> {

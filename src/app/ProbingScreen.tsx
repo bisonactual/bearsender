@@ -422,7 +422,8 @@ function RunFoot({ tab }: { tab: Routine }) {
       <button type="button" class="fs-pgo" disabled={!linked || !!busy} onClick={() => probeNow(tab)}>PROBE</button>
       {tab === 'rot' && <button type="button" class="fs-pap" disabled={!canApply}
         title={pr.rotAngle.value === null ? 'Measure first' : `Turn the program by ${pr.rotAngle.value.toFixed(3)}°`} onClick={() => pr.applyRotation()}>APPLY ROTATION</button>}
-      <button type="button" class={'fs-pcx' + (busy ? ' is-live' : '')} disabled={!busy} title="Stop the routine and the move in progress" onClick={() => pr.cancel()}>CANCEL</button>
+      <button type="button" class={'fs-pcx' + (busy && !pr.finishing.value ? ' is-live' : '')} disabled={!busy || pr.finishing.value}
+        title={pr.finishing.value ? 'The moves are done and the result is being written: nothing is left to cancel' : 'Stop the routine and the move in progress'} onClick={() => pr.cancel()}>CANCEL</button>
     </div>
   </>;
 }

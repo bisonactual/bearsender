@@ -3,8 +3,7 @@
 // ═══════════════════════════════════════════════
 
 import { log } from '../console';
-import { applyXYResult, isProbingRunning, runProbing, machineIo, machineAt, settingsOf } from './probe-program';
-import { Miss, Stop, afterMiss } from './io';
+import { afterMiss } from './io';
 import type { Io, Point } from './io';
 import type { ProbeSettings } from './settings';
 
@@ -75,21 +74,4 @@ async function once(io: Io, sp: Point, c: CentreCfg, P: ProbeSettings): Promise<
   }
   if (bore) await io.move(null, null, sp.z, 'Up out of the bore');
   return { x: at.x, y: at.y, sizeX: size.X, sizeY: size.Y };
-}
-
-/** The old entry (the dead modules): runs it and writes the centre, as before. */
-export async function runCenterFinder(cfg: any): Promise<boolean> {
-  if (isProbingRunning()) { log('err', 'Probe already running'); return false; }
-  return (await runProbing(async () => {
-    try {
-      const f = await centre(machineIo(settingsOf(cfg)), machineAt(), cfg, settingsOf(cfg));
-      applyXYResult(f.x, f.y, cfg.axes === 'X' ? 'X' : cfg.axes === 'Y' ? 'Y' : 'XY', { mode: cfg.coordMode, wcs: cfg.wcs });
-      log('info', `✓ Center found: X=${f.x.toFixed(4)} Y=${f.y.toFixed(4)}`);
-      return true;
-    } catch (e) {
-      if (e instanceof Miss) { log('err', `✗ Center: ${e.message}`); return false; }
-      if (e instanceof Stop) return false;
-      throw e;
-    }
-  })) ?? false;
 }

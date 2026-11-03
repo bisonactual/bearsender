@@ -7,8 +7,7 @@ import { log } from '../console';
 import { processGcode } from '../gcode';
 import { lexLine } from '../gcode/lexer';
 import * as job from '../stores/job';
-import { isProbingRunning, runProbing, machineIo, machineAt, settingsOf } from './probe-program';
-import { Miss, Stop, afterMiss } from './io';
+import { afterMiss } from './io';
 import type { Io, Point } from './io';
 import type { ProbeSettings } from './settings';
 
@@ -58,27 +57,6 @@ export async function rotation(io: Io, sp: Point, c: RotCfg, P: ProbeSettings): 
   const angleRad = side.along === 'X' ? Math.atan2(dy, dx) : Math.atan2(-dx, dy);
   return { angleDeg: angleRad * 180 / Math.PI, p1, p2 };
 }
-
-/** The old entry (the dead modules). */
-export async function runRotation(cfg: any): Promise<Rotation | null> {
-  if (isProbingRunning()) { log('err', 'Probe already running'); return null; }
-  return runProbing(async () => {
-    try {
-      log('info', `Rotation: probing two points on the ${ROT_SIDES[cfg.edge].name} side (${cfg.edge})…`);
-      const r = await rotation(machineIo(settingsOf(cfg)), machineAt(), cfg, settingsOf(cfg));
-      log('info', `✓ Rotation measured: ${r.angleDeg.toFixed(3)}°`);
-      return r;
-    } catch (e) {
-      if (e instanceof Miss) { log('err', `✗ Rotation: ${e.message}`); return null; }
-      if (e instanceof Stop) return null;
-      throw e;
-    }
-  });
-}
-
-// G-words after which a line's X and Y aren't a point of the program in its work coordinates: machine
-// coordinates (G53), offset settings (G10, G92), and the stored positions (G28, G30 and their sets).
-const LEAVE = [53, 10, 92, 92.1, 28, 28.1, 30, 30.1];
 
 /** The line with its X and Y words (or I and J) replaced by `put.XY` (or `put.IJ`), at the first of
  *  them; comments and everything else as they were. */
