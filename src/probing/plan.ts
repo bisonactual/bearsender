@@ -227,7 +227,7 @@ export async function makePlan(r: Routine, inp: PlanInputs): Promise<Plan> {
       origin = ts;
       part = union(box(-8, 8, -8, 8, -60, 0), box(sp.x - ts.x - 40, sp.x - ts.x + 40, -40, 40, -BIG, -60));
       plan.stock = { k: 'setter', z0: -ts.z, known: !!inp.ts };
-      plan.where = `Start anywhere: the tool goes up to machine Z0, over to the toolsetter, down to ${c.toolsetterDepth} mm above it, then probes.`;
+      plan.where = `Start anywhere: the tool goes up to the top of its Z travel, over to the toolsetter, down to ${c.toolsetterDepth} mm above it, then probes.`;
       plan.sub = inp.ts ? `Toolsetter (G59.3): X ${f3(inp.ts.x)} Y ${f3(inp.ts.y)} Z ${f3(inp.ts.z)}, machine. Set it in Setup, Offsets.`
         : 'G59.3 is not read yet, so the toolsetter is drawn at an example place. Set it in Setup, Offsets.';
       run = io => toolsetter(io, sp, ts, c);

@@ -312,18 +312,18 @@ export async function touchPlate(io: Io, sp: Point, c: { probeDistance: number }
   return r;
 }
 
-/** On the toolsetter at G59.3: up to machine Z0, over it, down to the approach height, probe, and back
- *  the same way to the start. The Z touched. */
+/** On the toolsetter at G59.3: up to the top of the homed Z travel, over it, down to the approach height,
+ *  probe, and back the same way to the start. The Z touched. */
 export async function toolsetter(io: Io, sp: Point, ts: Point, c: { toolsetterDepth: number }): Promise<Point> {
   const depth = c.toolsetterDepth;
   const top = machine.zTravel.peek()?.max ?? 0; await io.move(null, null, top, `Up to the top of Z travel, machine Z ${top}`);   // F5: the homed travel's top (stores/machine.ts zTravel), not machine Z0
   await io.move(ts.x, ts.y, null, 'Over the toolsetter (G59.3)');
   await io.move(null, null, ts.z + depth, `Down to ${depth} mm above it`);
   const r = await afterMiss(() => io.touch('Z', -1, depth + 5, 'toolsetter'), async () => {
-    await io.move(null, null, 0, 'Up to machine Z0');
+    await io.move(null, null, top, `Up to the top of Z travel, machine Z ${top}`);
     await io.move(sp.x, sp.y, null, 'Back over the start');
   });
-  await io.move(null, null, 0, 'Up to machine Z0');
+  await io.move(null, null, top, `Up to the top of Z travel, machine Z ${top}`);
   await io.move(sp.x, sp.y, null, 'Back over the start');
   await io.move(null, null, sp.z, 'Down to the start height', 'result');
   return r;
