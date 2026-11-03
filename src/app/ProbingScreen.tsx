@@ -268,7 +268,12 @@ function ToolWhat() {
   const set = (p: Partial<pr.TlCfg>) => pr.update('tl', pr.tl, p);
   const tlo = machine.tlo.value, tool = machine.tool.value;
   const linked = connection.connected.value, busy = !!pr.running.value;
-  const when = c.refAt ? new Date(c.refAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const when = (at: number) => new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const T = (n: number | null | undefined) => n !== null && n !== undefined ? 'T' + n : 'the reference tool';
+  // A reference belongs to the surface it was measured on; the other surface's, or one from before
+  // references were kept per surface, doesn't apply here and is said so.
+  const here = pr.SURFACE_NAME[c.mode], otherMode = c.mode === 'touchplate' ? 'toolsetter' : 'touchplate';
+  const ref = pr.referenceFor(c), other = c.refs?.[otherMode] ?? null;
   return <>
     <Tiles label="Measure on" value={c.mode} set={v => set({ mode: v })} opts={[['touchplate', 'plate', 'ON A TOUCH PLATE'], ['toolsetter', 'setter', 'ON THE TOOLSETTER']]} />
     <div class="fs-prow">
@@ -278,12 +283,14 @@ function ToolWhat() {
       </> : <UnitField label="Stop this far above the toolsetter" value={c.toolsetterDepth} unit="mm" step={1} min={1} set={v => set({ toolsetterDepth: v })} />}
     </div>
     <div class="fs-psect"><div class="fs-cap">REFERENCE TOOL</div>
-      <div class="fs-note">{c.tloReference === null
-        ? <><b>Not set.</b> Measure the reference tool first. Every later tool is measured against it, and the difference becomes its tool length offset.</>
-        : <><b>{c.refTool !== null && c.refTool !== undefined ? 'T' + c.refTool : 'The reference tool'}, touched at machine Z <span class="fs-mono">{f3(c.tloReference)}</span></b>{when ? ', ' + when : ''}. Later tools are measured against it.</>}</div>
+      <div class="fs-note">{ref
+        ? <><b>{T(ref.tool)}, touched at machine Z <span class="fs-mono">{f3(ref.z)}</span> on the {here}</b>, {when(ref.at)}. Later tools measured on the {here} are measured against it.</>
+        : <><b>Not set on the {here}.</b> Measure the reference tool on the {here} first. Every later tool is measured against it, and the difference becomes its tool length offset.</>}</div>
+      {!ref && other && <div class="fs-note is-warn">The {pr.SURFACE_NAME[otherMode]}'s reference ({T(other.tool)}, Z {f3(other.z)}) doesn't apply on the {here}: a touch on one isn't comparable with a touch on the other.</div>}
+      {!ref && c.tloReference !== null && <div class="fs-note is-warn">A reference kept from before ({T(c.refTool)}, Z {f3(c.tloReference)}) doesn't say whether it was on the plate or the toolsetter, so it isn't used. Measure it again.</div>}
       <div class="fs-row-gap">
-        <button type="button" class="fs-btn" disabled={!linked || busy} title="Probe this tool as the reference the others are measured from" onClick={() => probeNow('tl', true)}>MEASURE AS REFERENCE</button>
-        {c.tloReference !== null && <button type="button" class="fs-btn" title="Forget the reference and cancel the tool length offset (G49)" onClick={() => pr.clearReference()}>CLEAR</button>}
+        <button type="button" class="fs-btn" disabled={!linked || busy} title={`Probe this tool on the ${here} as the reference the others are measured from`} onClick={() => probeNow('tl', true)}>MEASURE AS REFERENCE</button>
+        {(ref || c.tloReference !== null) && <button type="button" class="fs-btn" title={`Forget the ${here}'s reference and cancel the tool length offset (G49)`} onClick={() => pr.clearReference()}>CLEAR</button>}
       </div>
     </div>
     <div class="fs-psect"><div class="fs-cap">TOOL LENGTH OFFSET NOW</div>

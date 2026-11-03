@@ -41,20 +41,34 @@ export function update<T extends object>(sub: Routine, sig: Signal<T>, patch: Pa
   settled(sub);
 }
 
+export type Surface = 'touchplate' | 'toolsetter';
+/** A reference tool: the machine Z it touched at, its number and when. It is kept with the surface it
+ *  was measured on: a touch on the plate and one on the toolsetter aren't comparable. */
+export interface ToolRef { z: number; tool: number | null; at: number; }
+
 export interface TlCfg {
-  mode: 'touchplate' | 'toolsetter';
+  mode: Surface;
   /** How far down it searches for the plate, mm (tool length's own). */
   probeDistance: number;
   /** The touch plate's thickness, mm. */
   touchPlateHeight: number;
   /** How far above the toolsetter it stops before probing, mm. */
   toolsetterDepth: number;
-  /** The reference tool: the machine Z it touched at, its number and when. */
+  /** The reference tool on each surface. */
+  refs?: Partial<Record<Surface, ToolRef | null>>;
+  /** A reference kept before they were kept per surface: what it was measured on isn't known, so it isn't used. */
   tloReference: number | null;
   refTool?: number | null;
   refAt?: number | null;
 }
-export const tl = saved<TlCfg>('tl', { mode: 'touchplate', probeDistance: 50, touchPlateHeight: 0, toolsetterDepth: 10, tloReference: null, refTool: null, refAt: null });
+export const tl = saved<TlCfg>('tl', { mode: 'touchplate', probeDistance: 50, touchPlateHeight: 0, toolsetterDepth: 10, refs: {}, tloReference: null, refTool: null, refAt: null });
+
+export const SURFACE_NAME: Record<Surface, string> = { touchplate: 'touch plate', toolsetter: 'toolsetter' };
+
+/** The reference tool on the surface picked, if one was measured there. */
+export function referenceFor(c: TlCfg = tl.value): ToolRef | null {
+  return c.refs?.[c.mode] ?? null;
+}
 
 export type EfCfg = Omit<EdgeCfg, 'edge'>;
 export const ef = saved<EfCfg>('ef', { mode: 'external', depth: 3, offset: 5, probeZ: false, touchPlateHeight: 0, workpieceHeight: 0 });
@@ -160,7 +174,7 @@ export function measuring(r: Routine): string {
 /** The status line with no run on show. */
 export function readyText(r: Routine): string {
   if (r === 'ef' && !efEdge.value) return 'Pick a corner, a side or the top on the picture, then PROBE.';
-  if (r === 'tl' && tl.value.tloReference === null) return 'Ready. No reference tool yet: this tool will be measured on its own.';
+  if (r === 'tl' && !referenceFor()) return `Ready. No reference tool on the ${SURFACE_NAME[tl.value.mode]} yet: this tool will be measured on its own.`;
   return `Ready: ${measuring(r)}.`;
 }
 
@@ -323,37 +337,40 @@ export async function measureTool(asReference: boolean, plan: Plan | null = null
     setRun('tl', { phase: 'fail', plan: null, start: null, lines: [], text: 'G59.3 isn\'t read yet: read the offsets, or set the toolsetter there (Setup, Offsets).' });
     return;
   }
-  const f = await exec('tl', plan, (io, sp) => c.mode === 'toolsetter' ? toolsetter(io, sp, ts!, c) : touchPlate(io, sp, c));
-  if (!f) return;
   const tool = machine.tool.value;
-  const T = (n: number | null | undefined) => n === null || n === undefined ? 'this tool' : 'T' + n;
+  const ref = referenceFor(c), surface = SURFACE_NAME[c.mode];
+  const known = (n: number | null | undefined) => n !== null && n !== undefined;
+  const T = (n: number | null | undefined) => known(n) ? 'T' + n : 'this tool';
+  // Against a reference on the same surface, the surface is under both tools, so it drops out. Without
+  // one, the touch plate's thickness comes off once; a toolsetter has none.
+  const tloOf = (z: number) => ref ? z - ref.z : c.mode === 'touchplate' ? z - c.touchPlateHeight : z;
+  const f = await exec('tl', plan, (io, sp) => c.mode === 'toolsetter' ? toolsetter(io, sp, ts!, c) : touchPlate(io, sp, c),
+    found => writeLine(asReference ? 'G49' : `G21G43.1Z${tloOf(found.z).toFixed(4)}`));
+  if (!f) return;
   if (asReference) {
-    update('tl', tl, { tloReference: f.z, refTool: tool, refAt: Date.now() });
-    sendCmd('G49');
+    // A new reference on this surface; the one from before references were kept per surface goes with it.
+    update('tl', tl, { refs: { ...c.refs, [c.mode]: { z: f.z, tool, at: Date.now() } }, tloReference: null, refTool: null, refAt: null });
     setRun('tl', {
-      phase: 'ok', text: `Reference set: ${T(tool)} touched at machine Z ${f3(f.z)}. Measure each later tool with PROBE.`,
+      phase: 'ok', text: `Reference set on the ${surface}: ${T(tool)} touched at machine Z ${f3(f.z)}. Measure each later tool on the ${surface} with PROBE.`,
       lines: [{ k: 'TOUCHED', v: `Z ${f3(f.z)}`, old: 'machine' }, { k: 'TLO', v: '', old: 'cancelled (G49): the reference has none' }],
     });
     return;
   }
-  // Against a reference, the plate (or the toolsetter) is under both tools, so it drops out. Without one,
-  // the touch plate's thickness comes off once; a toolsetter has none.
-  const tlo = c.tloReference !== null ? f.z - c.tloReference
-    : c.mode === 'touchplate' ? f.z - c.touchPlateHeight : f.z;
-  sendCmd(`G21G43.1Z${tlo.toFixed(4)}`);
-  const known = (n: number | null | undefined) => n !== null && n !== undefined;
-  const against = c.tloReference !== null ? `· ${known(tool) ? T(tool) + ' ' : ''}against ${known(c.refTool) ? T(c.refTool) : 'the reference'} (Z ${f3(c.tloReference)})`
-    : c.mode === 'touchplate' ? `· no reference: the touch less the ${c.touchPlateHeight.toFixed(3)} mm plate` : '· no reference: the touch itself';
+  const tlo = tloOf(f.z);
+  const against = ref ? `· ${known(tool) ? T(tool) + ' ' : ''}against ${known(ref.tool) ? T(ref.tool) : 'the reference'} on the ${surface} (Z ${f3(ref.z)})`
+    : c.mode === 'touchplate' ? `· no reference on the ${surface}: the touch less the ${c.touchPlateHeight.toFixed(3)} mm plate` : `· no reference on the ${surface}: the touch itself`;
   setRun('tl', {
     phase: 'ok', text: 'Done. Tool length offset set (G43.1).',
     lines: [{ k: 'TOUCHED', v: `Z ${f3(f.z)}`, old: 'machine' }, { k: 'TLO', v: `${f3(tlo)} mm`, old: against }],
   });
 }
 
+/** Forgets the reference on the surface picked (and one kept from before references were per surface). */
 export function clearReference(): void {
-  update('tl', tl, { tloReference: null, refTool: null, refAt: null });
+  const c = tl.value;
+  update('tl', tl, { refs: { ...c.refs, [c.mode]: null }, tloReference: null, refTool: null, refAt: null });
   sendCmd('G49');
-  setRun('tl', { phase: 'ok', plan: null, start: null, lines: [], text: 'Reference cleared; G49 sent.' });
+  setRun('tl', { phase: 'ok', plan: null, start: null, lines: [], text: `Reference on the ${SURFACE_NAME[c.mode]} cleared; G49 sent.` });
 }
 
 // ── The job screen's 3D view ──────────────────────────────────────────────────
