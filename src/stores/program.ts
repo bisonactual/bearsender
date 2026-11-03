@@ -221,13 +221,20 @@ function toolRows(p: Program, cum: Float64Array): ToolRow[] {
 /** The program's own motion: the end of every move and the extremes of every arc, in machine
  *  coordinates and per work offset in that offset's coordinates. Unlike the interpreter's bounds it
  *  leaves out where the machine starts from, G53 moves and G28/G30, so Frame traces the work, not
- *  the way to it. The travel check uses the interpreter's bounds, which have all of them. */
+ *  the way to it. The travel check uses the interpreter's bounds, which have all of them. An axis
+ *  counts from the first move whose line names it: a first G0 Z5 ends at the start's X and Y. */
 function programExtent(p: Program): ProgramView['extent'] {
   const machine = emptyBounds(), perWorkOffset: ProgramView['extent']['perWorkOffset'] = {};
+  const named = { x: false, y: false, z: false };
   for (const m of p.moves) {
     if (/^(G(53|28|30)\b|\$H)/.test(m.source)) continue;
+    if (!named.x || !named.y || !named.z) {
+      const code = p.lines[m.line - 1]?.code ?? '';
+      for (const [letter] of lexLine(code).words) if (letter === 'X' || letter === 'Y' || letter === 'Z') named[letter === 'X' ? 'x' : letter === 'Y' ? 'y' : 'z'] = true;
+    }
     const wb = perWorkOffset[m.workOffset] ??= emptyBounds();
-    for (const pt of m.arc ? moveExtrema(m).slice(1) : [m.end]) {
+    for (const end of m.arc ? moveExtrema(m).slice(1) : [m.end]) {
+      const pt: Position = { x: named.x ? end.x : null, y: named.y ? end.y : null, z: named.z ? end.z : null };
       includePoint(machine, pt);
       includePoint(wb, { x: subtract(pt.x, m.frameOffset.x), y: subtract(pt.y, m.frameOffset.y), z: subtract(pt.z, m.frameOffset.z) } as Position);
     }
