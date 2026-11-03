@@ -9,6 +9,7 @@ import * as connection from '../stores/connection';
 import type { LinkSettings } from '../stores/connection';
 import * as flight from '../stores/flight';
 import * as jobOptions from '../stores/options';
+import * as machine from '../stores/machine';
 import * as opt from '../options';
 import { lsGet, lsSet } from '../ui';
 import { log } from '../console';
@@ -167,6 +168,34 @@ function JogSteps() {
   );
 }
 
+function Park() {
+  const p = jobOptions.parkPoint.value;
+  const travel = machine.zTravel.value;
+  const linked = connection.connected.value;
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  const here = () => { const m = machine.mpos.peek(); jobOptions.setParkPoint({ x: r3(m.x), y: r3(m.y), z: r3(m.z) }); };
+  return (
+    <>
+      <div class="fs-fields fs-fields-2">
+        <Field label="X (machine)"><NumIn label="Park X" value={p.x} step={1} set={v => jobOptions.setParkPoint({ ...p, x: v })} wide /></Field>
+        <Field label="Y (machine)"><NumIn label="Park Y" value={p.y} step={1} set={v => jobOptions.setParkPoint({ ...p, y: v })} wide /></Field>
+      </div>
+      <div class="fs-inline">
+        <span class="fs-cap">Z</span>
+        <Seg2<'top' | 'at'> label="Park Z" value={p.z === null ? 'top' : 'at'} opts={[['top', 'TOP OF TRAVEL'], ['at', 'HEIGHT']]}
+          set={v => jobOptions.setParkPoint({ ...p, z: v === 'top' ? null : (p.z ?? travel?.max ?? -5) })} />
+        {p.z === null
+          ? <span class="fs-dim fs-mono">{travel ? 'machine Z ' + travel.max.toFixed(3) : 'read from the homing settings on connecting'}</span>
+          : <NumIn label="Park Z" value={p.z} step={1} set={v => jobOptions.setParkPoint({ ...p, z: v })} />}
+      </div>
+      <div class="fs-inline">
+        <button type="button" class="fs-btn fs-btn-sm" disabled={!linked} onClick={here}>USE CURRENT POSITION</button>
+        <button type="button" class="fs-btn fs-btn-sm" onClick={() => jobOptions.setParkPoint(jobOptions.PARK_DEFAULT)}>RESET</button>
+      </div>
+    </>
+  );
+}
+
 interface OptCard { title: string; desc: ComponentChildren; text: string; body: () => ComponentChildren; }
 
 const CARDS: OptCard[] = [
@@ -192,6 +221,13 @@ const CARDS: OptCard[] = [
         <Field label="Resume lift (mm below machine zero)"><NumIn label="Resume lift" value={jobOptions.resumeLiftMm.value} min={0} step={1} set={v => jobOptions.setResumeLift(v)} wide /></Field>
       </>
     ) },
+  { title: 'COOLANT', text: 'coolant mist flood m7 m8 run tab',
+    desc: 'What the Run tab\'s COOLANT button switches on and off: mist (M7) or flood (M8). It uses the controller\'s real-time toggle, so it works while a job runs and sends nothing between its lines.',
+    body: () => <Seg2<jobOptions.Coolant> label="Coolant" value={jobOptions.coolant.value} opts={[['mist', 'MIST (M7)'], ['flood', 'FLOOD (M8)']]}
+      set={v => { jobOptions.coolant.value = v; log('info', 'Coolant button: ' + v); }} /> },
+  { title: 'PARK', text: 'park point position bottom bar',
+    desc: 'Where the bottom bar\'s PARK goes, in machine coordinates. Z goes up first, to the park height unless the tool is already higher, and never down while crossing; then over to X and Y; then to the park height. Top of travel is as high as the controller allows Z, from its homing settings.',
+    body: () => <Park /> },
   { title: '3D VIEWPORT EXTENTS', text: '3d viewport extents projection grid',
     desc: 'Machine-coordinate workspace bounds. 0,0 is home (top-right); enter negative values for your working area. Updates the grid and camera position instantly.',
     body: () => <ViewExtents /> },

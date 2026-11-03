@@ -11,6 +11,7 @@ import { JogCard, PositionCard, LimitsCard, OffsetsTable } from './SetupScreen';
 import { ProbingPopupBody } from './ProbingScreen';
 import { ToolTable } from './ToolsScreen';
 import { RecorderTab } from './RecorderTab';
+import { WcsPicker } from './WcsPicker';
 
 /** Lends carried-over panels to a popup, and puts each back where it came from on close. */
 class Borrow extends Component<{ ids: string[]; class?: string }> {
@@ -63,6 +64,7 @@ function MessagesList() {
 const POPUPS: Record<ui.Popup, PopupDef> = {
   jog: { title: 'JOG', body: () => <div class="fs-popup-cards"><JogCard /><PositionCard /></div>, tall: false },
   offsets: { title: 'WORK OFFSETS', body: () => <div class="fs-popup-body"><OffsetsTable /></div>, tall: true },
+  wcs: { title: 'WORK OFFSET IN FORCE', body: () => <WcsPicker />, tall: false },
   probe: { title: 'PROBE', body: () => <ProbingPopupBody />, tall: true, open: () => { ui.probingTab.value = 'ef'; } },
   measure: { title: 'MEASURE THE TOOL', body: () => <ProbingPopupBody />, tall: true, open: () => { ui.probingTab.value = 'tl'; } },
   frame: { title: 'FRAME THE PROGRAM', body: () => <div class="fs-popup-cards"><LimitsCard /></div>, tall: false },

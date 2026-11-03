@@ -12,6 +12,7 @@ import * as flight from '../stores/flight';
 import * as ui from './ui';
 import { mode, moving, nextSection, awaitedSection, toolLabel, toolChangeMode } from './mode';
 import { toggleConnect, rtSend, sendCmd } from '../connection';
+import { log } from '../console';
 import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm, resumeToolChange } from '../streaming';
 import { alarmText } from '../parser';
 import { JobScreen } from './JobScreen';
@@ -21,6 +22,8 @@ import { ToolsScreen } from './ToolsScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { WarmupButton } from './Warmup';
 import * as warmup from '../warmup';
+import * as frame from '../frame';
+import { park, whyNot as parkWhyNot } from '../park';
 import { PopupHost } from './Popup';
 import { startAsks } from './asks';
 import { BEAR_MARK } from './brand';
@@ -177,7 +180,7 @@ function PositionLine() {
         {ui.signalsShown.value && <Signals />}
         <button type="button" class={'fs-btn fs-btn-sm' + (ui.signalsShown.value ? ' is-on' : '')} aria-pressed={ui.signalsShown.value ? 'true' : 'false'}
           onClick={() => { ui.signalsShown.value = !ui.signalsShown.value; }}>SIGNALS</button>
-        <button type="button" class="fs-wcs" title="Work offsets" onClick={() => { ui.popup.value = 'offsets'; }}>{wcs}</button>
+        <button type="button" class="fs-wcs" title="The work offset in force: tap to pick another" onClick={() => { ui.popup.value = 'wcs'; }}>{wcs}</button>
         {/* TO GO needs the end point of the executing line. The old parser can't give it reliably
             (no G91, G20 or G53), so it waits for step 2's interpreter. */}
         <div role="group" aria-label="Position reference" class="fs-seg">
@@ -314,27 +317,30 @@ function MessageLine() {
 
 // ── Bottom bar ────────────────────────────────────────────────────────────────
 
-function Override({ label, value, unit, pct, down, up, name }: { label: string; value: number; unit: string; pct: number; down: string; up: string; name: string }) {
-  const off = !connection.connected.value;
+// The overrides are on the job screen's Run tab (RunPanel.tsx).
+
+/** A bottom bar button that says, under its name, why a tap does nothing now. */
+function BarButton({ label, why, title, onClick }: { label: string; why?: string | null; title: string; onClick: () => void }) {
   return (
-    <div class="fs-ovr">
-      <div class="fs-ovr-read">
-        <div class="fs-cap">{label}</div>
-        <div><span class="fs-ovr-value">{num(value)}</span> <span class="fs-unit">{unit}</span></div>
-      </div>
-      <button type="button" class="fs-step" disabled={off} aria-label={name + ' override down 10%'} onClick={() => rtSend(down)}>−</button>
-      <span class="fs-ovr-pct">{pct}%</span>
-      <button type="button" class="fs-step" disabled={off} aria-label={name + ' override up 10%'} onClick={() => rtSend(up)}>+</button>
-    </div>
+    <button type="button" class={'fs-btn fs-btn-tall fs-bar-btn' + (why ? ' is-off' : '')} aria-disabled={why ? 'true' : undefined}
+      title={why ? label + ': ' + why : title} onClick={onClick}>
+      {label}{why && <span class="fs-bar-why">{why}</span>}
+    </button>
   );
 }
 
-// Real-time override bytes: feed ±10% 0x91/0x92, spindle ±10% 0x9A/0x9B, rapid 100/50/25% 0x95/0x96/0x97.
-const NEXT_RAPID: Record<number, string> = { 100: '\x96', 50: '\x97', 25: '\x95' };
+/** FRAME: round the program's outline at safe Z, as the Setup list's FRAME popup does (frame.ts). It opens
+ *  that popup when it needs a work offset picked, or when the frame was refused and says why. */
+function frameNow(): void {
+  const why = frame.whyNot();
+  if (why) { log('info', 'FRAME: nothing was sent (' + why + ')'); return; }
+  if (!frame.selected.value?.frameable) { ui.popup.value = 'frame'; return; }
+  frame.frame();
+  if (frame.refusal.value) ui.popup.value = 'frame';
+}
 
 function BottomBar() {
   const m = mode.value;
-  const ov = machine.overrides.value;
   const linked = connection.connected.value;
   const resume = m === 'hold' || m === 'change';
   // The warmup streams on its own: no job starts over it (Resume after a hold of it is the cycle start).
@@ -354,15 +360,11 @@ function BottomBar() {
   return (
     <footer class="fs-bottom">
       <div class="fs-row-gap">
-        <button type="button" class="fs-btn fs-btn-tall" onClick={() => { ui.popup.value = 'jog'; }}>JOG</button>
-        <button type="button" class="fs-btn fs-btn-tall" onClick={() => { ui.popup.value = 'offsets'; }}>OFFSETS</button>
-      </div>
-      <Override label="FEED" name="Feed" value={machine.feed.value} unit="mm/min" pct={ov.feed} down={'\x92'} up={'\x91'} />
-      <Override label="SPINDLE" name="Spindle" value={machine.spindle.value} unit="rpm" pct={ov.spindle} down={'\x9B'} up={'\x9A'} />
-      <div class="fs-ovr">
-        <div class="fs-cap">RAPID</div>
-        <button type="button" class="fs-btn fs-rapid" disabled={!linked} aria-label={'Rapid override, now ' + ov.rapid + '%. Press to change'}
-          onClick={() => rtSend(NEXT_RAPID[ov.rapid] ?? '\x95')}>{ov.rapid}%</button>
+        <BarButton label="JOG" title="Jog the machine" onClick={() => { ui.popup.value = 'jog'; }} />
+        <BarButton label="OFFSETS" title="The work offsets table" onClick={() => { ui.popup.value = 'offsets'; }} />
+        <BarButton label="PROBE" title="Probe, with the jog pad" onClick={() => { ui.popup.value = 'probe'; }} />
+        <BarButton label="PARK" why={parkWhyNot()} title="Z up first, then to the park point (Settings, Options)" onClick={() => park()} />
+        <BarButton label="FRAME" why={frame.whyNot()} title="Round the program's outline at safe Z" onClick={frameNow} />
       </div>
       <span class="fs-grow" />
       <div class="fs-run">

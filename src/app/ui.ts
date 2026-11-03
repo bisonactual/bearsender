@@ -7,7 +7,7 @@ import { lsGet, lsSet } from '../ui';
 
 export type Screen = 'job' | 'setup' | 'probing' | 'tools' | 'settings';
 /** The job screen's right panel. */
-export type Panel = 'setup' | 'recorder' | 'preview' | 'camera' | 'console' | 'macros';
+export type Panel = 'setup' | 'run' | 'recorder' | 'preview' | 'camera' | 'console' | 'macros';
 /** The job screen's left panel. */
 export type LeftPanel = 'jobs' | 'program';
 export type SetupTab = 'machine' | 'offsets' | 'warmup';
@@ -29,7 +29,7 @@ export const probingTab = signal<ProbingTab>(saved<ProbingTab>('fs-probing-sub',
 /** The right panel follows the job while auto is on; picking a tab turns it off. */
 export const auto = signal(lsGet('fs-panel-auto', true));
 /** The tab picked by hand, used while auto is off. */
-export const pickedPanel = signal<Panel>(saved<Panel>('fs-panel', ['setup', 'recorder', 'preview', 'camera', 'console', 'macros'], 'setup'));
+export const pickedPanel = signal<Panel>(saved<Panel>('fs-panel', ['setup', 'run', 'recorder', 'preview', 'camera', 'console', 'macros'], 'setup'));
 /** The left panel, the same way. */
 export const leftAuto = signal(lsGet('fs-left-auto', true));
 export const pickedLeft = signal<LeftPanel>(saved<LeftPanel>('fs-left', ['jobs', 'program'], 'jobs'));
@@ -42,7 +42,7 @@ export const fullView = signal(false);
 /** The Recorder panel shows every event read, not just the last few. */
 export const allEvents = signal(false);
 
-export type Popup = 'jog' | 'offsets' | 'probe' | 'measure' | 'frame' | 'tools' | 'recorder' | 'messages';
+export type Popup = 'jog' | 'offsets' | 'wcs' | 'probe' | 'measure' | 'frame' | 'tools' | 'recorder' | 'messages';
 /** The popup panel open over the screen, if any. */
 export const popup = signal<Popup | null>(null);
 /** The input signals shown on the position line. */

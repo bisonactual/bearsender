@@ -569,12 +569,10 @@
   .fs-bottom { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px 28px; padding: clamp(6px, 1.2vh, 12px) 16px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
   .fs-bottom > * { flex: none; }
   .fs-bottom > .fs-grow { flex: 1 1 0; }
-  .fs-ovr { display: flex; align-items: center; gap: 8px; }
-  .fs-ovr-read { min-width: 118px; }
-  .fs-ovr-value { font-family: var(--mono); font-size: 20px; }
-  .fs-ovr-pct { width: 56px; text-align: center; font-family: var(--mono); font-size: 18px; }
-  .fs-step { width: 44px; height: clamp(36px, 4.6vh, 44px); border-radius: 8px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); font-size: 20px !important; }
-  .fs-rapid { height: clamp(36px, 4.6vh, 44px); padding: 0 12px; font-family: var(--mono) !important; font-size: 18px; font-weight: 400; letter-spacing: 0; }
+  /* JOG, OFFSETS, PROBE, PARK, FRAME: a button that can't act now says why under its name. */
+  .fs-bar-btn { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+  .fs-bar-btn.is-off { color: var(--text2); }
+  .fs-bar-why { font-family: var(--sans) !important; font-size: 10px; font-weight: 500; letter-spacing: 0; color: var(--text2); }
   .fs-run { display: flex; gap: 10px; }
   .fs-run-btn { width: 128px; height: clamp(48px, 6.6vh, 64px); display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 0; font-family: var(--cond) !important; font-size: 19px; font-weight: 700; letter-spacing: 0.08em; }
   .fs-run-btn.is-start { background: var(--green); color: #052e12; }
@@ -582,38 +580,47 @@
   .fs-run-btn.is-stop { background: var(--red); color: #1a0505; }
   @media (max-width: 1440px) {
     .fs-bottom { column-gap: 16px; }
-    .fs-run { gap: 8px; }
-    .fs-run-btn { width: 104px; }
-  }
-  @media (max-width: 1280px) {
-    .fs-bottom { column-gap: 8px; }
-    .fs-ovr-read { min-width: 80px; }
-    .fs-ovr-pct { width: 48px; }
-    .fs-step { width: 40px; }
-    .fs-run { gap: 6px; }
-    .fs-run-btn { width: 96px; gap: 6px; font-size: 17px; }
-    /* The readings keep their width with five-figure values */
-    .fs-bottom .fs-unit { display: none; }
   }
   @media (max-width: 1100px) {
     .fs-bottom { column-gap: 10px; padding-left: 10px; padding-right: 10px; }
     .fs-bottom .fs-btn-tall { padding: 0 10px; }
-    .fs-ovr { gap: 6px; }
-    .fs-ovr-read { min-width: 0; }
-    .fs-ovr-value { font-size: 18px; }
-    .fs-bottom .fs-unit { display: none; }
-    .fs-step { width: 36px; }
-    .fs-ovr-pct { width: 44px; font-size: 16px; }
     .fs-run-btn { width: 84px; gap: 6px; font-size: 16px; letter-spacing: 0.04em; }
   }
-  /* Narrow (portrait): each override's reading sits over its buttons. */
   @media (max-width: 900px) {
     .fs-bottom { column-gap: 8px; }
+    .fs-bottom .fs-row-gap { gap: 6px; }
     .fs-bottom .fs-btn-tall { padding: 0 8px; }
     .fs-run { gap: 6px; }
-    .fs-bottom .fs-ovr { flex-wrap: wrap; justify-content: center; max-width: 136px; row-gap: 2px; }
-    .fs-bottom .fs-ovr-read { flex: 0 0 100%; display: flex; align-items: baseline; gap: 6px; }
-    .fs-bottom .fs-ovr > .fs-cap { flex: 0 0 100%; }
+  }
+
+  /* The Run tab: coolant and the overrides, one row each. */
+  .fs-run-panel { display: flex; flex-direction: column; gap: 4px; }
+  .fs-runrow { display: flex; flex-direction: column; gap: 6px; padding: 10px 2px; border-bottom: 1px solid var(--border); }
+  .fs-runrow:last-child { border-bottom: 0; }
+  .fs-run-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .fs-run-read { font-size: 20px; }
+  .fs-run-ovr { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .fs-run-ovr > .fs-note-sm { margin-top: 0; }
+  .fs-run-pct { width: 76px; font-size: 26px; text-align: right; flex: none; }
+  .fs-run-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .fs-run-step { min-width: 58px; height: 44px; padding: 0 10px; font-family: var(--mono) !important; font-size: 16px; letter-spacing: 0; }
+  .fs-cool { min-width: 150px; height: 48px; font-size: 17px; }
+  .fs-note-sm.is-warn { margin-top: 0; color: var(--warn-text); }
+
+  /* The work offset picker, from the position line's chip. */
+  .fs-wcspick { width: min(720px, 92vw); }
+  .fs-wcspick-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; overflow-y: auto; min-height: 0; }
+  .fs-wcspick-row { display: grid; grid-template-columns: 76px 170px 1fr; align-items: center; gap: 8px; min-height: 44px; padding: 4px 14px; border-radius: 8px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); text-align: left; }
+  .fs-wcspick-row:hover:not(:disabled) { background: var(--surface3); }
+  .fs-wcspick-row.is-on { border-color: var(--accent); background: #2a1a0e; }
+  .fs-wcspick-row:disabled { opacity: 0.75; }
+  .fs-wcspick-code { font-family: var(--mono); font-size: 18px; font-weight: 700; }
+  .fs-wcspick-row.is-on .fs-wcspick-code, .fs-wcspick-row.is-on .fs-wcspick-what { color: var(--accent); }
+  .fs-wcspick-what { font-family: var(--cond); font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: var(--text2); text-transform: uppercase; }
+  .fs-wcspick-vals { font-size: 15px; white-space: pre; }
+  @media (max-width: 700px) {
+    .fs-wcspick-row { grid-template-columns: 64px 1fr; }
+    .fs-wcspick-vals { grid-column: 1 / -1; }
   }
 
   /* Portrait (an iPad upright): the two panels stack, the Jobs list over the larger right panel. */
@@ -968,15 +975,8 @@
   .fs-warm-text.is-hint { font-family: var(--sans) !important; font-size: 13px; font-weight: 600; letter-spacing: 0; }
   .fs-bar-sections > div.is-now { font-weight: 700; color: #fff; }
   /* Narrower: MACHINE WARMUP takes three lines. Portrait: the run buttons get a row of their own. */
-  @media (max-width: 1440px) {
-    .fs-run-btn.is-warmup { width: 112px; font-size: 14px; }
-  }
-  @media (max-width: 1280px) {
-    .fs-run-btn.is-warmup { width: 96px; font-size: 13px; }
-    .fs-run-btn.is-warmup small { font-size: 11px; }
-    .fs-warm-text.is-hint { font-size: 12px; }
-  }
   @media (max-width: 1100px) {
+    .fs-run-btn.is-warmup small { font-size: 11px; }
     .fs-run-btn.is-warmup { width: 84px; padding: 0 4px; font-size: 12px; letter-spacing: 0.02em; }
     .fs-warm-text.is-hint { font-size: 11px; }
   }

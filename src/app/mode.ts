@@ -8,7 +8,6 @@ import * as machine from '../stores/machine';
 import * as job from '../stores/job';
 import * as messages from '../stores/messages';
 import * as flight from '../stores/flight';
-import * as camera from '../stores/camera';
 import * as program from '../stores/program';
 import type { ToolRow } from '../stores/program';
 import * as ui from './ui';
@@ -51,12 +50,13 @@ export const recordToResume = computed(() => {
   return !!r && flight.enabled.value && (r.state === 'Stopped' || r.state === 'Retracted') && r.ln > 0 && UNEXPECTED.has(r.why);
 });
 
-/** AUTO, right panel: Setup before a start and at a tool change; while running the Camera if one is set up,
- *  otherwise the Recorder; the Recorder after a stop. An alarm opens the Recorder only after a stop or a lost
- *  link this session, or with a job to resume; a power-up alarm such as 11 (homing required) opens Setup. */
+/** AUTO, right panel: Setup before a start and at a tool change; Run while running (the owner, 3 Nov: it
+ *  replaced the Camera if one is set up, otherwise the Recorder); the Recorder after a stop. An alarm opens
+ *  the Recorder only after a stop or a lost link this session, or with a job to resume; a power-up alarm
+ *  such as 11 (homing required) opens Setup. */
 export const autoPanel = computed<ui.Panel>(() => {
   const m = mode.value;
-  if (m === 'running' || m === 'hold') return camera.device.value !== null ? 'camera' : 'recorder';
+  if (m === 'running' || m === 'hold') return 'run';
   if (m === 'change') return 'setup';
   if (stoppedShort.value || (m === 'alarm' && recordToResume.value)) return 'recorder';
   return 'setup';

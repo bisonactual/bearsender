@@ -24,6 +24,7 @@ import { offsetsWaitForHoming } from '../offsets';
 import { CameraPanel as Camera } from './CameraPanel';
 import { ConsolePanel as Console } from './ConsolePanel';
 import { MacrosPanel as Macros } from './MacrosPanel';
+import { RunPanel } from './RunPanel';
 import { Preview } from './Preview';
 import { WarmupStrip } from './Warmup';
 import { progress as warmupProgress } from '../warmup';
@@ -782,7 +783,7 @@ function CameraPanel({ hidden }: { hidden: boolean }) {
       <div class="fs-panel-box"><Camera /></div>
       <div class="fs-note-sm">
         {camera.device.value === null
-          ? 'No camera set up: pick one and press START. BearSender remembers it, starts it whenever this tab shows, and AUTO shows it while a job runs.'
+          ? 'No camera set up: pick one and press START. BearSender remembers it, and starts it whenever this tab shows.'
           : 'The camera runs only while this tab shows.'}
       </div>
     </div>
@@ -844,16 +845,17 @@ function LeftPanel() {
   );
 }
 
-const TABS: [ui.Panel, string][] = [['setup', 'SETUP'], ['recorder', 'RECORDER'], ['preview', 'PREVIEW'], ['camera', 'CAMERA'], ['console', 'CONSOLE'], ['macros', 'MACROS']];
+const TABS: [ui.Panel, string][] = [['setup', 'SETUP'], ['run', 'RUN'], ['recorder', 'RECORDER'], ['preview', 'PREVIEW'], ['camera', 'CAMERA'], ['console', 'CONSOLE'], ['macros', 'MACROS']];
 
 function JobPanel() {
   const current = panel.value;
   return (
     <section aria-label="Job panel" class="fs-card fs-panel">
       <PanelHead label="Panel" tabs={TABS} current={current} pick={ui.pickPanel} auto={ui.auto} picked={ui.pickedPanel}
-        autoTitle="Follow the job: Setup before the start and at tool changes; while running the Camera if one is set up, otherwise the Recorder; the Recorder after a stop" />
+        autoTitle="Follow the job: Setup before the start and at tool changes; Run while it runs; the Recorder after a stop" />
       <div class="fs-card-body">
         {current === 'setup' && <SetupPanel />}
+        {current === 'run' && <RunPanel />}
         {current === 'recorder' && <RecorderPanel />}
         <PreviewPanel hidden={current !== 'preview'} />
         <CameraPanel hidden={current !== 'camera'} />

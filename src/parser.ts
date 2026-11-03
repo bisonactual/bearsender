@@ -28,7 +28,14 @@ export function initParser(): void {
   });
   command.on('banner', line => log('info', line));
   command.on('startup', line => log('info', line));
-  command.on('gc', line => { log('info', line); machine.modal.value = line.slice(4, -1).trim().split(/\s+/); });
+  command.on('gc', line => {
+    log('info', line);
+    const words = line.slice(4, -1).trim().split(/\s+/);
+    machine.modal.value = words;
+    // The work offset in force, as the status report's WCS: gives it.
+    const wcs = words.find(w => /^G5[4-9](\.[1-3])?$/.test(w));
+    if (wcs) machine.wcs.value = wcs;
+  });
   command.onReply((reply, { job, quiet }) => {
     if (reply.result === 'error') { if (!quiet) messages.push('error', `error:${reply.code} on "${reply.command}"`); }
     else if (!job) { noteOffsetWrite(reply.command); noteModeChange(reply.command); noteStartupLines(reply); }

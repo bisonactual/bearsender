@@ -102,13 +102,17 @@ const n = (v: number) => String(Math.round(v * 1000) / 1000);
 /** The bytes the lines take in the controller's input, a newline each. */
 export const bytes = (lines: string[]) => lines.reduce((t, l) => t + byteLen(l + '\n'), 0);
 
+/** The way to a machine point from where the tool is (machine Z): Z up first, to the higher of the two, so
+ *  it never goes down while crossing; then over to X and Y; then to the point's Z. G53, in the units in
+ *  force, so the first line wants G21 in front. PARK goes the same way (park.ts). */
+export function wayTo(p: Point, fromZ: number): string[] {
+  return [`G53G0Z${n(Math.max(p.z, fromZ))}`, `G53G0X${n(p.x)}Y${n(p.y)}`, `G53G0Z${n(p.z)}`];
+}
+
 /** The lines with at most `cap` passes a step, and the passes a step's time wants. */
 function build(r: Routine, m: Motion, p: Point, fromZ: number, cap: number): { lines: string[]; steps: Step[]; wanted: number } {
-  const lines = [
-    `G21G94G53G0Z${n(Math.max(p.z, fromZ))}`,
-    `G53G0X${n(p.x)}Y${n(p.y)}`,
-    `G53G0Z${n(p.z)}`,
-  ];
+  const lines = wayTo(p, fromZ);
+  lines[0] = 'G21G94' + lines[0];
   const pts = pass(m, p);
   const each = passSecs(m);
   const steps: Step[] = [];

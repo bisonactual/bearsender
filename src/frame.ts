@@ -10,6 +10,7 @@ import * as connection from './stores/connection';
 import * as machine from './stores/machine';
 import * as job from './stores/job';
 import type { AxisRange } from './stores/job';
+import { progress as warmupProgress } from './warmup';
 
 export interface LimitsTab { id: string; label: string; stats: AxisRange; frameable: boolean; }
 
@@ -49,10 +50,24 @@ function checkAbsoluteBounds(coords: { axis: string; absVal: number }[]): string
   return coords.filter(c => c.absVal > BAD_LIMIT).map(c => `${c.axis} (${c.absVal.toFixed(3)})`);
 }
 
+/** Why FRAME does nothing now, in a few words, or null. Its moves would go between a job's or the
+ *  warmup's lines, or after them; the controller takes them only when idle. */
+export function whyNot(): string | null {
+  if (!connection.connected.value) return 'not connected';
+  if (!selected.value) return 'no program';
+  if (job.running.value) return 'job running';
+  if (warmupProgress.value) return 'warmup running';
+  const s = machine.stateName.value;
+  if (s !== 'idle') return s ? 'machine ' + (s === 'tool' ? 'at a tool change' : s) : 'no status yet';
+  return null;
+}
+
 /** Lifts to safe Z, then rapids round the selected work offset's X and Y extents. */
 export function frame(): void {
   const sel = selected.value;
   if (!connection.connected.value || !sel || !sel.frameable) return;
+  const why = whyNot();
+  if (why) { refusal.value = 'Not framed: ' + why + '.'; return; }
   const z = safeZ.value;
   if (!Number.isFinite(z)) { refusal.value = 'Safe Z is not a number.'; log('err', 'Frame: invalid Safe Z value'); return; }
 
