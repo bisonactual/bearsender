@@ -229,7 +229,10 @@ async function readFrame(wcs: string): Promise<{ table: Point | null; g92: Point
     const v = line.slice(name.length + 2).split(/[,:\]]/).map(parseFloat).filter(n => Number.isFinite(n)).map(reportMm);
     return name === 'TLO' && v.length === 1 ? { x: 0, y: 0, z: v[0] } : { x: v[0] ?? 0, y: v[1] ?? 0, z: v[2] ?? 0 };
   };
-  return { table: vec(wcs), g92: vec('G92') ?? zero3(), tlo: vec('TLO') ?? zero3() };
+  // The command layer takes [TLO:] as a push line, so it isn't among the reply's lines: offsets.ts has
+  // stored it by the time the ok comes.
+  const tlo = vec('TLO') ?? machine.tloVector.value ?? (machine.tlo.value !== null ? { x: 0, y: 0, z: machine.tlo.value } : zero3());
+  return { table: vec(wcs), g92: vec('G92') ?? zero3(), tlo };
 }
 
 export interface ZeroWrite {
