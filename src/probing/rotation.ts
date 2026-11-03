@@ -5,6 +5,7 @@
 import { state } from '../state';
 import { log } from '../console';
 import { processGcode } from '../gcode';
+import { lexLine } from '../gcode/lexer';
 import * as job from '../stores/job';
 import { probeAxis, rapidToMPos, isProbingRunning, runProbing } from './probe-program';
 
@@ -14,51 +15,46 @@ function startPos() {
 
 type Rotation = { angleDeg: number; p1: { x: number; y: number }; p2: { x: number; y: number } };
 
+/** Each side as the edge finder names it: the axis it runs along, and the probe's direction of travel onto it. */
+const SIDES: Record<string, { along: 'X' | 'Y'; dir: number; name: string }> = {
+  AB: { along: 'X', dir: 1, name: 'front' },
+  CD: { along: 'X', dir: -1, name: 'back' },
+  AD: { along: 'Y', dir: 1, name: 'left' },
+  CB: { along: 'Y', dir: -1, name: 'right' },
+};
+
 export async function runRotation(cfg: any): Promise<Rotation | null> {
   if (isProbingRunning()) { log('err', 'Probe already running'); return null; }
   return runProbing(() => rotation(cfg));
 }
 
+/** Two points on the side, the point spacing apart along it (to the right, or further back). At each, as
+ *  for a single side: out past the side at the start height, down, then in to it. */
 async function rotation(cfg: any): Promise<Rotation | null> {
   const sp = startPos();
   const clr = cfg.xyClr + cfg.probeDiameter / 2;
-  const probeX = cfg.edge === 'AB' || cfg.edge === 'CD';
-  const probeAx = probeX ? 'X' : 'Y';
-  const dirMap: Record<string, number> = { AB: 1, CD: -1, AD: 1, CB: -1 };
-  const dir = dirMap[cfg.edge];
+  const side = SIDES[cfg.edge];
+  const across = side.along === 'X' ? 'Y' : 'X';
+  log('info', `Rotation: probing two points on the ${side.name} side (${cfg.edge})…`);
 
-  log('info', `Rotation: probing two points along ${probeAx} edge (${cfg.edge})…`);
-
-  const approachX1 = probeX ? sp.x - dir * clr : null;
-  const approachY1 = !probeX ? sp.y - dir * clr : null;
-  await rapidToMPos(approachX1, approachY1, null);
-  await rapidToMPos(null, null, sp.z - cfg.depth);
-  const r1 = await probeAxis(probeAx, dir, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
-  if (!r1) { await rapidToMPos(null, null, sp.z); log('err', '✗ Rotation: point 1 probe failed'); return null; }
-  await rapidToMPos(null, null, sp.z);
-
-  const approachX2 = probeX ? sp.x - dir * clr : sp.x + cfg.offset;
-  const approachY2 = !probeX ? sp.y - dir * clr : sp.y + cfg.offset;
-  await rapidToMPos(approachX2, approachY2, null);
-  await rapidToMPos(null, null, sp.z - cfg.depth);
-  const r2 = await probeAxis(probeAx, dir, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
-  if (!r2) { await rapidToMPos(null, null, sp.z); log('err', '✗ Rotation: point 2 probe failed'); return null; }
-  await rapidToMPos(null, null, sp.z);
+  const pts: { x: number; y: number }[] = [];
+  for (const q of [0, cfg.offset]) {
+    const n = pts.length + 1;
+    const at = side.along === 'X' ? { x: sp.x + q, y: sp.y - side.dir * clr } : { x: sp.x - side.dir * clr, y: sp.y + q };
+    await rapidToMPos(at.x, at.y, null);
+    await rapidToMPos(null, null, sp.z - cfg.depth);
+    const r = await probeAxis(across, side.dir, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
+    if (!r) { await rapidToMPos(null, null, sp.z); log('err', `✗ Rotation: point ${n} probe failed`); return null; }
+    await rapidToMPos(null, null, sp.z);
+    // Both touches are a tip radius short of the side, so the radius drops out of the angle.
+    pts.push({ x: r.x, y: r.y });
+  }
   await rapidToMPos(sp.x, sp.y, null);
 
-  const p1 = { x: r1.x, y: r1.y };
-  const p2 = { x: r2.x, y: r2.y };
-  let angleRad: number;
-  if (probeX) {
-    const dy = p2.y - p1.y;
-    const dx = p2.x - p1.x;
-    angleRad = dy !== 0 ? Math.atan(dx / dy) : 0;
-  } else {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    angleRad = dx !== 0 ? Math.atan(dy / dx) : 0;
-    if (cfg.edge === 'CB' || cfg.edge === 'AD') angleRad = -1 / (angleRad || 1e-10);
-  }
+  const [p1, p2] = pts;
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  // The part's turn, anticlockwise positive: a side along X runs at atan2(dy, dx), one along Y at atan2(-dx, dy).
+  const angleRad = side.along === 'X' ? Math.atan2(dy, dx) : Math.atan2(-dx, dy);
   const angleDeg = angleRad * 180 / Math.PI;
   log('info', `✓ Rotation measured: ${angleDeg.toFixed(3)}°`);
   log('info', `  P1: X=${p1.x.toFixed(4)} Y=${p1.y.toFixed(4)}`);
@@ -66,6 +62,41 @@ async function rotation(cfg: any): Promise<Rotation | null> {
   return { angleDeg, p1, p2 };
 }
 
+// G-words after which a line's X and Y aren't a point of the program in its work coordinates: machine
+// coordinates (G53), offset settings (G10, G92), and the stored positions (G28, G30 and their sets).
+const LEAVE = [53, 10, 92, 92.1, 28, 28.1, 30, 30.1];
+
+/** The line with its X and Y words (or I and J) replaced by `put.XY` (or `put.IJ`), at the first of
+ *  them; comments and everything else as they were. */
+function replaceWords(line: string, put: { XY?: string; IJ?: string }): string {
+  const group: Record<string, 'XY' | 'IJ'> = { X: 'XY', Y: 'XY', I: 'IJ', J: 'IJ' };
+  let out = '', depth = 0;
+  const placed = new Set<string>();
+  for (let i = 0; i < line.length;) {
+    const ch = line[i];
+    if (!depth && ch === ';') { out += line.slice(i); break; }
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    else if (!depth) {
+      const m = /^([XYIJ])\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)/i.exec(line.slice(i));
+      const g = m && group[m[1].toUpperCase()];
+      if (m && g && put[g] !== undefined) {
+        i += m[0].length;
+        if (!placed.has(g)) { out += put[g]; placed.add(g); }
+        else if (/\s$/.test(out)) while (i < line.length && /\s/.test(line[i])) i++;
+        continue;
+      }
+    }
+    out += ch;
+    i++;
+  }
+  return out.trimEnd();
+}
+
+/** Turns the loaded program by the angle about X0 Y0. Every move's end is turned as a point (in G91, as a
+ *  step) and written with both X and Y, so a line naming one axis gets the other too; an arc's centre
+ *  (I, J) is turned with it. Lines in machine coordinates, offset settings and stored positions are left
+ *  as they are, and so are comments. */
 export function applyRotationToGcode(angleDeg: number): void {
   if (!(state as any).gcodeLines || (state as any).gcodeLines.length === 0) {
     log('err', 'No G-code loaded to rotate');
@@ -74,24 +105,43 @@ export function applyRotationToGcode(angleDeg: number): void {
   const angleRad = angleDeg * Math.PI / 180;
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);
+  const turn = (a: number, b: number) => [a * cos - b * sin, a * sin + b * cos];
+  const f = (v: number) => (Math.abs(v) < 5e-5 ? 0 : v).toFixed(4);
   const rotated: string[] = [];
-  let curX = 0, curY = 0;
-  for (const line of (state as any).gcodeLines) {
-    const xm = line.match(/X([+-]?[\d.]+)/i);
-    const ym = line.match(/Y([+-]?[\d.]+)/i);
-    if (!xm && !ym) { rotated.push(line); continue; }
-    const ox = xm ? parseFloat(xm[1]) : curX;
-    const oy = ym ? parseFloat(ym[1]) : curY;
-    const rx = ox * cos - oy * sin;
-    const ry = ox * sin + oy * cos;
-    let newLine = line;
-    if (xm) newLine = newLine.replace(xm[0], 'X' + rx.toFixed(4));
-    if (ym) newLine = newLine.replace(ym[0], 'Y' + ry.toFixed(4));
-    curX = ox;
-    curY = oy;
-    rotated.push(newLine);
+  let x = 0, y = 0;             // where the program is, unturned
+  let inc = false, arcAbs = false;
+  let left = 0;
+  for (const line of (state as any).gcodeLines as string[]) {
+    const b = lexLine(line);
+    const g = b.words.filter(([l]) => l === 'G').map(([, v]) => v);
+    if (g.includes(90)) inc = false;
+    if (g.includes(91)) inc = true;
+    if (g.includes(90.1)) arcAbs = true;
+    if (g.includes(91.1)) arcAbs = false;
+    const w = (l: string) => b.words.find(([k]) => k === l)?.[1];
+    const X = w('X'), Y = w('Y'), I = w('I'), J = w('J');
+    const hasXY = X !== undefined || Y !== undefined, hasIJ = I !== undefined || J !== undefined;
+    const leave = b.errors.length > 0 || g.some(v => LEAVE.includes(v));
+    if ((!hasXY && !hasIJ) || leave) {
+      if (leave && (hasXY || hasIJ)) left++;
+      rotated.push(line);
+      continue;
+    }
+    const put: { XY?: string; IJ?: string } = {};
+    if (hasXY) {
+      let rx: number, ry: number;
+      if (inc) { [rx, ry] = turn(X ?? 0, Y ?? 0); x += X ?? 0; y += Y ?? 0; }
+      else { x = X ?? x; y = Y ?? y; [rx, ry] = turn(x, y); }
+      put.XY = `X${f(rx)} Y${f(ry)}`;
+    }
+    if (hasIJ) {
+      const [ri, rj] = turn(I ?? 0, J ?? 0);
+      put.IJ = `I${f(ri)} J${f(rj)}`;
+    }
+    rotated.push(replaceWords(line, put));
   }
   // Loaded again, so the 3D view, the limits and the frame show the program as it will now run.
   processGcode(rotated.join('\n'), job.file.value ?? 'rotated.nc');
-  log('info', `G-code rotated by ${angleDeg.toFixed(3)}° (${rotated.length} lines)`);
+  log('info', `G-code rotated by ${angleDeg.toFixed(3)}° (${rotated.length} lines)${left ? `; ${left} lines in machine coordinates, offset settings or stored positions left as they were` : ''}`);
+  if (arcAbs) log('info', 'The program uses absolute arc centres (G90.1); they were turned as points');
 }
