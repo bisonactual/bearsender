@@ -82,8 +82,8 @@ export const rotResult = signal('');
 /** The angle measured last, until it is applied: applying it twice would turn the program twice. */
 export const rotAngle = signal<number | null>(null);
 
-/** What the preview shows, as a title. */
-export const previewOf = signal('');
+/** Which routine the preview shows, and its title: a routine's card shows only its own. */
+export const previewOf = signal<{ r: Routine; title: string } | null>(null);
 
 function say(r: Routine, text: string, tone: Tone = 'idle'): void {
   status.value = { ...status.value, [r]: { text, tone } };
@@ -204,8 +204,8 @@ export function applyRotation(): void {
 // ── Preview ───────────────────────────────────────────────────────────────────
 
 /** Shows a routine's moves in the preview card, and in the job screen's 3D view as before. */
-function show(title: string, wps: pv.Waypoint[]): void {
-  previewOf.value = title;
+function show(r: Routine, title: string, wps: pv.Waypoint[]): void {
+  previewOf.value = { r, title };
   pv.loadPreview(wps);
   (window as any).loadPreview3D?.(wps);
 }
@@ -216,29 +216,29 @@ export function preview(r: Routine): void {
     if (c.mode === 'toolsetter') {
       const ts = machine.offsets.value['G59.3'] || { x: 50, y: 50, z: -20 };
       const at = machine.mpos.value;
-      show('TOOL LENGTH · TOOLSETTER', pv.waypointsToolsetter({
+      show(r, 'TOOL LENGTH · TOOLSETTER', pv.waypointsToolsetter({
         probeDistance: c.probeDistance, latchDistance: c.latchDistance, toolsetterDepth: c.toolsetterDepth,
         tsOffX: ts.x - at.x, tsOffY: ts.y - at.y, tsOffZ: ts.z - at.z,
       }));
     } else {
-      show('TOOL LENGTH · TOUCH PLATE', pv.waypointsTouchplate({ probeDistance: c.probeDistance, latchDistance: c.latchDistance, touchPlateHeight: c.touchPlateHeight }));
+      show(r, 'TOOL LENGTH · TOUCH PLATE', pv.waypointsTouchplate({ probeDistance: c.probeDistance, latchDistance: c.latchDistance, touchPlateHeight: c.touchPlateHeight }));
     }
   } else if (r === 'ef') {
     const edge = efEdge.value;
     if (!edge) { say('ef', 'Pick an edge or corner first', 'err'); return; }
     const c = ef.value;
     const title = `EDGE FINDER · ${edge.length === 1 ? 'CORNER ' : edge === 'Z' ? '' : 'EDGE '}${edge} · ${c.mode.toUpperCase()}`;
-    if (edge === 'Z') show(title, pv.waypointsTouchplate({ probeDistance: c.probeDistance, latchDistance: c.latchDistance, touchPlateHeight: 0 }));
-    else if (edge.length === 1) show(title, pv.waypointsEdgeCorner({ ...c, edge }));
-    else show(title, pv.waypointsEdgeSingle({ ...c, edge }));
+    if (edge === 'Z') show(r, title, pv.waypointsTouchplate({ probeDistance: c.probeDistance, latchDistance: c.latchDistance, touchPlateHeight: 0 }));
+    else if (edge.length === 1) show(r, title, pv.waypointsEdgeCorner({ ...c, edge }));
+    else show(r, title, pv.waypointsEdgeSingle({ ...c, edge }));
   } else if (r === 'cf') {
     const c = cf.value;
-    show(`CENTRE FINDER · ${c.centerMode.toUpperCase()} · ${c.axes}`, pv.waypointsCenter({
+    show(r, `CENTRE FINDER · ${c.centerMode.toUpperCase()} · ${c.axes}`, pv.waypointsCenter({
       centerMode: c.centerMode, axes: c.axes, sizeX: c.workpieceSizeX, sizeY: c.workpieceSizeY,
       xyClr: c.xyClr, depth: c.depth, probeDistance: c.probeDistance, latchDistance: c.latchDistance, probeDiameter: c.probeDiameter,
     }));
   } else {
     const c = rot.value;
-    show(`ROTATION · EDGE ${c.edge}`, pv.waypointsRotation(c));
+    show(r, `ROTATION · EDGE ${c.edge}`, pv.waypointsRotation(c));
   }
 }

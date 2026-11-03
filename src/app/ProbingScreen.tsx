@@ -222,13 +222,18 @@ function RoutineCard({ tab }: { tab: ui.ProbingTab }) {
 const LEGEND: [string, string][] = [['rapid', 'Rapid'], ['probe', 'Probe'], ['retract', 'Retract'], ['contact', 'Contact'], ['result', 'Result']];
 
 function PreviewCard() {
-  const wps = pv.waypoints.value;
+  // Only the routine on show's own preview: another's moves and title would be over the wrong routine.
+  const of = pr.previewOf.value;
+  const mine = !!of && of.r === ui.probingTab.value;
+  const wps = mine ? pv.waypoints.value : [];
   const cur = pv.step.value;
   const xy = useRef<HTMLCanvasElement>(null);
   const xz = useRef<HTMLCanvasElement>(null);
+  const shown = useRef(wps);
+  shown.current = wps;
   const draw = () => {
-    if (xy.current) pv.drawView(xy.current, 'XY', pv.waypoints.peek(), pv.step.peek());
-    if (xz.current) pv.drawView(xz.current, 'XZ', pv.waypoints.peek(), pv.step.peek());
+    if (xy.current) pv.drawView(xy.current, 'XY', shown.current, pv.step.peek());
+    if (xz.current) pv.drawView(xz.current, 'XZ', shown.current, pv.step.peek());
   };
   useEffect(draw, [wps, cur]);
   useEffect(() => {
@@ -239,7 +244,7 @@ function PreviewCard() {
   }, []);
   const wp = wps[cur];
   return (
-    <Card title="PROBE PREVIEW" class="fs-pv-card" end={<span class="fs-dim fs-pv-title">{pr.previewOf.value || 'Press PREVIEW on a routine'}</span>}>
+    <Card title="PROBE PREVIEW" class="fs-pv-card" end={<span class="fs-dim fs-pv-title">{mine ? of!.title : 'Press PREVIEW on a routine'}</span>}>
       <div class="fs-pv-views">
         <div class="fs-pv-view"><canvas ref={xy} aria-label="The moves from above, X and Y" /></div>
         <div class="fs-pv-view"><canvas ref={xz} aria-label="The moves from the front, X and Z" /></div>
