@@ -8,11 +8,12 @@
 // times the steps (G4) and ends with M5.
 //
 // The whole warmup fits in the controller's input (the RX buffer from $I), so all of it, M5 included,
-// is in the controller as soon as it starts, and a lost link can't leave the spindle running (the
-// owner's choice, 3 Nov). The input is what counts, not the planner as well: a new spindle speed and a
-// dwell each wait for the moves before them to finish, so what follows waits in the input. Where the
-// motion pattern's passes don't fit, each step runs fewer passes and dwells the rest of its time, and
-// the Setup tab says so.
+// is sent as soon as it starts (the owner's choice, 3 Nov). The input is what counts, not the planner as
+// well: a new spindle speed and a dwell each wait for the moves before them to finish, so what follows
+// waits in the input. Where the motion pattern's passes don't fit, each step runs fewer passes and
+// dwells the rest of its time, and the Setup tab says so. That alone doesn't stop the spindle after a
+// lost link: on the sim, the controller drops the input it hasn't run yet when the WebSocket client goes,
+// so the M5 waiting there never runs (review 3 fixes, run W2).
 //
 // The way to the start point: Z up first, to the higher of the point's Z and where the tool is, then
 // over to the point's X and Y, then to its Z. Every move is G53, in mm and mm/min (G21 G94 first, so an
@@ -254,7 +255,7 @@ function begin(isCold: boolean, p: Plan, lines: string[]): void {
         const left = r.lines.length - r.head;
         end(r, left
           ? `Machine warmup: the link was lost with ${left} of its lines not sent, so the spindle may still be running. Check the machine.`
-          : 'Machine warmup: the link was lost. The controller had all of its lines, so it goes on and stops the spindle at the end.', true);
+          : 'Machine warmup: the link was lost. All of its lines had been sent, but a controller can drop what it hasn\'t run yet when the link goes (the sim does), so the spindle may still be running. Check the machine.', true);
       } else {
         // A jog cancel empties the controller's input, so the rest of the warmup is gone: stop the spindle.
         end(r, `Machine warmup ended: the controller's input was emptied (${why}), so the rest of it was lost. M5 was sent to stop the spindle.`, true);
