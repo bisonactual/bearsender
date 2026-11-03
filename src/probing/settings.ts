@@ -1,7 +1,5 @@
-// ═══════════════════════════════════════════════
-// The probe settings: one set for every routine (the owner, 3 Nov), kept per browser like the other
-// options. Settings, Probe shows them (ProbeSettingsCard); the Probing screen opens it in a popup.
-// ═══════════════════════════════════════════════
+// The probe settings: one set for every routine, kept in this browser like the other options.
+// Settings, Probe shows them (ProbeSettingsCard), and the Probing screen opens the same card in a popup.
 
 import { signal } from '@preact/signals';
 import { lsGet, lsSet } from '../ui';
@@ -23,10 +21,10 @@ export interface ProbeSettings {
 const KEY = 'fs-probe-settings';
 const DEFAULTS: ProbeSettings = { tip: 2, fast: 100, slow: 25, back: 1, clear: 5, search: 10 };
 
-/** Before, each routine kept its own copy (fs-probing-tab-ef, -cf, -rot, -tl). The first time, the set is
- *  taken from the edge finder's, then the centre finder's, then rotation's, whichever was kept; tool
- *  length's feeds only if none of those was. */
-function carried(): ProbeSettings {
+/** Earlier versions kept a copy per routine (fs-probing-tab-ef, -cf, -rot, -tl). The first time, the
+ *  set is taken from the edge finder's, then the centre finder's, then rotation's, whichever was kept,
+ *  and tool length's feeds only if none of those was. */
+function carriedOver(): ProbeSettings {
   for (const sub of ['ef', 'cf', 'rot', 'tl']) {
     const o = lsGet<Record<string, unknown> | null>(`fs-probing-tab-${sub}`, null);
     if (!o) continue;
@@ -48,7 +46,7 @@ function asNumbers(o: Record<string, unknown>): ProbeSettings {
   return { tip: n('tip'), fast: n('fast'), slow: n('slow'), back: n('back'), clear: n('clear'), search: n('search') };
 }
 
-export const probe = signal<ProbeSettings>(asNumbers(lsGet<Record<string, unknown>>(KEY, carried() as unknown as Record<string, unknown>) ?? {}));
+export const probe = signal<ProbeSettings>(asNumbers(lsGet<Record<string, unknown>>(KEY, carriedOver() as unknown as Record<string, unknown>) ?? {}));
 
 /** What makes the settings unusable, in words; empty when they can be used. A routine never sends
  *  settings that can't be used: a back-off of 0 or below, say, would rapid into the wall it touched.

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// 3D preview in viewport
-// ═══════════════════════════════════════════════
+// A probing or surfacing plan in the job screen's 3D view, stepped through or played.
 
 import { signal } from '@preact/signals';
 import * as machine from '../stores/machine';
@@ -9,13 +7,13 @@ import type { Waypoint } from '../surfacing';
 
 import * as THREE from 'three';
 
-let _waypoints: Waypoint[] = [];
-let _step = 0;
-let _playing = false;
-let _playTimer: ReturnType<typeof setInterval> | null = null;
-let _autoTimer: ReturnType<typeof setTimeout> | null = null;
-let _pathGroup: any = null;
-let _probeGhost: any = null;
+let waypoints: Waypoint[] = [];
+let step = 0;
+let playing = false;
+let playTimer: ReturnType<typeof setInterval> | null = null;
+let autoTimer: ReturnType<typeof setTimeout> | null = null;
+let pathGroup: any = null;
+let probeGhost: any = null;
 
 const STEP_INTERVAL = 400;
 
@@ -37,11 +35,11 @@ function toThree(mx: number, my: number, mz: number): any {
 }
 
 function buildPathLines(wps: Waypoint[], upTo: number): void {
-  if (_pathGroup) {
-    scene.remove(_pathGroup);
-    _pathGroup.traverse((c: any) => { c.geometry?.dispose(); c.material?.dispose(); });
+  if (pathGroup) {
+    scene.remove(pathGroup);
+    pathGroup.traverse((c: any) => { c.geometry?.dispose(); c.material?.dispose(); });
   }
-  _pathGroup = new THREE.Group();
+  pathGroup = new THREE.Group();
   const { x: ox, y: oy, z: oz } = machine.mpos.peek();
 
   for (let i = 1; i < wps.length; i++) {
@@ -60,7 +58,7 @@ function buildPathLines(wps: Waypoint[], upTo: number): void {
     });
     const line = new THREE.Line(geo, mat);
     line.computeLineDistances();
-    _pathGroup.add(line);
+    pathGroup.add(line);
   }
 
   for (let i = 0; i <= upTo && i < wps.length; i++) {
@@ -71,27 +69,27 @@ function buildPathLines(wps: Waypoint[], upTo: number): void {
     const mat = new THREE.MeshBasicMaterial({ color: 0x22C55E, transparent: true, opacity: 0.9 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(pos);
-    _pathGroup.add(mesh);
+    pathGroup.add(mesh);
   }
 
-  scene.add(_pathGroup);
+  scene.add(pathGroup);
 }
 
 function updateGhost(wp: Waypoint): void {
-  if (!_probeGhost) {
+  if (!probeGhost) {
     const mat = new THREE.MeshBasicMaterial({ color: 0xF97316, transparent: true, opacity: 0.5, depthWrite: false });
-    _probeGhost = new THREE.Group();
+    probeGhost = new THREE.Group();
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(0, 1.5, 4, 8), mat);
     cone.rotation.x = Math.PI;
     cone.position.y = 2;
-    _probeGhost.add(cone);
+    probeGhost.add(cone);
     const body = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 6, 8), mat);
     body.position.y = 7;
-    _probeGhost.add(body);
-    scene.add(_probeGhost);
+    probeGhost.add(body);
+    scene.add(probeGhost);
   }
   const { x: ox, y: oy, z: oz } = machine.mpos.peek();
-  _probeGhost.position.copy(toThree(ox + wp.x, oy + wp.y, oz + wp.z));
+  probeGhost.position.copy(toThree(ox + wp.x, oy + wp.y, oz + wp.z));
 }
 
 function dimToolpath(dim: boolean): void {
@@ -112,69 +110,69 @@ function dimToolpath(dim: boolean): void {
 export function loadPreview3D(wps: Waypoint[]): void {
   clearPreview3D();
   if (!wps.length) return;
-  _waypoints = wps;
-  _step = 0;
+  waypoints = wps;
+  step = 0;
   dimToolpath(true);
-  buildPathLines(_waypoints, _step);
-  updateGhost(_waypoints[0]);
-  publish();
+  buildPathLines(waypoints, step);
+  updateGhost(waypoints[0]);
+  publishOverlay();
   playPreview3D();
 }
 
 export function clearPreview3D(): void {
   stopPlay();
-  if (_autoTimer) { clearTimeout(_autoTimer); _autoTimer = null; }
-  if (_pathGroup) {
-    scene.remove(_pathGroup);
-    _pathGroup.traverse((c: any) => { c.geometry?.dispose(); c.material?.dispose(); });
-    _pathGroup = null;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  if (pathGroup) {
+    scene.remove(pathGroup);
+    pathGroup.traverse((c: any) => { c.geometry?.dispose(); c.material?.dispose(); });
+    pathGroup = null;
   }
-  if (_probeGhost) {
-    scene.remove(_probeGhost);
-    _probeGhost.traverse((c: any) => { c.geometry?.dispose(); c.material?.dispose(); });
-    _probeGhost = null;
+  if (probeGhost) {
+    scene.remove(probeGhost);
+    probeGhost.traverse((c: any) => { c.geometry?.dispose(); c.material?.dispose(); });
+    probeGhost = null;
   }
   dimToolpath(false);
-  _waypoints = [];
-  _step = 0;
-  publish();
+  waypoints = [];
+  step = 0;
+  publishOverlay();
 }
 
 export function stepPreview3D(dir: number): void {
-  if (!_waypoints.length) return;
-  _step = Math.max(0, Math.min(_waypoints.length - 1, _step + dir));
-  buildPathLines(_waypoints, _step);
-  updateGhost(_waypoints[_step]);
-  publish();
+  if (!waypoints.length) return;
+  step = Math.max(0, Math.min(waypoints.length - 1, step + dir));
+  buildPathLines(waypoints, step);
+  updateGhost(waypoints[step]);
+  publishOverlay();
 }
 
 export function playPreview3D(): void {
-  if (!_waypoints.length) return;
-  if (_playing) { stopPlay(); return; }
-  if (_step >= _waypoints.length - 1) _step = 0;
-  _playing = true;
-  publish();
-  _playTimer = setInterval(() => {
-    _step++;
-    buildPathLines(_waypoints, _step);
-    updateGhost(_waypoints[_step]);
-    if (_step >= _waypoints.length - 1) stopPlay();
-    else publish();
+  if (!waypoints.length) return;
+  if (playing) { stopPlay(); return; }
+  if (step >= waypoints.length - 1) step = 0;
+  playing = true;
+  publishOverlay();
+  playTimer = setInterval(() => {
+    step++;
+    buildPathLines(waypoints, step);
+    updateGhost(waypoints[step]);
+    if (step >= waypoints.length - 1) stopPlay();
+    else publishOverlay();
   }, STEP_INTERVAL);
 }
 
 function stopPlay(): void {
-  if (_playTimer) { clearInterval(_playTimer); _playTimer = null; }
-  _playing = false;
-  publish();
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  playing = false;
+  publishOverlay();
 }
 
 /** The overlay's state now, or null when no preview shows. */
-function publish(): void {
-  const wp = _waypoints[_step];
+function publishOverlay(): void {
+  const wp = waypoints[step];
   if (!wp) { overlay.value = null; return; }
   const o = machine.mpos.peek();
-  overlay.value = { step: _step, total: _waypoints.length, playing: _playing, x: o.x + wp.x, y: o.y + wp.y, z: o.z + wp.z, label: wp.label || typeLabel(wp.type) };
+  overlay.value = { step, total: waypoints.length, playing, x: o.x + wp.x, y: o.y + wp.y, z: o.z + wp.z, label: wp.label || typeLabel(wp.type) };
 }
 
 function typeLabel(type: string): string {

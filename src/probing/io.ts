@@ -1,7 +1,5 @@
-// ═══════════════════════════════════════════════
 // What a probing routine moves with: the machine (probe-program.ts machineIo), or the drawing's dry
 // run over a virtual part (plan.ts), so the drawing shows the moves the machine makes, step for step.
-// ═══════════════════════════════════════════════
 
 export interface Point { x: number; y: number; z: number; }
 

@@ -1,7 +1,5 @@
-// ═══════════════════════════════════════════════
-// Core probing engine — WCS mapping, probe/idle
-// waiting, tool length sequences
-// ═══════════════════════════════════════════════
+// Probing on the machine: the moves and touches through the command layer, writing the result, and
+// the tool length routines.
 //
 // Each step waits for its own reply through the command layer. A probing move (G38.3) is answered
 // once the probe cycle has ended, with the [PRB:] line before its ok when $10 asks for it; without
@@ -30,25 +28,13 @@ import type { Io, Point, StepType } from './io';
 import type { ProbeSettings } from './settings';
 import { probeProblems } from './settings';
 
-export const WCS_P: Record<string, number> = {
-  G54: 1,
-  G55: 2,
-  G56: 3,
-  G57: 4,
-  G58: 5,
-  G59: 6,
-  'G59.1': 7,
-  'G59.2': 8,
-  'G59.3': 9,
-};
-
 /** What every move and write says first: millimetres, and feeds in mm/min. */
 const MM = 'G21G94';
 
-let _running = false;
-let _cancelled = false;
-let _finishing = false;                    // the moves are done and the result is being written
-let _cancel: (() => void) | null = null;   // ends the wait of the step in progress
+let isProbing = false;
+let cancelled = false;
+let isFinishing = false;                   // the moves are done and the result is being written
+let endWait: (() => void) | null = null;   // ends the wait of the step in progress
 const OWNER = {};                          // the routine's commands, for Cancel (command.cancelOwned)
 
 interface ProbeResult {
@@ -66,7 +52,7 @@ export function getActiveWcs(): string {
 /** Why a probing routine wouldn't start now, or null if it would. */
 export function probingRefusal(): string | null {
   if (!connection.connected.peek()) return 'Not connected';
-  if (_running) return 'Probing already in progress';
+  if (isProbing) return 'Probing already in progress';
   if (warmupProgress.value) return 'The machine warmup is running, so nothing was sent. Stop it, or let it end.';
   // Sent now, a probe would wait unread in the controller and run after the Resume, in the job.
   if (machine.stateName.value === 'tool' && !command.toolChangeAcknowledged())
@@ -79,26 +65,26 @@ export function probingRefusal(): string | null {
 export async function runProbing<T>(sequence: () => Promise<T>, finish?: (found: T) => Promise<void>): Promise<T | null> {
   const refusal = probingRefusal();
   if (refusal) { log('err', refusal); return null; }
-  _running = true;
-  _cancelled = false;
+  isProbing = true;
+  cancelled = false;
   const modes = await readModes();
-  if (modes === null || _cancelled) { _running = false; return null; }
+  if (modes === null || cancelled) { isProbing = false; return null; }
   try {
     const found = await sequence();
     // A Cancel taken after the last move: nothing is written.
-    if (_cancelled) throw new Stop('cancelled');
+    if (cancelled) throw new Stop('cancelled');
     if (finish) {
-      _finishing = true;
+      isFinishing = true;
       await finish(found);
     }
     return found;
   } finally {
-    _cancel = null;
+    endWait = null;
     // After a Cancel, the reset comes first (it puts back grblHAL's own defaults).
     while (isStopping()) await new Promise(r => setTimeout(r, 50));
     await restoreModes(modes);
-    _finishing = false;
-    _running = false;
+    isFinishing = false;
+    isProbing = false;
   }
 }
 
@@ -130,12 +116,12 @@ async function restoreModes(modes: string): Promise<void> {
 }
 
 /** The promise's value, or null if it fails or Cancel is pressed first. */
-function orCancel<T>(p: Promise<T>): Promise<T | null> {
+function unlessCancelled<T>(p: Promise<T>): Promise<T | null> {
   return new Promise(resolve => {
-    if (_cancelled) { resolve(null); return; }
-    _cancel = () => resolve(null);
-    _failed = '';
-    p.then(v => { _cancel = null; resolve(v); }, e => { _cancel = null; if (e instanceof command.CommandFailed) _failed = e.why; resolve(null); });
+    if (cancelled) { resolve(null); return; }
+    endWait = () => resolve(null);
+    failedWhy = '';
+    p.then(v => { endWait = null; resolve(v); }, e => { endWait = null; if (e instanceof command.CommandFailed) failedWhy = e.why; resolve(null); });
   });
 }
 
@@ -148,39 +134,39 @@ function parseProbe(lines: string[]): ProbeResult | null {
 }
 
 /** Why the last command of the routine failed, for the status: a refusal, or no answer and why (an alarm, a reset). */
-let _why = '';
-let _failed = '';
-const noAnswer = (cmd: string) => `${cmd} got no answer${_failed ? ` (${_failed})` : ''}`;
+let lastFailure = '';
+let failedWhy = '';
+const noAnswer = (cmd: string) => `${cmd} got no answer${failedWhy ? ` (${failedWhy})` : ''}`;
 
 /** A probing move, and where it touched. Null if it was refused, not answered, or cancelled. */
 async function probeMove(cmd: string): Promise<ProbeResult | null> {
-  if (_cancelled) return null;
-  const reply = await orCancel(command.send(MM + cmd, { log: true, owner: OWNER }));
-  if (!reply) { _why = noAnswer(MM + cmd); return null; }
-  if (reply.result !== 'ok') { _why = `${MM}${cmd} was refused (error:${reply.code})`; return null; }
+  if (cancelled) return null;
+  const reply = await unlessCancelled(command.send(MM + cmd, { log: true, owner: OWNER }));
+  if (!reply) { lastFailure = noAnswer(MM + cmd); return null; }
+  if (reply.result !== 'ok') { lastFailure = `${MM}${cmd} was refused (error:${reply.code})`; return null; }
   const result = parseProbe(reply.lines);
   if (result) return result;
-  const params = await orCancel(command.send('$#', { owner: OWNER }));
-  if (!params) _why = noAnswer('$#');
+  const params = await unlessCancelled(command.send('$#', { owner: OWNER }));
+  if (!params) lastFailure = noAnswer('$#');
   return params ? parseProbe(params.lines) : null;
 }
 
 /** A move, waiting until the machine has stopped at its end. */
 async function sendAndWait(cmd: string): Promise<boolean> {
-  if (_cancelled) return false;
-  const replies = await orCancel(Promise.all([command.send(MM + cmd, { log: true, owner: OWNER }), command.send('G4P0', { owner: OWNER })]));
-  if (!replies) { _why = noAnswer(MM + cmd); return false; }
+  if (cancelled) return false;
+  const replies = await unlessCancelled(Promise.all([command.send(MM + cmd, { log: true, owner: OWNER }), command.send('G4P0', { owner: OWNER })]));
+  if (!replies) { lastFailure = noAnswer(MM + cmd); return false; }
   const bad = replies.find(r => r.result !== 'ok');
-  if (bad) { _why = `${bad.command} was refused (error:${bad.code})`; return false; }
+  if (bad) { lastFailure = `${bad.command} was refused (error:${bad.code})`; return false; }
   return true;
 }
 
 /** Cancel: the routine's commands not sent yet are taken back, and a move in progress is stopped. False
  *  when there is nothing to cancel: no routine, or its moves are done and its result is being written. */
 export function cancelProbing(): boolean {
-  if (!_running || _finishing) return false;
-  _cancelled = true;
-  if (_cancel) { _cancel(); _cancel = null; }
+  if (!isProbing || isFinishing) return false;
+  cancelled = true;
+  if (endWait) { endWait(); endWait = null; }
   // A $G or $# in flight moves nothing; a move or a dwell behind one may still be under way.
   if (command.cancelOwned(OWNER).some(c => !c.startsWith('$'))) {
     log('info', 'Probing cancelled: stopping the move in progress');
@@ -189,14 +175,14 @@ export function cancelProbing(): boolean {
   return true;
 }
 
-function stopped(): Stop {
-  return new Stop(_cancelled ? 'cancelled' : _why || 'a command failed');
+function stopError(): Stop {
+  return new Stop(cancelled ? 'cancelled' : lastFailure || 'a command failed');
 }
 
-// ── Writing what was found (in a routine's finish) ────────────────────────────
+// Writing what was found (in a routine's finish)
 
 const AXES = ['x', 'y', 'z'] as const;
-const zero3 = (): Point => ({ x: 0, y: 0, z: 0 });
+const zeroPoint = (): Point => ({ x: 0, y: 0, z: 0 });
 
 /** One line of the result, answered: the routine's own, so it goes before the modes are put back. */
 export async function writeLine(line: string): Promise<void> {
@@ -219,7 +205,7 @@ async function readFrame(wcs: string): Promise<{ table: Point | null; g92: Point
     throw new Stop(`$# got no answer (${e.why}), so the offsets in force aren't known: nothing was written`);
   }
   if (reply.result !== 'ok') throw new Stop(`$# was refused (error:${reply.code}), so the offsets in force aren't known: nothing was written`);
-  const vec = (name: string): Point | null => {
+  const readVector = (name: string): Point | null => {
     const line = reply.lines.find(l => l.startsWith(`[${name}:`));
     if (!line) return null;
     const v = line.slice(name.length + 2).split(/[,:\]]/).map(parseFloat).filter(n => Number.isFinite(n)).map(reportMm);
@@ -227,8 +213,8 @@ async function readFrame(wcs: string): Promise<{ table: Point | null; g92: Point
   };
   // The command layer takes [TLO:] as a push line, so it isn't among the reply's lines: offsets.ts has
   // stored it by the time the ok comes.
-  const tlo = vec('TLO') ?? machine.tloVector.value ?? (machine.tlo.value !== null ? { x: 0, y: 0, z: machine.tlo.value } : zero3());
-  return { table: vec(wcs), g92: vec('G92') ?? zero3(), tlo };
+  const tlo = readVector('TLO') ?? machine.tloVector.value ?? (machine.tlo.value !== null ? { x: 0, y: 0, z: machine.tlo.value } : zeroPoint());
+  return { table: readVector(wcs), g92: readVector('G92') ?? zeroPoint(), tlo };
 }
 
 export interface ZeroWrite {
@@ -248,7 +234,7 @@ export async function writeZero(wcs: string, zero: Partial<Point>): Promise<Zero
   const wrote: Partial<Point> = {};
   for (const a of AXES) if (zero[a] !== undefined) wrote[a] = zero[a]! - frame.g92[a] - frame.tlo[a];
   const words = AXES.filter(a => wrote[a] !== undefined).map(a => a.toUpperCase() + wrote[a]!.toFixed(4)).join('');
-  await writeLine(`G21G10L2P${WCS_P[wcs] ?? 1}${words}`);
+  await writeLine(`G21G10L2P${machine.WCS_P[wcs] ?? 1}${words}`);
   log('info', `Probed ${AXES.filter(a => zero[a] !== undefined).map(a => `${a.toUpperCase()}${zero[a]!.toFixed(4)}`).join(' ')} → ${wcs} ${words}`);
   return { wrote, was: frame.table, g92: frame.g92, tlo: frame.tlo };
 }
@@ -265,25 +251,25 @@ export function machineIo(P: ProbeSettings, onStep: (type: StepType, label: stri
     async move(x, y, z, label, type = 'rapid') {
       usable();
       onStep(type, label);
-      if (!await rapidToMPos(x, y, z)) throw stopped();
+      if (!await rapidToMPos(x, y, z)) throw stopError();
     },
     async touch(axis, dir, distance, face) {
       usable();
       const sign = dir < 0 ? '-' : '';
       onStep('probe', `Find the ${face} (fast)`);
       const fast = await probeMove(`G38.3G91F${P.fast}${axis}${sign}${distance.toFixed(4)}`);
-      if (!fast) throw stopped();
+      if (!fast) throw stopError();
       if (!fast.success) throw new Miss(face, distance, false);
       onStep('contact', `Touched the ${face}`);
       onStep('back', `Back off ${P.back} mm`);
-      if (!await backOff(axis, dir)) throw stopped();
+      if (!await backOff(axis, dir)) throw stopError();
       onStep('slow', `Touch the ${face} again (slow)`);
       const slow = await probeMove(`G38.3G91F${P.slow}${axis}${sign}${(P.back * 2).toFixed(4)}`);
-      if (!slow) throw stopped();
+      if (!slow) throw stopError();
       if (!slow.success) throw new Miss(face, P.back * 2, true);
       onStep('contact', `Touched the ${face}`);
       onStep('back', `Back off ${P.back} mm`);
-      if (!await backOff(axis, dir)) throw stopped();
+      if (!await backOff(axis, dir)) throw stopError();
       return { x: slow.x, y: slow.y, z: slow.z };
     },
   };
@@ -295,34 +281,37 @@ export function machineAt(): Point {
   return { x: m.x, y: m.y, z: m.z };
 }
 
-// ── Tool length ───────────────────────────────────────────────────────────────
+// Tool length
 
 /** On a touch plate: straight down, up to the search distance, then back up to the start. The Z touched. */
-export async function touchPlate(io: Io, sp: Point, c: { probeDistance: number }): Promise<Point> {
-  const r = await afterMiss(() => io.touch('Z', -1, c.probeDistance, 'plate'), () => io.move(null, null, sp.z, 'Back up to the start height'));
-  await io.move(null, null, sp.z, 'Back up to the start height', 'result');
-  return r;
+export async function touchPlate(io: Io, start: Point, c: { probeDistance: number }): Promise<Point> {
+  const touched = await afterMiss(() => io.touch('Z', -1, c.probeDistance, 'plate'), () => io.move(null, null, start.z, 'Back up to the start height'));
+  await io.move(null, null, start.z, 'Back up to the start height', 'result');
+  return touched;
 }
 
 /** On the toolsetter at G59.3: up to the top of the homed Z travel, over it, down to the approach height,
  *  probe, and back the same way to the start. The Z touched. */
-export async function toolsetter(io: Io, sp: Point, ts: Point, c: { toolsetterDepth: number }): Promise<Point> {
+export async function toolsetter(io: Io, start: Point, setter: Point, c: { toolsetterDepth: number }): Promise<Point> {
   const depth = c.toolsetterDepth;
-  const top = machine.zTravel.peek()?.max ?? 0; await io.move(null, null, top, `Up to the top of Z travel, machine Z ${top}`);   // F5: the homed travel's top (stores/machine.ts zTravel), not machine Z0
-  await io.move(ts.x, ts.y, null, 'Over the toolsetter (G59.3)');
-  await io.move(null, null, ts.z + depth, `Down to ${depth} mm above it`);
-  const r = await afterMiss(() => io.touch('Z', -1, depth + 5, 'toolsetter'), async () => {
+  // The top of the homed travel (stores/machine.ts zTravel), not machine Z0: with hard limits on, Z0 is
+  // past the soft limit.
+  const top = machine.zTravel.peek()?.max ?? 0;
+  await io.move(null, null, top, `Up to the top of Z travel, machine Z ${top}`);
+  await io.move(setter.x, setter.y, null, 'Over the toolsetter (G59.3)');
+  await io.move(null, null, setter.z + depth, `Down to ${depth} mm above it`);
+  const touched = await afterMiss(() => io.touch('Z', -1, depth + 5, 'toolsetter'), async () => {
     await io.move(null, null, top, `Up to the top of Z travel, machine Z ${top}`);
-    await io.move(sp.x, sp.y, null, 'Back over the start');
+    await io.move(start.x, start.y, null, 'Back over the start');
   });
   await io.move(null, null, top, `Up to the top of Z travel, machine Z ${top}`);
-  await io.move(sp.x, sp.y, null, 'Back over the start');
-  await io.move(null, null, sp.z, 'Down to the start height', 'result');
-  return r;
+  await io.move(start.x, start.y, null, 'Back over the start');
+  await io.move(null, null, start.z, 'Down to the start height', 'result');
+  return touched;
 }
 
 export async function rapidToMPos(x: number | null, y: number | null, z: number | null): Promise<boolean> {
-  if (_cancelled) return false;
+  if (cancelled) return false;
   let cmd = 'G53G0';
   if (x !== null) cmd += `X${x.toFixed(4)}`;
   if (y !== null) cmd += `Y${y.toFixed(4)}`;

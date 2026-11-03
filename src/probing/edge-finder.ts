@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Edge finder probe logic: a corner, a side, or the top, outside the part or inside a pocket
-// ═══════════════════════════════════════════════
+// The edge finder: a corner, a side or the top, outside the part or inside a pocket.
 //
 // The letters are ioSender's: A front-left, B front-right, C back-right, D back-left; AB front, CD back,
 // AD left, CB right; Z the top. Every touch is made with the tip a radius short of the surface, so the
@@ -10,7 +8,7 @@ import { Miss, afterMiss } from './io';
 import type { Io, Point } from './io';
 import type { ProbeSettings } from './settings';
 
-export interface EdgeCfg {
+export interface EdgeConfig {
   mode: 'external' | 'internal';
   edge: string;
   /** How far from the corner each side is touched, mm. */
@@ -38,36 +36,36 @@ export const SIDES: Record<string, { axis: 'X' | 'Y'; into: number; name: string
 
 /** The routine, from `sp`, with the probe settings P. Throws Miss or Stop as the Io does, after going
  *  back up to the start height from a miss. */
-export async function edge(io: Io, sp: Point, c: EdgeCfg, P: ProbeSettings): Promise<EdgeFound> {
+export async function edge(io: Io, start: Point, c: EdgeConfig, P: ProbeSettings): Promise<EdgeFound> {
   return afterMiss(
-    () => c.edge === 'Z' ? top(io, sp, c, P) : c.edge.length === 2 ? side(io, sp, c, P) : corner(io, sp, c, P),
-    () => io.move(null, null, sp.z, 'Up'));
+    () => c.edge === 'Z' ? top(io, start, c, P) : c.edge.length === 2 ? side(io, start, c, P) : corner(io, start, c, P),
+    () => io.move(null, null, start.z, 'Up'));
 }
 
-async function top(io: Io, sp: Point, c: EdgeCfg, P: ProbeSettings): Promise<EdgeFound> {
+async function top(io: Io, start: Point, c: EdgeConfig, P: ProbeSettings): Promise<EdgeFound> {
   const face = c.touchPlateHeight ? 'plate' : c.mode === 'internal' ? 'pocket floor' : 'top';
-  const r = await io.touch('Z', -1, P.search, face);
-  await io.move(null, null, sp.z, 'Back up to the start', 'result');
-  return { z: r.z };
+  const touched = await io.touch('Z', -1, P.search, face);
+  await io.move(null, null, start.z, 'Back up to the start', 'result');
+  return { z: touched.z };
 }
 
 /** It starts over the side (or near the wall), moves out past it at the start height, goes down, then
- *  probes back in (the owner, 3 Nov). */
-async function side(io: Io, sp: Point, c: EdgeCfg, P: ProbeSettings): Promise<EdgeFound> {
+ *  probes back in. */
+async function side(io: Io, start: Point, c: EdgeConfig, P: ProbeSettings): Promise<EdgeFound> {
   const s = SIDES[c.edge];
   const dir = c.mode === 'external' ? s.into : -s.into;
   const clr = P.clear + P.tip / 2;
   const face = `${s.name} ${c.mode === 'external' ? 'side' : 'wall'}`;
   const isX = s.axis === 'X';
-  await io.move(isX ? sp.x - dir * clr : null, isX ? null : sp.y - dir * clr, null, `Clear of the ${face}`);
-  await io.move(null, null, sp.z - c.depth, `Down ${c.depth} mm`);
-  const r = await io.touch(s.axis, dir, P.search, face);
-  await io.move(null, null, sp.z, 'Up');
-  await io.move(sp.x, sp.y, null, `Back to the start: ${s.axis}0 on the ${face}`, 'result');
-  return isX ? { x: r.x + dir * P.tip / 2 } : { y: r.y + dir * P.tip / 2 };
+  await io.move(isX ? start.x - dir * clr : null, isX ? null : start.y - dir * clr, null, `Clear of the ${face}`);
+  await io.move(null, null, start.z - c.depth, `Down ${c.depth} mm`);
+  const touched = await io.touch(s.axis, dir, P.search, face);
+  await io.move(null, null, start.z, 'Up');
+  await io.move(start.x, start.y, null, `Back to the start: ${s.axis}0 on the ${face}`, 'result');
+  return isX ? { x: touched.x + dir * P.tip / 2 } : { y: touched.y + dir * P.tip / 2 };
 }
 
-async function corner(io: Io, sp: Point, c: EdgeCfg, P: ProbeSettings): Promise<EdgeFound> {
+async function corner(io: Io, start: Point, c: EdgeConfig, P: ProbeSettings): Promise<EdgeFound> {
   const into = CORNERS[c.edge];
   const out = c.mode === 'external';
   // s: the probe's direction of travel, onto the part's sides, or out to the pocket's walls.
@@ -76,17 +74,17 @@ async function corner(io: Io, sp: Point, c: EdgeCfg, P: ProbeSettings): Promise<
   const wd = out ? 'side' : 'wall';
   const xf = `${into.x > 0 ? 'left' : 'right'} ${wd}`, yf = `${into.y > 0 ? 'front' : 'back'} ${wd}`;
 
-  await io.move(null, sp.y + c.offset * into.y, null, `Along to the ${xf}`);
-  await io.move(sp.x - s.x * clr, null, null, 'Clear of it');
-  await io.move(null, null, sp.z - c.depth, `Down ${c.depth} mm`);
+  await io.move(null, start.y + c.offset * into.y, null, `Along to the ${xf}`);
+  await io.move(start.x - s.x * clr, null, null, 'Clear of it');
+  await io.move(null, null, start.z - c.depth, `Down ${c.depth} mm`);
   const rx = await io.touch('X', s.x, P.search, xf);
-  await io.move(null, null, sp.z, 'Up');
+  await io.move(null, null, start.z, 'Up');
 
-  await io.move(sp.x + c.offset * into.x, sp.y, null, `Along to the ${yf}`);
-  await io.move(null, sp.y - s.y * clr, null, 'Clear of it');
-  await io.move(null, null, sp.z - c.depth, `Down ${c.depth} mm`);
+  await io.move(start.x + c.offset * into.x, start.y, null, `Along to the ${yf}`);
+  await io.move(null, start.y - s.y * clr, null, 'Clear of it');
+  await io.move(null, null, start.z - c.depth, `Down ${c.depth} mm`);
   const ry = await io.touch('Y', s.y, P.search, yf);
-  await io.move(null, null, sp.z, 'Up');
+  await io.move(null, null, start.z, 'Up');
 
   const found: EdgeFound = { x: rx.x + s.x * rad, y: ry.y + s.y * rad };
   if (c.probeZ) {
@@ -95,7 +93,7 @@ async function corner(io: Io, sp: Point, c: EdgeCfg, P: ProbeSettings): Promise<
     await io.move(found.x! + into.x * c.offset, found.y! + into.y * c.offset, null, `Over the ${face}`);
     try { found.z = (await io.touch('Z', -1, P.search, face)).z; }
     catch (e) { if (!(e instanceof Miss)) throw e; found.zMissed = e; }
-    await io.move(null, null, sp.z, 'Up');
+    await io.move(null, null, start.z, 'Up');
   }
   await io.move(found.x!, found.y!, null, `Over the corner: X0 Y0${c.probeZ ? ' and Z0' : ''}`, 'result');
   return found;

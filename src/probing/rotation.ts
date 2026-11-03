@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Rotation measurement probe logic
-// ═══════════════════════════════════════════════
+// Rotation: the angle of a side of the part, and turning the loaded program by it.
 
 import { log } from '../console';
 import { processGcode } from '../gcode';
@@ -12,7 +10,7 @@ import type { ProbeSettings } from './settings';
 
 export type Rotation = { angleDeg: number; p1: { x: number; y: number }; p2: { x: number; y: number } };
 
-export interface RotCfg {
+export interface RotationConfig {
   edge: 'AB' | 'AD' | 'CB' | 'CD';
   /** How far along the side the second point is, mm. */
   offset: number;
@@ -21,7 +19,7 @@ export interface RotCfg {
 }
 
 /** Each side as the edge finder names it: the axis it runs along, and the probe's direction of travel onto it. */
-export const ROT_SIDES: Record<string, { along: 'X' | 'Y'; dir: number; name: string }> = {
+export const ROTATION_SIDES: Record<string, { along: 'X' | 'Y'; dir: number; name: string }> = {
   AB: { along: 'X', dir: 1, name: 'front' },
   CD: { along: 'X', dir: -1, name: 'back' },
   AD: { along: 'Y', dir: 1, name: 'left' },
@@ -30,25 +28,25 @@ export const ROT_SIDES: Record<string, { along: 'X' | 'Y'; dir: number; name: st
 
 /** Two points on the side, the point spacing apart along it (to the right, or further back). At each, as
  *  for a single side: out past the side at the start height, down, then in to it. */
-export async function rotation(io: Io, sp: Point, c: RotCfg, P: ProbeSettings): Promise<Rotation> {
+export async function rotation(io: Io, start: Point, c: RotationConfig, P: ProbeSettings): Promise<Rotation> {
   const clr = P.clear + P.tip / 2;
-  const side = ROT_SIDES[c.edge];
+  const side = ROTATION_SIDES[c.edge];
   const across = side.along === 'X' ? 'Y' : 'X';
   const pts = await afterMiss(async () => {
     const pts: { x: number; y: number }[] = [];
     for (const q of [0, c.offset]) {
       const n = pts.length + 1;
-      const at = side.along === 'X' ? { x: sp.x + q, y: sp.y - side.dir * clr } : { x: sp.x - side.dir * clr, y: sp.y + q };
+      const at = side.along === 'X' ? { x: start.x + q, y: start.y - side.dir * clr } : { x: start.x - side.dir * clr, y: start.y + q };
       await io.move(at.x, at.y, null, `To point ${n}, clear of the side`);
-      await io.move(null, null, sp.z - c.depth, `Down ${c.depth} mm`);
-      const r = await io.touch(across, side.dir, P.search, `${side.name} side at point ${n}`);
-      await io.move(null, null, sp.z, 'Up');
+      await io.move(null, null, start.z - c.depth, `Down ${c.depth} mm`);
+      const touched = await io.touch(across, side.dir, P.search, `${side.name} side at point ${n}`);
+      await io.move(null, null, start.z, 'Up');
       // Both touches are a tip radius short of the side, so the radius drops out of the angle.
-      pts.push({ x: r.x, y: r.y });
+      pts.push({ x: touched.x, y: touched.y });
     }
     return pts;
-  }, () => io.move(null, null, sp.z, 'Up'));
-  await io.move(sp.x, sp.y, null, 'Back to the start: angle measured', 'result');
+  }, () => io.move(null, null, start.z, 'Up'));
+  await io.move(start.x, start.y, null, 'Back to the start: angle measured', 'result');
 
   const [p1, p2] = pts;
   const dx = p2.x - p1.x, dy = p2.y - p1.y;

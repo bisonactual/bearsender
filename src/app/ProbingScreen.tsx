@@ -48,12 +48,12 @@ function Choice<T extends string>({ value, set, opts, label, full }: { value: T;
   );
 }
 
-// ── Each routine's plan, for its drawing: a dry run whenever what it depends on changes ──
+// Each routine's plan, for its drawing: a dry run whenever what it depends on changes
 
 function inputs(): PlanInputs {
   const linked = connection.connected.value;
   return {
-    P: ps.probe.value, tl: pr.tl.value, ef: pr.ef.value, efEdge: pr.efEdge.value, cf: pr.cf.value, rot: pr.rot.value,
+    P: ps.probe.value, tl: pr.toolLengthConfig.value, ef: pr.edgeConfig.value, efEdge: pr.pickedEdge.value, cf: pr.centreConfig.value, rot: pr.rotationConfig.value,
     ts: machine.offsets.value['G59.3'] ?? null,
     // Where the machine is matters to the toolsetter's drawing only; it is read when the rest changes, not followed.
     at: linked ? machine.mpos.peek() : null,
@@ -173,8 +173,8 @@ function pickName(id: string, ins: boolean): string {
 /** The part from above with a round target on each corner, side and the top; rotation shows the sides only. */
 function Picker({ kind }: { kind: 'ef' | 'rot' }) {
   const [ref, size] = useSize<HTMLDivElement>();
-  const ins = kind === 'ef' && pr.ef.value.mode === 'internal';
-  const pick = kind === 'ef' ? pr.efEdge.value : pr.rot.value.edge;
+  const ins = kind === 'ef' && pr.edgeConfig.value.mode === 'internal';
+  const pick = kind === 'ef' ? pr.pickedEdge.value : pr.rotationConfig.value.edge;
   const ids = kind === 'ef' ? Object.keys(CORNER_NAMES).concat(Object.keys(SIDES), ['Z']) : SIDE_IDS;
   return (
     <div class="fs-picker" ref={ref} role="radiogroup" aria-label={kind === 'ef' ? 'Corner, side or surface' : 'Side to measure along'}>
@@ -185,7 +185,7 @@ function Picker({ kind }: { kind: 'ef' | 'rot' }) {
         const [x, y] = pickAt(id), name = kind === 'rot' ? pickName(id, false) : pickName(id, ins);
         return <button type="button" class={'fs-pk-t' + (pick === id ? ' is-on' : '')} role="radio" aria-checked={pick === id ? 'true' : 'false'}
           aria-label={name} title={`${name} (${id})`} style={{ left: x + '%', top: y + '%' }}
-          onClick={() => kind === 'ef' ? pr.pickEdge(id) : pr.update('rot', pr.rot, { edge: id as pr.RotEdge })} />;
+          onClick={() => kind === 'ef' ? pr.pickEdge(id) : pr.update('rot', pr.rotationConfig, { edge: id as pr.RotationEdge })} />;
       })}
     </div>
   );
@@ -204,8 +204,8 @@ function Tiles<T extends 'bore' | 'boss' | 'plate' | 'setter', V extends string>
 }
 
 function EdgeWhat() {
-  const c = pr.ef.value, ins = c.mode === 'internal', pick = pr.efEdge.value;
-  const set = (p: Partial<pr.EfCfg>) => pr.update('ef', pr.ef, p);
+  const c = pr.edgeConfig.value, ins = c.mode === 'internal', pick = pr.pickedEdge.value;
+  const set = (p: Partial<pr.EdgeFinderConfig>) => pr.update('ef', pr.edgeConfig, p);
   const kind = !pick ? '' : pick === 'Z' ? 'z' : pick.length === 2 ? 's' : 'c';
   const sets = kind === 'c' ? 'sets X and Y' + (c.probeZ ? ' and Z' : '') : kind === 's' ? 'sets ' + SIDES[pick!].axis : 'sets Z';
   return <>
@@ -222,14 +222,14 @@ function EdgeWhat() {
         <UnitField label={`Put Z0 this far below the ${ins ? 'floor' : 'top'}`} value={c.workpieceHeight} unit="mm" step={0.1} set={v => set({ workpieceHeight: v })} />
       </>}
     </div>}
-    <TargetBlock sig={pr.efTarget} what={kind === 'c' ? (c.probeZ ? 'X, Y and Z' : 'X and Y') : kind === 's' ? SIDES[pick!].axis : kind === 'z' ? 'Z' : 'the zero'} />
+    <TargetBlock sig={pr.edgeTarget} what={kind === 'c' ? (c.probeZ ? 'X, Y and Z' : 'X and Y') : kind === 's' ? SIDES[pick!].axis : kind === 'z' ? 'Z' : 'the zero'} />
     <ProbeLine />
   </>;
 }
 
 function CentreWhat() {
-  const c = pr.cf.value;
-  const set = (p: Partial<typeof c>) => pr.update('cf', pr.cf, p);
+  const c = pr.centreConfig.value;
+  const set = (p: Partial<typeof c>) => pr.update('cf', pr.centreConfig, p);
   return <>
     <Tiles label="Centre of" value={c.centerMode} set={v => set({ centerMode: v })} opts={[['inside', 'bore', 'BORE · INSIDE'], ['outside', 'boss', 'BOSS · OUTSIDE']]} />
     <div class="fs-prow fs-pmid"><span class="fs-cap">FIND</span><Choice label="Axes" value={c.axes} set={v => set({ axes: v })} opts={[['XY', 'X AND Y'], ['X', 'X ONLY'], ['Y', 'Y ONLY']]} /></div>
@@ -241,20 +241,20 @@ function CentreWhat() {
       <UnitField label="Probe this far below the start" value={c.depth} unit="mm" step={0.5} min={0} set={v => set({ depth: v })} />
       <UnitField label="Times round" value={c.passes} unit="×" step={1} min={1} set={v => set({ passes: Math.max(1, Math.round(v)) })} />
     </div>
-    <TargetBlock sig={pr.cfTarget} what={c.axes === 'XY' ? 'X and Y' : c.axes} />
+    <TargetBlock sig={pr.centreTarget} what={c.axes === 'XY' ? 'X and Y' : c.axes} />
     <ProbeLine />
   </>;
 }
 
 function RotationWhat() {
-  const c = pr.rot.value;
+  const c = pr.rotationConfig.value;
   const file = job.file.value;
   return <>
     <Picker kind="rot" />
     <div class="fs-pk-cap"><span class="nm">{pickName(c.edge, false)}</span><span class="ds">two points along it give the angle · was “{c.edge}”</span></div>
     <div class="fs-prow">
-      <UnitField label="Second point this far along" value={c.offset} unit="mm" step={5} min={1} set={v => pr.update('rot', pr.rot, { offset: v })} />
-      <UnitField label="Probe this far below the start" value={c.depth} unit="mm" step={0.5} min={0} set={v => pr.update('rot', pr.rot, { depth: v })} />
+      <UnitField label="Second point this far along" value={c.offset} unit="mm" step={5} min={1} set={v => pr.update('rot', pr.rotationConfig, { offset: v })} />
+      <UnitField label="Probe this far below the start" value={c.depth} unit="mm" step={0.5} min={0} set={v => pr.update('rot', pr.rotationConfig, { depth: v })} />
     </div>
     <div class="fs-psect"><div class="fs-cap">RESULT</div>
       <div class="fs-note">The angle shows in column 3. <b>APPLY ROTATION</b> then turns {file ? <b>{file}</b> : 'the loaded program'} about X0 Y0 by that angle, once. No work offset is written.{job.lines.value.length ? '' : ' No program is loaded.'}</div>
@@ -264,8 +264,8 @@ function RotationWhat() {
 }
 
 function ToolWhat() {
-  const c = pr.tl.value;
-  const set = (p: Partial<pr.TlCfg>) => pr.update('tl', pr.tl, p);
+  const c = pr.toolLengthConfig.value;
+  const set = (p: Partial<pr.ToolLengthConfig>) => pr.update('tl', pr.toolLengthConfig, p);
   const tlo = machine.tlo.value, tool = machine.tool.value;
   const linked = connection.connected.value, busy = !!pr.running.value;
   const when = (at: number) => new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -336,7 +336,7 @@ function Where({ tab, plan }: { tab: Routine; plan: Plan | null }) {
     at = { x: w0.x + p.x - s0.x, y: w0.y + p.y - s0.y, z: w0.z + p.z - s0.z };
   }
   const ok = run?.phase === 'ok';
-  const s: ViewState = { cur, live: !!follow || ok, showRes: !follow, at, tip: ps.probe.value.tip, angle: tab === 'rot' && ok ? pr.rotAngle.value ?? lastAngle(run) : null };
+  const s: ViewState = { cur, live: !!follow || ok, showRes: !follow, at, tip: ps.probe.value.tip, angle: tab === 'rot' && ok ? pr.measuredAngle.value ?? lastAngle(run) : null };
   const w = m.wps[cur], w0 = m.wps[0];
   const busy = !!pr.running.value;
   return <>
@@ -350,7 +350,7 @@ function Where({ tab, plan }: { tab: Routine; plan: Plan | null }) {
       <button type="button" class="fs-btn fs-btn-sm" aria-label="Next move" disabled={busy || cur >= n - 1} onClick={() => { stopPlay(); setStep(tab, cur + 1); }}>▶|</button>
       <span class="fs-pstep">{cur + 1} / {n} · {follow && run ? run.label : w.label}</span>
       <span class="fs-mono fs-dim fs-pxyz" title="This step's position, mm from where the probe starts">X {f3(w.x - w0.x)} Y {f3(w.y - w0.y)} Z {f3(w.z - w0.z)}</span>
-      <button type="button" class="fs-btn fs-btn-sm" title="Draw these moves in the job screen's 3D view" onClick={() => pr.show3d(m)}>3D VIEW</button>
+      <button type="button" class="fs-btn fs-btn-sm" title="Draw these moves in the job screen's 3D view" onClick={() => pr.showInJobPreview(m)}>3D VIEW</button>
     </div>}
     {n > 0 && <div class="fs-plegend" aria-label="Key">
       <span><i class="is-rapid" />Rapid</span><span><i class="is-probe" />Probe move</span><span><i class="is-touch" />Touch</span>
@@ -365,12 +365,12 @@ function lastAngle(run: pr.Run | undefined): number | null {
   return v ? parseFloat(v) : null;
 }
 
-// ── Column 3: the probe light, the jog pad, then the status, the result and the buttons ──
+// Column 3: the probe light, the jog pad, then the status, the result and the buttons
 
 function ProbeLight({ tab }: { tab: Routine }) {
   const linked = connection.connected.value;
   const hit = linked && machine.pins.value.includes('P');
-  const what = tab === 'tl' && pr.tl.value.mode === 'touchplate' ? 'plate on the tool' : 'stylus';
+  const what = tab === 'tl' && pr.toolLengthConfig.value.mode === 'touchplate' ? 'plate on the tool' : 'stylus';
   return (
     <div class={'fs-plamp' + (hit ? ' is-hit' : '')} role="status">
       <span class="fs-lamp" /><span class="w">PROBE {!linked ? '—' : hit ? 'TOUCHING' : 'OPEN'}</span>
@@ -419,7 +419,7 @@ function RunFoot({ tab }: { tab: Routine }) {
   else if (run) { tone = run.phase === 'ok' ? 'ok' : run.phase === 'fail' ? 'err' : run.phase === 'held' ? 'warn' : ''; text = run.text; }
   else text = pr.readyText(tab);
   const lines = run?.phase === 'ok' && (!busy || busy === tab) ? run.lines : [];
-  const canApply = tab === 'rot' && pr.rotAngle.value !== null && job.lines.value.length > 0;
+  const canApply = tab === 'rot' && pr.measuredAngle.value !== null && job.lines.value.length > 0;
   return <>
     <div class={'fs-pstatus2' + (tone ? ' is-' + tone : '')} role="status">{text}</div>
     {lines.length > 0 && <div class="fs-pres fs-mono">
@@ -428,14 +428,14 @@ function RunFoot({ tab }: { tab: Routine }) {
     <div class="fs-prunb">
       <button type="button" class="fs-pgo" disabled={!linked || !!busy} onClick={() => probeNow(tab)}>PROBE</button>
       {tab === 'rot' && <button type="button" class="fs-pap" disabled={!canApply}
-        title={pr.rotAngle.value === null ? 'Measure first' : `Turn the program by ${pr.rotAngle.value.toFixed(3)}°`} onClick={() => pr.applyRotation()}>APPLY ROTATION</button>}
+        title={pr.measuredAngle.value === null ? 'Measure first' : `Turn the program by ${pr.measuredAngle.value.toFixed(3)}°`} onClick={() => pr.applyRotation()}>APPLY ROTATION</button>}
       <button type="button" class={'fs-pcx' + (busy && !pr.finishing.value ? ' is-live' : '')} disabled={!busy || pr.finishing.value}
         title={pr.finishing.value ? 'The moves are done and the result is being written: nothing is left to cancel' : 'Stop the routine and the move in progress'} onClick={() => pr.cancel()}>CANCEL</button>
     </div>
   </>;
 }
 
-// ── The screen and the popups ─────────────────────────────────────────────────
+// The screen and the popups
 
 function ProbingTabs() {
   const tab = ui.probingTab.value;
