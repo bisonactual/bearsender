@@ -23,10 +23,16 @@ export interface InterpreterContext {
   initialLengthOffset?: Point;
   /** The controller's g73_retract setting, in mm. Required for G73. */
   g73RetractMm?: number;
-  /** The controller's modes when the program starts ($G). Each one not given is G21, G90, G17, G94, G0. */
-  initialModes?: Partial<Pick<ModalState, 'units' | 'distance' | 'plane' | 'feedMode' | 'motion'>>;
+  /** The controller's modes when the program starts ($G). Each one not given is G21, G90, G17, G94, G0,
+   *  G91.1, G98, M5 with no speed, coolant off and no feed. `programmedFeed` is the F word, in the units
+   *  and feed mode given. */
+  initialModes?: Partial<Pick<ModalState, 'units' | 'distance' | 'plane' | 'feedMode' | 'motion' | 'arcDistance' | 'retract' |
+    'spindle' | 'spindleSpeed' | 'coolant' | 'programmedFeed'>>;
   /** Where homing ($H) leaves each axis, in machine coordinates; null where it isn't known. */
   homePosition?: Position;
+  /** What else $H does: the axes the controller's homing cycles home ($44-$49; null if not known), and the
+   *  startup lines it runs after a complete homing ($N0, $N1; null if not known, empty if none). */
+  homing?: { axes: Axis[] | null; startup: string[] | null };
   /** After M2/M30 grblHAL resets some modes and reads on. 'stop' (the default) reads nothing after it,
    *  for a sender that doesn't send the rest; 'continue' reads on with grblHAL's resets. */
   afterProgramEnd?: 'stop' | 'continue';

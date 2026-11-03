@@ -64,14 +64,17 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
   if (!Number.isInteger(maxMoves) || maxMoves < 1) throw new Error('maxExpandedMoves must be a positive integer');
   const modes = context.initialModes;
   if (!modes) issue(0, 'assumed-modes', 'Starting modes not supplied; G21 G90 G17 G94 G0 assumed.', 'inference');
+  // The F word inherited is in the starting units and feed mode, as a program's own F would be.
+  const startUnits = modes?.units ?? 'G21', startFeedMode = modes?.feedMode ?? 'G94', startF = modes?.programmedFeed ?? null;
   let state: ModalState = {
-    motion: modes?.motion ?? 'G0', plane: modes?.plane ?? 'G17', units: modes?.units ?? 'G21', distance: modes?.distance ?? 'G90',
-    arcDistance: 'G91.1', feedMode: modes?.feedMode ?? 'G94',
+    motion: modes?.motion ?? 'G0', plane: modes?.plane ?? 'G17', units: startUnits, distance: modes?.distance ?? 'G90',
+    arcDistance: modes?.arcDistance ?? 'G91.1', feedMode: startFeedMode,
     workOffset: active, workOffsetValue: offsets[active] ? { ...offsets[active]! } : unknown(),
     tool: context.initialTool ?? null, selectedTool: context.initialTool ?? null,
     lengthOffset: context.initialLengthOffset ? { mode: 'G43', h: null, value: { ...context.initialLengthOffset } } : { mode: 'G49', h: null, value: zero() }, g92: { ...(context.initialG92 ?? zero()) },
-    spindle: 'M5', spindleSpeed: null, coolant: { mist: false, flood: false }, feed: null, programmedFeed: null,
-    retract: 'G98', position: { ...(context.initialPosition ?? unknown()) }, cycle: null,
+    spindle: modes?.spindle ?? 'M5', spindleSpeed: modes?.spindleSpeed ?? null, coolant: { mist: false, flood: false, ...modes?.coolant },
+    feed: startF === null ? null : startF * (startFeedMode === 'G94' && startUnits === 'G20' ? 25.4 : 1), programmedFeed: startF,
+    retract: modes?.retract ?? 'G98', position: { ...(context.initialPosition ?? unknown()) }, cycle: null,
     operation: null, programEnd: null, reliable: true,
   };
   if (!context.initialPosition) issue(0, 'unknown-start', 'Initial machine position not supplied; axes remain unknown until established by absolute moves.');
@@ -299,12 +302,27 @@ export function interpretGcode(text: string, context: InterpreterContext = {}): 
       if (halted || TRANSPARENT.test(text)) { finish(); continue; }
       const homing = text.match(/^\$H([XYZABCUVW]*)$/);
       if (homing) {
-        const axes = homing[1] ? AXES.filter(k => homing[1].includes(k.toUpperCase())) : AXES;
+        // $H homes the axes of the controller's homing cycles ($44-$49); $H<axes> those named. After a
+        // complete homing grblHAL runs its startup lines ($N0, $N1), which can move or change modes.
+        const cycles = context.homing?.axes ?? null;
+        const named = homing[1] ? AXES.filter(k => homing[1].includes(k.toUpperCase())) : cycles ?? AXES;
         const end = { ...state.position };
-        for (const k of axes) end[k] = context.homePosition?.[k] ?? null;
-        if (axes.some(k => end[k] === null)) issue(line, 'unknown-home', `${text}: where homing leaves the machine isn't known; positions after it are unknown until absolute moves set them.`);
+        for (const k of named) end[k] = context.homePosition?.[k] ?? null;
+        if (named.some(k => end[k] === null)) issue(line, 'unknown-home', `${text}: where homing leaves the machine isn't known; positions after it are unknown until absolute moves set them.`);
         // A rapid's time is a lower bound for homing, which seeks slower.
-        if (axes.length) emit(line, 'rapid', end, '$H', undefined, deltaTo(end, axes));
+        if (named.length) emit(line, 'rapid', end, '$H', undefined, deltaTo(end, named));
+        const startup = context.homing?.startup ?? null;
+        if (!homing[1] && cycles === null) {
+          issue(line, 'unknown-home', `${text}: which axes the controller homes ($44-$49) wasn't read, so X, Y and Z are taken as homed; any not homed stay where they were.`);
+          markIncomplete(); state.reliable = false;
+        }
+        if (startup === null || startup.length) {
+          issue(line, 'unknown-home', startup === null
+            ? `${text}: the controller's startup lines ($N0, $N1) weren't read; grblHAL runs them after homing, and they can move the machine or change modes, so positions after it are unknown until absolute moves set them.`
+            : `${text}: after homing grblHAL runs its startup lines (${startup.join('; ')}), which BearSender doesn't follow; positions after it are unknown until absolute moves set them.`);
+          markIncomplete(); state.reliable = false;
+          state.position = unknown();
+        }
       } else {
         const jog = text.startsWith('$J=');
         const setting = /^\$(\d+|N\d+)=/.test(text);

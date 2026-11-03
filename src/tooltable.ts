@@ -45,16 +45,18 @@ function parseToolTableLine(line: string): ToolEntry {
   return entry;
 }
 
-let pending: Promise<void> | null = null;
+let pending: Promise<string | null> | null = null;
 
-/** Reads the tool table ($TTLIST). A read already under way is joined, not sent again. */
-export function loadToolTable(): Promise<void> {
-  if (!connection.connected.value) return Promise.resolve();
+/** Reads the tool table ($TTLIST). A read already under way is joined, not sent again. Resolves with
+ *  null when the table came in, or why it didn't (the error, no answer, not connected): the table held
+ *  is then the one from before. */
+export function loadToolTable(): Promise<string | null> {
+  if (!connection.connected.value) return Promise.resolve('not connected');
   if (!pending) pending = read().finally(() => { pending = null; reading.value = false; });
   return pending;
 }
 
-async function read(): Promise<void> {
+async function read(): Promise<string | null> {
   reading.value = true;
   cutShort.value = null;
   try {
@@ -68,13 +70,15 @@ async function read(): Promise<void> {
       machine.toolTable.value = entries;
       machine.toolTableError.value = null;
       log('info', 'Tool table: ' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies'));
-    } else {
-      const raw = 'error:' + reply.code;
-      machine.toolTableError.value = raw;
-      log('err', '$TTLIST: ' + raw);
+      return null;
     }
+    const raw = 'error:' + reply.code;
+    machine.toolTableError.value = raw;
+    log('err', '$TTLIST: ' + raw);
+    return raw;
   } catch (e) {
     if (!(e instanceof command.CommandFailed)) throw e;
     cutShort.value = e.why;
+    return e.why;
   }
 }

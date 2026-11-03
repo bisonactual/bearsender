@@ -48,6 +48,24 @@ export const toolTableError = signal<string | null>(null);
 export const settings = signal<Record<number, string>>({});
 /** The modal state from the last [GC:] line: G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0. */
 export const modal = signal<string[]>([]);
+/** The startup lines ($N0, $N1) as $N lists them, empty ones left out; null until read. grblHAL runs them
+ *  after a reset and after homing. */
+export const startupLines = signal<string[] | null>(null);
+
+/** The Z travel once homed, in machine coordinates, as grblHAL sets it (machine_limits.c,
+ *  limits_set_work_envelope): `min` to `max`, with the pull-off ($27) off the ends when hard limits are on
+ *  ($21). With "set machine origin to 0" ($22 bit 3) and Z homing down ($23 bit 2) it is 0 up to $132;
+ *  otherwise up to 0, the top. `top` is the physical top the lift counts down from: machine zero, or the
+ *  far end of the travel where zero is at the bottom. Null until $21, $22, $23, $27 and $132 are read. */
+export const zTravel = computed<{ min: number; max: number; top: number } | null>(() => {
+  const s = settings.value;
+  const hard = parseInt(s[21] ?? ''), flags = parseInt(s[22] ?? ''), dir = parseInt(s[23] ?? '');
+  const pulloff = parseFloat(s[27] ?? ''), len = parseFloat(s[132] ?? '');
+  if ([hard, flags, dir, pulloff, len].some(v => !Number.isFinite(v))) return null;
+  const off = (hard & 1) ? pulloff : 0;
+  if ((flags & 8) && (dir & 4)) return { min: 0, max: len - off, top: len };
+  return { min: -len + off, max: (flags & 8) ? 0 : -off, top: 0 };
+});
 
 /** The P word that selects each work offset in G10. */
 export const WCS_P: Record<string, number> = { G54: 1, G55: 2, G56: 3, G57: 4, G58: 5, G59: 6, 'G59.1': 7, 'G59.2': 8, 'G59.3': 9 };

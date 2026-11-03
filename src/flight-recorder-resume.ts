@@ -112,27 +112,31 @@ export interface Lift { liftZ: number; currentZ: number; }
 
 /**
  * The lines that take the machine back onto the start of the resume line. The tool length offset is
- * put back first, as the file had it there, before any move. The moves back in are in machine
- * coordinates (G53), mm and feed per minute, to the interpreter's machine position: up to the lift
- * height (or not at all, if the tool is higher), across, then straight down. Then the program's own
- * modes are put back: units, distance, plane, feed mode, work offset, and its feed.
+ * put back first, as the file had it there, before any move, and the spindle and coolant are stopped
+ * where the file had them off (an operator may have switched them on). The moves back in are in
+ * machine coordinates (G53), mm and feed per minute, to the interpreter's machine position: up to the
+ * lift height (or not at all, if the tool is higher), across, then straight down, with the spindle and
+ * coolant started above the line where the file had them on. Then the program's own modes are put
+ * back: units, distance, plane, feed mode, work offset, the cycle retract, and its feed.
  */
 export function resumePreamble(job: string, noRetract: boolean, s: ModalState, lift: Lift, spinup = 2): string[] {
   const p = s.position;
-  if ((s.spindle === 'M3' || s.spindle === 'M4') && !s.spindleSpeed)
-    throw new ResumeRefused('the spindle is on with no speed set before the resume line');
+  const on = s.spindle === 'M3' || s.spindle === 'M4';
+  if (on && !s.spindleSpeed) throw new ResumeRefused('the spindle is on with no speed set before the resume line');
   const plungeFeed = s.feedMode === 'G94' && s.feed ? s.feed : 100;   // mm/min
   const f4 = (v: number | null) => v!.toFixed(4);
   const preamble = [`$FLIGHT=${job}${noRetract ? ',1' : ''}`, `G21G90G94${s.plane}`, lengthOffsetLine(s)];
+  if (!on) preamble.push('M5');
+  if (!s.coolant.mist || !s.coolant.flood) preamble.push('M9');   // what should be on comes back on below
   if (lift.currentZ < lift.liftZ - 0.0005) preamble.push(`G53G0Z${lift.liftZ.toFixed(4)}`);   // up to the lift height
   preamble.push(`G53G0X${f4(p.x)}Y${f4(p.y)}`);               // over the start of the resume line
-  if (s.spindle === 'M3' || s.spindle === 'M4') preamble.push(`S${s.spindleSpeed!.toFixed(0)}${s.spindle}`, `G4P${spinup.toFixed(1)}`);
+  if (on) preamble.push(`S${s.spindleSpeed!.toFixed(0)}${s.spindle}`, `G4P${spinup.toFixed(1)}`);
   if (s.coolant.mist) preamble.push('M7');
   if (s.coolant.flood) preamble.push('M8');
   preamble.push(`G53G1Z${f4(p.z)}F${plungeFeed.toFixed(1)}`);   // straight down, the tool has been there before
-  // G91.1 and G98 are grblHAL's own defaults; the others only when the program used them.
+  // G91.1 is grblHAL's only arc mode; G98/G99 always, as an earlier job or the console may have left either.
   const feed = s.feedMode === 'G94' && s.programmedFeed !== null ? `F${s.programmedFeed.toFixed(1)}` : '';
-  preamble.push(s.units + s.distance + s.feedMode + s.workOffset + (s.arcDistance === 'G90.1' ? 'G90.1' : '') + (s.retract === 'G99' ? 'G99' : '') + feed);
+  preamble.push(s.units + s.distance + s.feedMode + s.workOffset + (s.arcDistance === 'G90.1' ? 'G90.1' : '') + s.retract + feed);
   return preamble;
 }
 

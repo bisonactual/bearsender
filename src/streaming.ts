@@ -216,10 +216,16 @@ export function startJob(): void {
   if (starting) return;
   // The modes first: the program is read from them, and they are kept with the job for a resume. The
   // sim refused the first $ command after homing (error:71) and took the next, so a refusal gets one more try.
+  // Stop, RESET or a lost link while $G is pending revokes this Start, as does another file loaded.
   starting = true;
+  const live = command.intent(), lines = state.gcodeLines;
   const modes = () => command.send('$G', { quiet: true }).catch(e => { if (e instanceof command.CommandFailed) return null; throw e; });
-  modes().then(r => r?.result === 'error' ? modes() : r).then(reply => {
+  modes().then(r => r?.result === 'error' && live() ? modes() : r).then(reply => {
     starting = false;
+    if (!live() || state.gcodeLines !== lines) {
+      log('info', 'Start: nothing was sent. ' + (live() ? 'Another file was loaded' : 'Stop, RESET, a reset or the link going') + ' came while $G was answered; press Start again.');
+      return;
+    }
     if (!state.connected || state.running) return;
     const words = reply?.result === 'ok' ? [...machine.modal.value] : null;
     if (!words) log('err', 'Start: $G got no answer, so the modes the job starts from aren\'t known: the program was read from the last known, and a resume will assume G21 G90 G17 G94.');
@@ -243,8 +249,11 @@ export function streamLines(lines: SendLine[], numbered: boolean, opts: { stamp?
   if (!opts.stamp) { begin(lines, numbered, opts.resumedAt); return; }
   const stamp = opts.stamp;
   starting = true;
+  const live = command.intent();
   command.send(stamp, { log: true, quiet: true }).then(reply => {
     starting = false;
+    // Stop or RESET while the stamp was answered: the job doesn't start (the record may show it Running at line 0).
+    if (!live()) { log('info', `The job stamp ${stamp} was answered after Stop, RESET or a reset: nothing of the job was sent.`); return; }
     if (reply.result === 'ok') { begin(lines, numbered, opts.resumedAt); return; }
     const text = `The flight recorder refused the job stamp ${stamp}: error:${reply.code}${errorText(reply.code) ? ' (' + errorText(reply.code) + ')' : ''}. ` +
       'Nothing of the job was sent, and the record it holds is unchanged (Recorder panel). Press Start to try again, or discard the record first.';
@@ -343,6 +352,8 @@ let stopping: { timer: ReturnType<typeof setTimeout> } | null = null;
 /** STOP: ends the job, whether or not BearSender is sending one, and stops the machine. */
 export function stopJob(): void {
   if (!state.connected) return;
+  // A Start, stamp, warmup or Resume waiting on a reply doesn't go ahead after this.
+  command.revokePending('Stop');
   if (run && !run.ended) {
     end(run);
     log('info', 'Job stopped');
@@ -396,6 +407,7 @@ export function updateRunButtons(): void {
 /** RESET: at once, moving or not. */
 export function sendReset(): void {
   if (!state.connected) return;
+  command.revokePending('RESET');
   if (stopping) { clearTimeout(stopping.timer); stopping = null; job.stopping.value = false; }
   if (run && !run.ended) { end(run); job.finished('stopped'); }
   holdUntilHeld = 0;

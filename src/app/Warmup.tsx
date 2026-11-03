@@ -84,6 +84,8 @@ function MotionCard() {
   const usesX = m.pattern !== 'none' && m.pattern !== 'y';
   const usesY = m.pattern !== 'none' && m.pattern !== 'x';
   const each = wu.passSecs(m);
+  // The routine the button runs, as it fits in the controller's input (warmup.ts): known once connected.
+  const fit = connection.connected.value ? wu.fitted(wu.fromCold.value ? wu.cold.value : wu.normal.value, m) : null;
   // Machine travel as the frame check takes it: from 0 down to −$130 (X) and −$131 (Y).
   const tx = setting(130), ty = setting(131);
   const past: string[] = [];
@@ -108,6 +110,10 @@ function MotionCard() {
         ? <>From the start point toward −X and −Y, and back to it. One pass is {about(each)}; each step runs whole passes for its time, then dwells what is left. Acceleration isn't counted.</>
         : <>The spindle runs at the start point; nothing moves.</>}</div>
       {past.length > 0 && <div class="fs-note is-warn">The pattern takes {past.join(', and ')}.</div>}
+      {fit?.fit && fit.fit.sent < fit.fit.wanted && <div class="fs-note is-warn">
+        To fit in the controller's input, so that its M5 is there from the start, each step runs {fit.fit.sent} of its {fit.fit.wanted} passes{fit.fit.sent ? '' : ' (none)'} and dwells the rest of its time. Longer ranges or a slower feed give fewer, longer passes.</div>}
+      {fit && !fit.fits && <div class="fs-note is-warn">
+        This routine doesn't fit in the controller's input even without motion, so its M5 goes only when there is room: if the link drops before then, the spindle keeps running. Fewer steps fit.</div>}
     </Card>
   );
 }
@@ -183,24 +189,37 @@ export function WarmupStrip() {
 
 const HOLD_MS = 5000;
 
-/** MACHINE WARMUP: held for 5 s it starts the warmup; let go sooner, nothing happens. */
+/** MACHINE WARMUP: held for 5 s it starts the warmup; let go sooner, nothing happens. The hold lasts only
+ *  while the press does: letting go, the button losing focus, the window losing focus or the page being
+ *  hidden all end it (a key let go elsewhere never reaches the button). */
 export function WarmupButton() {
   const [holding, setHolding] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef(false);
   const why = wu.whyNot();
   const isCold = wu.fromCold.value;
   const release = () => {
+    held.current = false;
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     setHolding(false);
   };
   const press = () => {
     if (why || timer.current) return;
+    held.current = true;
     setHolding(true);
-    timer.current = setTimeout(() => { timer.current = null; setHolding(false); wu.start(); }, HOLD_MS);
+    timer.current = setTimeout(() => { timer.current = null; setHolding(false); if (held.current) { held.current = false; wu.start(); } }, HOLD_MS);
   };
   useEffect(() => release, []);
   // A reason coming up while it's held (a job started, the link dropped) lets go of it.
   useEffect(() => { if (why) release(); }, [why]);
+  // The window losing focus or the page hidden while held lets go of it too.
+  useEffect(() => {
+    if (!holding) return;
+    const hidden = () => { if (document.hidden) release(); };
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', hidden);
+    return () => { window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', hidden); };
+  }, [holding]);
   const sub = why ? why.toUpperCase() : isCold ? '· COLD' : '· NORMAL';
   return (
     <button type="button" class={'fs-run-btn is-warmup' + (holding ? ' is-holding' : '')} disabled={!!why}
@@ -210,6 +229,7 @@ export function WarmupButton() {
       onPointerUp={release} onPointerCancel={release} onLostPointerCapture={release}
       onKeyDown={e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); press(); } }}
       onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') release(); }}
+      onBlur={release}
       onContextMenu={e => e.preventDefault()}>
       <span class="fs-warm-fill" aria-hidden="true" />
       {holding

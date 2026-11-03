@@ -130,6 +130,24 @@ let source: JobSource | null = null;
 // kept error behind ('clear': the empty line, or the sync).
 let lastSent: JobSource | null | 'clear' = 'clear';
 
+// Pending operations. Start, the warmup, a job stamp and Resume each wait on a reply ($G, $FLIGHT=, $#)
+// before they move anything. Stop, RESET, a reset or banner from the controller, an alarm, a jog cancel
+// and a lost link revoke whatever is pending then: each operation takes an intent() before it waits and
+// checks it before it moves, so an old request never moves the machine.
+let epoch = 0;
+
+/** Revokes every pending operation (Stop, RESET; the layer itself on a reset, banner or lost link). */
+export function revokePending(why: string): void {
+  epoch++;
+  trace('sync', 'pending operations revoked: ' + why);
+}
+
+/** For an operation that waits before it moves: true while nothing has revoked it and the link is up. */
+export function intent(): () => boolean {
+  const at = epoch;
+  return () => at === epoch && phase !== 'offline';
+}
+
 // A tool change. With nothing in flight, 0xA3 lets grblHAL read new lines at a tool change: it sets
 // aside what is in its input and takes it back at cycle start, writing over anything read after the
 // acknowledge that is still unread. So the acknowledge goes only with nothing waiting, and after the
@@ -167,6 +185,7 @@ export function connected(writer: (data: string) => boolean, opts: { reset: bool
 export function disconnected(): void {
   write = null;
   phase = 'offline';
+  revokePending('link closed');
   endSync();
   failAll(waiting, 'disconnected');
   failAll(queued, 'disconnected');
@@ -436,6 +455,7 @@ function pushed(kind: PushKind, line: string): void {
   if (kind === 'alarm') {
     // Motion asked for before the alarm isn't sent after it: jogs and G-code. $ commands (reads) stay.
     dropQueued(e => !e.command.startsWith('$') || e.command.startsWith('$J='), 'alarm');
+    revokePending('alarm');
     if (phase === 'ready' && waiting.length) resync('alarm', { awaitBanner: false, dropQueued: false });
   }
   // Jogging at a tool change reports Jog, and a hold Hold: the tool change goes on through both.
@@ -485,6 +505,7 @@ function resync(why: Failure, opts: { awaitBanner: boolean; dropQueued: boolean 
   const attempts = sync?.attempts ?? 0;
   endSync();
   phase = 'syncing';
+  revokePending(why);
   failAll(waiting, why);
   if (opts.dropQueued) failAll(queued, why);
   dropSource(why);

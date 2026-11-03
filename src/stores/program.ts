@@ -55,16 +55,38 @@ export interface ProgramView {
 const WCS: WorkSystem[] = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'G59.1', 'G59.2', 'G59.3'];
 const vec = (v: machine.Vec3): Point => ({ x: v.x, y: v.y, z: v.z });
 
-/** The modes in the words of a [GC:] line ($G), as the interpreter takes them; undefined with none.
- *  A motion mode it doesn't read (G38.x, a canned cycle) is taken as G80: axis words alone stop it. */
+/** The modes in the words of a [GC:] line ($G), as the interpreter takes them; undefined with none. Every
+ *  word a program inherits is used: units, distance, plane, feed mode, motion, arc distance (G91.1;
+ *  grblHAL has no G90.1), the cycle retract (G98/G99), the spindle (M3/M4/M5 and S), the coolant
+ *  (M7/M8/M9) and the feed (F, 0 being none). A motion mode it doesn't read (G38.x, a canned cycle) is
+ *  taken as G80: axis words alone stop it. */
 export function modesFromWords(words: string[] | null | undefined): InterpreterContext['initialModes'] {
   if (!words?.length) return undefined;
   const has = (w: string) => words.includes(w);
+  const word = (letter: string) => { const w = words.find(x => x[0] === letter && /^[FS][\d.]+$/.test(x)); return w ? parseFloat(w.slice(1)) : null; };
   const motion = words.find(w => /^G(0|1|2|3|38\.\d|8\d)$/.test(w));
+  const f = word('F'), s = word('S');
   return {
     units: has('G20') ? 'G20' : 'G21', distance: has('G91') ? 'G91' : 'G90',
     plane: has('G18') ? 'G18' : has('G19') ? 'G19' : 'G17', feedMode: has('G93') ? 'G93' : 'G94',
     ...(motion ? { motion: (['G0', 'G1', 'G2', 'G3', 'G80'].includes(motion) ? motion : 'G80') as Motion } : {}),
+    arcDistance: has('G90.1') ? 'G90.1' : 'G91.1', retract: has('G99') ? 'G99' : 'G98',
+    spindle: has('M3') ? 'M3' : has('M4') ? 'M4' : 'M5', spindleSpeed: s !== null && s > 0 ? s : null,
+    coolant: { mist: has('M7'), flood: has('M8') },
+    programmedFeed: f !== null && f > 0 ? f : null,
+  };
+}
+
+/** Where $H takes the machine, as far as the controller has said: the axes its homing cycles home
+ *  ($44-$49, null if none were read) and the startup lines grblHAL runs after homing ($N0, $N1; null
+ *  until read). */
+function homing(): NonNullable<InterpreterContext['homing']> {
+  const s = machine.settings.value;
+  const cycles = [44, 45, 46, 47, 48, 49].map(id => parseInt(s[id] ?? '')).filter(Number.isFinite);
+  const mask = cycles.reduce((m, c) => m | c, 0);
+  return {
+    axes: cycles.length ? (['x', 'y', 'z'] as const).filter((_, i) => mask & (1 << i)) : null,
+    startup: machine.startupLines.value,
   };
 }
 
@@ -112,8 +134,10 @@ export function context(withPosition = true): InterpreterContext {
   }
   const wcs = machine.wcs.value as WorkSystem;
   ctx.activeWorkOffset = WCS.includes(wcs) ? wcs : 'G54';
+  // The whole vector decides: an offset in X or Y alone counts, with Z 0.
   const tlo = machine.tlo.value, tloVector = machine.tloVector.value;
-  if (tlo) ctx.initialLengthOffset = tloVector ? vec(tloVector) : { x: 0, y: 0, z: tlo };
+  const lengthOffset = tloVector ? vec(tloVector) : tlo ? { x: 0, y: 0, z: tlo } : null;
+  if (lengthOffset && (lengthOffset.x || lengthOffset.y || lengthOffset.z)) ctx.initialLengthOffset = lengthOffset;
   // $110-$112 are mm/min whatever $13 says, as are $27, $28 and $130-$132.
   const rate = (id: number) => { const v = parseFloat(machine.settings.value[id] ?? ''); return v > 0 ? v : undefined; };
   const rates = { x: rate(110), y: rate(111), z: rate(112) };
@@ -122,6 +146,7 @@ export function context(withPosition = true): InterpreterContext {
   if (g73) ctx.g73RetractMm = g73;
   const home = homePosition();
   if (home) ctx.homePosition = home;
+  ctx.homing = homing();
   // Each tool's whole offset: grblHAL's G43 H applies it on every axis by default (TOOL_LENGTH_OFFSET_AXIS
   // -1). An axis the table doesn't list is taken as 0.
   const table = machine.toolTable.value;

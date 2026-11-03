@@ -32,8 +32,17 @@ export function initParser(): void {
   command.on('gc', line => { log('info', line); machine.modal.value = line.slice(4, -1).trim().split(/\s+/); });
   command.onReply((reply, { job, quiet }) => {
     if (reply.result === 'error') { if (!quiet) messages.push('error', `error:${reply.code} on "${reply.command}"`); }
-    else if (!job) { noteOffsetWrite(reply.command); noteModeChange(reply.command); }
+    else if (!job) { noteOffsetWrite(reply.command); noteModeChange(reply.command); noteStartupLines(reply); }
   });
+}
+
+/** $N lists the startup lines ($N0=…, $N1=…), which grblHAL runs after a reset and after homing: kept for
+ *  the reading of $H (stores/program.ts). Writing one reads them again. */
+function noteStartupLines(reply: command.Reply): void {
+  const c = reply.command.toUpperCase().replace(/\s+/g, '');
+  if (c === '$N') {
+    machine.startupLines.value = reply.lines.map(l => l.match(/^\$N\d+=(.*)$/)?.[1]?.trim() ?? '').filter(Boolean);
+  } else if (/^\$N\d+=/.test(c) && !state.running) command.send('$N', { quiet: true }).catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
 }
 
 // The modes the next job starts from ($G), for the program's reading (stores/program.ts). grblHAL
