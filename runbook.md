@@ -30,7 +30,7 @@ Type-checks, then writes `dist/` (not in git):
 ## Project layout
 | Path | What it is |
 |---|---|
-| `index.html` | The page: the shell's mount point, the file picker, the resume dialog and the probe preview's overlay |
+| `index.html` | The page: the shell's mount point, the file picker and the resume dialog |
 | `style.css` | All styles; the colour tokens are on `:root` |
 | `src/main.ts` | The entry point |
 | `src/app/` | The screens and panels (Preact) |

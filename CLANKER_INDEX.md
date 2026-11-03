@@ -8,8 +8,8 @@ What lives where. BearSender (formerly FlexiSender; the repo keeps its name).
 ## Root
 | File | What it is |
 |---|---|
-| `index.html` | The page: `#app` for the shell, the file picker, the resume dialog (`#frModal`), and `#legacy`, which holds only the probe preview's overlay |
-| `style.css` | All styles. At the top are the colour tokens and the few old rules still used (the resume dialog's `fr-`, the overlay's `pp-`, `tb-btn`); after them come the shell's `fs-` rules |
+| `index.html` | The page: `#app` for the shell, the file picker and the resume dialog (`#frModal`) |
+| `style.css` | All styles. At the top are the colour tokens and the few old rules still used (the resume dialog's `fr-` and `tb-btn`, the probe preview overlay's `pp-`); after them come the shell's `fs-` rules |
 | `build.ts` | The build |
 | `serve.ts` | The dev server |
 | `.github/workflows/pages.yml` | Publishes `dist/` to GitHub Pages |
@@ -24,9 +24,8 @@ What lives where. BearSender (formerly FlexiSender; the repo keeps its name).
 | `ToolsScreen.tsx` | The tool table (also the Setup list's TOOLS popup) |
 | `SettingsScreen.tsx` | The controller's `$` settings, and the other tabs: `ZonesTab.tsx`, `OptionsTab.tsx`, `RecorderTab.tsx` (also the recorder's SETTINGS popup) and Settings, Probe |
 | `CameraPanel.tsx`, `ConsolePanel.tsx`, `MacrosPanel.tsx` | The job screen's Camera, Console and Macros tabs |
-| `Preview.tsx` | The 3D preview |
+| `Preview.tsx` | The 3D preview, with the probe or surfacing preview's overlay |
 | `Popup.tsx` | The popups |
-| `Legacy.tsx` | Lends the old overlay markup to the Preview, until the probe preview is rebuilt |
 | `mode.ts` | What the job screen shows, worked out from the stores |
 | `plan.ts` | The job's times |
 | `asks.ts` | What the shell reads by itself on connecting (`$22`, `$130`–`$132`, `$30`, `$G`, `$TTLIST`, …) |
@@ -79,7 +78,6 @@ What lives where. BearSender (formerly FlexiSender; the repo keeps its name).
 | `ui.ts` | `byteLen`, `esc`, `isInputFocused`, `lsGet`, `lsSet` |
 | `main.ts` | Entry point |
 
-**Left from the old code until the review fixes are merged:** `state.ts`, the old shared state object, and `bus.ts`, the old status bus. See `reference.md`.
 
 ## src/probing/
 | File | What it is |
@@ -90,4 +88,4 @@ What lives where. BearSender (formerly FlexiSender; the repo keeps its name).
 | `io.ts` | What a routine moves with |
 | `plan.ts`, `drawing.ts` | The dry run and the SVG drawing |
 | `settings.ts` | The probe settings |
-| `probe-preview-3d.ts` | The 3D preview of the moves (also surfacing's) |
+| `probe-preview-3d.ts` | The 3D preview of the moves (also surfacing's), and its overlay's state as a signal |

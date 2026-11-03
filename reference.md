@@ -26,10 +26,12 @@ Where each file is, in a line, is in `CLANKER_INDEX.md`. This is how the parts f
 - **The status parser** (`src/parser.ts`) reads the status report into the machine and job stores. That includes MPos, WPos and WCO for every axis: A, B and C in degrees, U, V and W in mm.
 
 ## What is left of the old code
-These go once the review fixes on `streaming.ts`, `flight-recorder.ts` and `src/probing/` are merged:
-- **`state.ts` and `bus.ts`:** the old shared state object and status bus, still used by streaming, the flight recorder's resume, jogging, the 3D view and probing.
-- **`index.html`'s `#legacy`:** it holds only the probe preview's overlay. The Preview panel borrows it through `src/app/Legacy.tsx`.
-- **The resume dialog** (`#frModal`): old markup, built by `flight-recorder.ts`.
+- **No old shared state or status bus.** Each value lives with what owns it:
+  - the job's lines and run state in the job store, streaming's own flags in `streaming.ts`;
+  - the link's socket and buffers in `connection.ts`;
+  - positions, offsets, axes and `$` values in the machine store;
+  - the 3D view's bounds in `viewport.ts`.
+- **One piece of the old style is left: the resume dialog** (`#frModal` in `index.html`). `flight-recorder.ts` still builds it as HTML strings, and it is reviewed resume code. An effect on the machine state, the link and the job keeps it current.
 
 ## Kept in the browser
 Nothing is kept on the controller except its own settings, offsets and tool table.
