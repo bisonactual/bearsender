@@ -280,7 +280,8 @@ export async function measureTool(asReference: boolean, plan: Plan | null = null
   const tlo = c.tloReference !== null ? f.z - c.tloReference
     : c.mode === 'touchplate' ? f.z - c.touchPlateHeight : f.z;
   sendCmd(`G21G43.1Z${tlo.toFixed(4)}`);
-  const against = c.tloReference !== null ? `· ${T(tool)} against ${T(c.refTool)} (Z ${f3(c.tloReference)})`
+  const known = (n: number | null | undefined) => n !== null && n !== undefined;
+  const against = c.tloReference !== null ? `· ${known(tool) ? T(tool) + ' ' : ''}against ${known(c.refTool) ? T(c.refTool) : 'the reference'} (Z ${f3(c.tloReference)})`
     : c.mode === 'touchplate' ? `· no reference: the touch less the ${c.touchPlateHeight.toFixed(3)} mm plate` : '· no reference: the touch itself';
   setRun('tl', {
     phase: 'ok', text: 'Done. Tool length offset set (G43.1).',
