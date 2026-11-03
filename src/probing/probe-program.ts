@@ -24,6 +24,9 @@ import { reportMm } from '../units';
 import * as command from '../command';
 import * as machine from '../stores/machine';
 import { progress as warmupProgress } from '../warmup';
+import { Stop, Miss, afterMiss } from './io';
+import type { Io, Point, StepType } from './io';
+import type { ProbeSettings } from './settings';
 
 export const WCS_P: Record<string, number> = {
   G54: 1,
@@ -144,7 +147,8 @@ function orCancel<T>(p: Promise<T>): Promise<T | null> {
   return new Promise(resolve => {
     if (_cancelled) { resolve(null); return; }
     _cancel = () => resolve(null);
-    p.then(v => { _cancel = null; resolve(v); }, () => { _cancel = null; resolve(null); });
+    _failed = '';
+    p.then(v => { _cancel = null; resolve(v); }, e => { _cancel = null; if (e instanceof command.CommandFailed) _failed = e.why; resolve(null); });
   });
 }
 
@@ -156,14 +160,21 @@ function parseProbe(lines: string[]): ProbeResult | null {
   return null;
 }
 
-/** A probing move, and where it touched. */
+/** Why the last command of the routine failed, for the status: a refusal, or no answer and why (an alarm, a reset). */
+let _why = '';
+let _failed = '';
+const noAnswer = (cmd: string) => `${cmd} got no answer${_failed ? ` (${_failed})` : ''}`;
+
+/** A probing move, and where it touched. Null if it was refused, not answered, or cancelled. */
 async function probeMove(cmd: string): Promise<ProbeResult | null> {
   if (_cancelled) return null;
   const reply = await orCancel(command.send('G21' + cmd, { log: true, owner: OWNER }));
-  if (!reply || reply.result !== 'ok') return null;
+  if (!reply) { _why = noAnswer('G21' + cmd); return null; }
+  if (reply.result !== 'ok') { _why = `G21${cmd} was refused (error:${reply.code})`; return null; }
   const result = parseProbe(reply.lines);
   if (result) return result;
   const params = await orCancel(command.send('$#', { owner: OWNER }));
+  if (!params) _why = noAnswer('$#');
   return params ? parseProbe(params.lines) : null;
 }
 
@@ -171,7 +182,10 @@ async function probeMove(cmd: string): Promise<ProbeResult | null> {
 async function sendAndWait(cmd: string): Promise<boolean> {
   if (_cancelled) return false;
   const replies = await orCancel(Promise.all([command.send('G21' + cmd, { log: true, owner: OWNER }), command.send('G4P0', { owner: OWNER })]));
-  return !!replies && replies.every(r => r.result === 'ok');
+  if (!replies) { _why = noAnswer('G21' + cmd); return false; }
+  const bad = replies.find(r => r.result !== 'ok');
+  if (bad) { _why = `${bad.command} was refused (error:${bad.code})`; return false; }
+  return true;
 }
 
 /** Cancel: the routine's commands not sent yet are taken back, and a move in progress is stopped. */
@@ -186,29 +200,113 @@ export function cancelProbing(): void {
   } else log('info', 'Probing cancelled: no move of it was in flight, and what was still to send was taken back');
 }
 
-export async function runToolLengthProbe(seq: any): Promise<ProbeResult | null> {
-  (window as any).clearPreview3D?.();
-  return runProbing(() => seq.mode === 'toolsetter' ? runToolsetterSequence(seq) : runTouchplateSequence(seq));
+function stopped(): Stop {
+  return new Stop(_cancelled ? 'cancelled' : _why || 'a command failed');
 }
 
+/** The machine as a routine's Io: each step is reported to `onStep` as it starts, in the same order as
+ *  the drawing's dry run lists them. */
+export function machineIo(P: ProbeSettings, onStep: (type: StepType, label: string) => void = () => {}): Io {
+  const backOff = (axis: string, dir: number) => sendAndWait(`G91G0${axis}${dir < 0 ? '' : '-'}${P.back.toFixed(4)}`);
+  return {
+    async move(x, y, z, label, type = 'rapid') {
+      onStep(type, label);
+      if (!await rapidToMPos(x, y, z)) throw stopped();
+    },
+    async touch(axis, dir, distance, face) {
+      const sign = dir < 0 ? '-' : '';
+      onStep('probe', `Find the ${face} (fast)`);
+      const fast = await probeMove(`G38.3G91F${P.fast}${axis}${sign}${distance.toFixed(4)}`);
+      if (!fast) throw stopped();
+      if (!fast.success) throw new Miss(face, distance, false);
+      onStep('contact', `Touched the ${face}`);
+      onStep('back', `Back off ${P.back} mm`);
+      if (!await backOff(axis, dir)) throw stopped();
+      onStep('slow', `Touch the ${face} again (slow)`);
+      const slow = await probeMove(`G38.3G91F${P.slow}${axis}${sign}${(P.back * 2).toFixed(4)}`);
+      if (!slow) throw stopped();
+      if (!slow.success) throw new Miss(face, P.back * 2, true);
+      onStep('contact', `Touched the ${face}`);
+      onStep('back', `Back off ${P.back} mm`);
+      if (!await backOff(axis, dir)) throw stopped();
+      return { x: slow.x, y: slow.y, z: slow.z };
+    },
+  };
+}
+
+/** Where the machine is now, in machine coordinates: where a routine starts. */
+export function machineAt(): Point {
+  return { x: (state as any).machineX, y: (state as any).machineY, z: (state as any).machineZ };
+}
+
+/** The old per-routine settings (the dead modules' and the old tab's fields) as the one set. */
+export function settingsOf(cfg: any): ProbeSettings {
+  return { tip: cfg.probeDiameter ?? 0, fast: cfg.probeFeedRate, slow: cfg.latchFeedRate, back: cfg.latchDistance, clear: cfg.xyClr ?? 0, search: cfg.probeDistance };
+}
+
+// ── Tool length ───────────────────────────────────────────────────────────────
+
+/** On a touch plate: straight down, up to the search distance, then back up to the start. The Z touched. */
+export async function touchPlate(io: Io, sp: Point, c: { probeDistance: number }): Promise<Point> {
+  const r = await afterMiss(() => io.touch('Z', -1, c.probeDistance, 'plate'), () => io.move(null, null, sp.z, 'Back up to the start height'));
+  await io.move(null, null, sp.z, 'Back up to the start height', 'result');
+  return r;
+}
+
+/** On the toolsetter at G59.3: up to machine Z0, over it, down to the approach height, probe, and back
+ *  the same way to the start. The Z touched. */
+export async function toolsetter(io: Io, sp: Point, ts: Point, c: { toolsetterDepth: number }): Promise<Point> {
+  const depth = c.toolsetterDepth;
+  await io.move(null, null, 0, 'Up to machine Z0');
+  await io.move(ts.x, ts.y, null, 'Over the toolsetter (G59.3)');
+  await io.move(null, null, ts.z + depth, `Down to ${depth} mm above it`);
+  const r = await afterMiss(() => io.touch('Z', -1, depth + 5, 'toolsetter'), async () => {
+    await io.move(null, null, 0, 'Up to machine Z0');
+    await io.move(sp.x, sp.y, null, 'Back over the start');
+  });
+  await io.move(null, null, 0, 'Up to machine Z0');
+  await io.move(sp.x, sp.y, null, 'Back over the start');
+  await io.move(null, null, sp.z, 'Down to the start height', 'result');
+  return r;
+}
+
+/** The old entry (the dead modules): runs either, and logs as before. */
+export async function runToolLengthProbe(seq: any): Promise<ProbeResult | null> {
+  (window as any).clearPreview3D?.();
+  const io = machineIo(settingsOf({ ...seq, xyClr: 0, probeDiameter: 0 }));
+  return runProbing(async () => {
+    if (seq.mode === 'toolsetter' && (seq.toolsetterX === undefined || seq.toolsetterY === undefined || seq.toolsetterZ === undefined)) {
+      log('err', '✗ Toolsetter: G59.3 position not set — configure it in the Offsets tab');
+      return null;
+    }
+    try {
+      const sp = machineAt();
+      const r = seq.mode === 'toolsetter'
+        ? await toolsetter(io, sp, { x: seq.toolsetterX, y: seq.toolsetterY, z: seq.toolsetterZ }, seq)
+        : await touchPlate(io, sp, seq);
+      log('info', `✓ ${seq.mode === 'toolsetter' ? 'Toolsetter' : 'Touch plate'} probe: Z=${r.z.toFixed(4)}`);
+      return { ...r, success: true };
+    } catch (e) {
+      if (e instanceof Miss) log('err', `✗ Probe: ${e.message}`);
+      else if (!(e instanceof Stop)) throw e;
+      return null;
+    }
+  });
+}
+
+/** A touch with explicit feeds (the old entry, for the dead modules). */
 export async function probeAxis(
   axis: string, direction: number,
   probeFeedRate: number, latchFeedRate: number,
   probeDistance: number, latchDistance: number
 ): Promise<ProbeResult | null> {
-  if (_cancelled) return null;
-  const sign = direction < 0 ? '-' : '';
-  const dist = probeDistance.toFixed(4);
-  const latch = latchDistance.toFixed(4);
-  const latch2 = (latchDistance * 2).toFixed(4);
-  const fast = await probeMove(`G38.3G91F${probeFeedRate}${axis}${sign}${dist}`);
-  if (!fast || !fast.success) return null;
-  const retractSign = direction < 0 ? '' : '-';
-  if (!await sendAndWait(`G91G0${axis}${retractSign}${latch}`)) return null;
-  const slow = await probeMove(`G38.3G91F${latchFeedRate}${axis}${sign}${latch2}`);
-  if (!slow || !slow.success) return null;
-  if (!await sendAndWait(`G91G0${axis}${retractSign}${latch}`)) return null;
-  return slow;
+  try {
+    const io = machineIo({ tip: 0, fast: probeFeedRate, slow: latchFeedRate, back: latchDistance, clear: 0, search: probeDistance });
+    return { ...await io.touch(axis as 'X' | 'Y' | 'Z', direction, probeDistance, 'surface'), success: true };
+  } catch (e) {
+    if (e instanceof Miss || e instanceof Stop) return null;
+    throw e;
+  }
 }
 
 export async function rapidToMPos(x: number | null, y: number | null, z: number | null): Promise<boolean> {
@@ -218,71 +316,4 @@ export async function rapidToMPos(x: number | null, y: number | null, z: number 
   if (y !== null) cmd += `Y${y.toFixed(4)}`;
   if (z !== null) cmd += `Z${z.toFixed(4)}`;
   return sendAndWait(cmd);
-}
-
-async function runTouchplateSequence(seq: any): Promise<ProbeResult | null> {
-  log('info', '⊕ Touch plate probe starting…');
-  const startZ = (state as any).machineZ;
-  const fastResult = await probeMove(`G38.3G91F${seq.probeFeedRate}Z-${seq.probeDistance.toFixed(4)}`);
-  if (!fastResult || !fastResult.success) {
-    log('err', '✗ Probe: no contact on fast probe — check probe wiring and position');
-    await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`);
-    return null;
-  }
-  if (!await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`)) {
-    log('err', '✗ Probe: failed to retract after fast probe');
-    return null;
-  }
-  const slowResult = await probeMove(`G38.3G91F${seq.latchFeedRate}Z-${(seq.latchDistance * 2).toFixed(4)}`);
-  if (!slowResult || !slowResult.success) {
-    log('err', '✗ Probe: no contact on slow probe');
-    await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`);
-    return null;
-  }
-  // Back up to where it started. (It read the Z it was at, so it stayed on the plate.)
-  await sendAndWait(`G90G53G0Z${startZ.toFixed(4)}`);
-  log('info', `✓ Touch plate probe: Z=${slowResult.z.toFixed(4)}`);
-  return slowResult;
-}
-
-async function runToolsetterSequence(seq: any): Promise<ProbeResult | null> {
-  if (seq.toolsetterX === undefined || seq.toolsetterY === undefined || seq.toolsetterZ === undefined) {
-    log('err', '✗ Toolsetter: G59.3 position not set — configure it in the Offsets tab');
-    return null;
-  }
-  const startX = (state as any).machineX;
-  const startY = (state as any).machineY;
-  const startZ = (state as any).machineZ;
-  const depth = seq.toolsetterDepth ?? 10;
-  log('info', '⊕ Toolsetter probe starting…');
-  if (!await sendAndWait(`G53G0Z0`)) { log('err', '✗ Toolsetter: could not rapid to Z home'); return null; }
-  if (!await sendAndWait(`G53G0X${seq.toolsetterX.toFixed(4)}Y${seq.toolsetterY.toFixed(4)}`)) {
-    log('err', '✗ Toolsetter: could not rapid to toolsetter XY'); return null;
-  }
-  const approachZ = seq.toolsetterZ + depth;
-  if (!await sendAndWait(`G53G0Z${approachZ.toFixed(4)}`)) {
-    log('err', '✗ Toolsetter: could not approach toolsetter Z'); return null;
-  }
-  const fastResult = await probeMove(`G38.3G91F${seq.probeFeedRate}Z-${(depth + 5).toFixed(4)}`);
-  if (!fastResult || !fastResult.success) {
-    log('err', '✗ Toolsetter: no contact on fast probe');
-    await sendAndWait(`G53G0Z0`);
-    await sendAndWait(`G53G0X${startX.toFixed(4)}Y${startY.toFixed(4)}`);
-    return null;
-  }
-  if (!await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`)) {
-    log('err', '✗ Toolsetter: failed to retract'); return null;
-  }
-  const slowResult = await probeMove(`G38.3G91F${seq.latchFeedRate}Z-${(seq.latchDistance * 2).toFixed(4)}`);
-  if (!slowResult || !slowResult.success) {
-    log('err', '✗ Toolsetter: no contact on slow probe');
-    await sendAndWait(`G53G0Z0`);
-    await sendAndWait(`G53G0X${startX.toFixed(4)}Y${startY.toFixed(4)}`);
-    return null;
-  }
-  await sendAndWait(`G53G0Z0`);
-  await sendAndWait(`G53G0X${startX.toFixed(4)}Y${startY.toFixed(4)}`);
-  await sendAndWait(`G53G0Z${startZ.toFixed(4)}`);
-  log('info', `✓ Toolsetter probe: Z=${slowResult.z.toFixed(4)}`);
-  return slowResult;
 }

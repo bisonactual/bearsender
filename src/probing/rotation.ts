@@ -7,59 +7,73 @@ import { log } from '../console';
 import { processGcode } from '../gcode';
 import { lexLine } from '../gcode/lexer';
 import * as job from '../stores/job';
-import { probeAxis, rapidToMPos, isProbingRunning, runProbing } from './probe-program';
+import { isProbingRunning, runProbing, machineIo, machineAt, settingsOf } from './probe-program';
+import { Miss, Stop, afterMiss } from './io';
+import type { Io, Point } from './io';
+import type { ProbeSettings } from './settings';
 
-function startPos() {
-  return { x: (state as any).machineX, y: (state as any).machineY, z: (state as any).machineZ };
+export type Rotation = { angleDeg: number; p1: { x: number; y: number }; p2: { x: number; y: number } };
+
+export interface RotCfg {
+  edge: 'AB' | 'AD' | 'CB' | 'CD';
+  /** How far along the side the second point is, mm. */
+  offset: number;
+  /** How far below the start it probes, mm. */
+  depth: number;
 }
 
-type Rotation = { angleDeg: number; p1: { x: number; y: number }; p2: { x: number; y: number } };
-
 /** Each side as the edge finder names it: the axis it runs along, and the probe's direction of travel onto it. */
-const SIDES: Record<string, { along: 'X' | 'Y'; dir: number; name: string }> = {
+export const ROT_SIDES: Record<string, { along: 'X' | 'Y'; dir: number; name: string }> = {
   AB: { along: 'X', dir: 1, name: 'front' },
   CD: { along: 'X', dir: -1, name: 'back' },
   AD: { along: 'Y', dir: 1, name: 'left' },
   CB: { along: 'Y', dir: -1, name: 'right' },
 };
 
-export async function runRotation(cfg: any): Promise<Rotation | null> {
-  if (isProbingRunning()) { log('err', 'Probe already running'); return null; }
-  return runProbing(() => rotation(cfg));
-}
-
 /** Two points on the side, the point spacing apart along it (to the right, or further back). At each, as
  *  for a single side: out past the side at the start height, down, then in to it. */
-async function rotation(cfg: any): Promise<Rotation | null> {
-  const sp = startPos();
-  const clr = cfg.xyClr + cfg.probeDiameter / 2;
-  const side = SIDES[cfg.edge];
+export async function rotation(io: Io, sp: Point, c: RotCfg, P: ProbeSettings): Promise<Rotation> {
+  const clr = P.clear + P.tip / 2;
+  const side = ROT_SIDES[c.edge];
   const across = side.along === 'X' ? 'Y' : 'X';
-  log('info', `Rotation: probing two points on the ${side.name} side (${cfg.edge})…`);
-
-  const pts: { x: number; y: number }[] = [];
-  for (const q of [0, cfg.offset]) {
-    const n = pts.length + 1;
-    const at = side.along === 'X' ? { x: sp.x + q, y: sp.y - side.dir * clr } : { x: sp.x - side.dir * clr, y: sp.y + q };
-    await rapidToMPos(at.x, at.y, null);
-    await rapidToMPos(null, null, sp.z - cfg.depth);
-    const r = await probeAxis(across, side.dir, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
-    if (!r) { await rapidToMPos(null, null, sp.z); log('err', `✗ Rotation: point ${n} probe failed`); return null; }
-    await rapidToMPos(null, null, sp.z);
-    // Both touches are a tip radius short of the side, so the radius drops out of the angle.
-    pts.push({ x: r.x, y: r.y });
-  }
-  await rapidToMPos(sp.x, sp.y, null);
+  const pts = await afterMiss(async () => {
+    const pts: { x: number; y: number }[] = [];
+    for (const q of [0, c.offset]) {
+      const n = pts.length + 1;
+      const at = side.along === 'X' ? { x: sp.x + q, y: sp.y - side.dir * clr } : { x: sp.x - side.dir * clr, y: sp.y + q };
+      await io.move(at.x, at.y, null, `To point ${n}, clear of the side`);
+      await io.move(null, null, sp.z - c.depth, `Down ${c.depth} mm`);
+      const r = await io.touch(across, side.dir, P.search, `${side.name} side at point ${n}`);
+      await io.move(null, null, sp.z, 'Up');
+      // Both touches are a tip radius short of the side, so the radius drops out of the angle.
+      pts.push({ x: r.x, y: r.y });
+    }
+    return pts;
+  }, () => io.move(null, null, sp.z, 'Up'));
+  await io.move(sp.x, sp.y, null, 'Back to the start: angle measured', 'result');
 
   const [p1, p2] = pts;
   const dx = p2.x - p1.x, dy = p2.y - p1.y;
   // The part's turn, anticlockwise positive: a side along X runs at atan2(dy, dx), one along Y at atan2(-dx, dy).
   const angleRad = side.along === 'X' ? Math.atan2(dy, dx) : Math.atan2(-dx, dy);
-  const angleDeg = angleRad * 180 / Math.PI;
-  log('info', `✓ Rotation measured: ${angleDeg.toFixed(3)}°`);
-  log('info', `  P1: X=${p1.x.toFixed(4)} Y=${p1.y.toFixed(4)}`);
-  log('info', `  P2: X=${p2.x.toFixed(4)} Y=${p2.y.toFixed(4)}`);
-  return { angleDeg, p1, p2 };
+  return { angleDeg: angleRad * 180 / Math.PI, p1, p2 };
+}
+
+/** The old entry (the dead modules). */
+export async function runRotation(cfg: any): Promise<Rotation | null> {
+  if (isProbingRunning()) { log('err', 'Probe already running'); return null; }
+  return runProbing(async () => {
+    try {
+      log('info', `Rotation: probing two points on the ${ROT_SIDES[cfg.edge].name} side (${cfg.edge})…`);
+      const r = await rotation(machineIo(settingsOf(cfg)), machineAt(), cfg, settingsOf(cfg));
+      log('info', `✓ Rotation measured: ${r.angleDeg.toFixed(3)}°`);
+      return r;
+    } catch (e) {
+      if (e instanceof Miss) { log('err', `✗ Rotation: ${e.message}`); return null; }
+      if (e instanceof Stop) return null;
+      throw e;
+    }
+  });
 }
 
 // G-words after which a line's X and Y aren't a point of the program in its work coordinates: machine

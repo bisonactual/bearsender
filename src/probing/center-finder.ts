@@ -1,85 +1,95 @@
 // ═══════════════════════════════════════════════
-// Center finder probe logic
+// Center finder probe logic: the centre of a bore (inside) or a boss (outside), and its size
 // ═══════════════════════════════════════════════
 
-import { state } from '../state';
 import { log } from '../console';
-import { probeAxis, rapidToMPos, applyXYResult, isProbingRunning, runProbing } from './probe-program';
+import { applyXYResult, isProbingRunning, runProbing, machineIo, machineAt, settingsOf } from './probe-program';
+import { Miss, Stop, afterMiss } from './io';
+import type { Io, Point } from './io';
+import type { ProbeSettings } from './settings';
 
-function startPos() {
-  return { x: (state as any).machineX, y: (state as any).machineY, z: (state as any).machineZ };
+export interface CentreCfg {
+  centerMode: 'inside' | 'outside';
+  axes: 'XY' | 'X' | 'Y';
+  /** The bore's or the boss's size, about, mm. */
+  workpieceSizeX: number;
+  workpieceSizeY: number;
+  /** How far below the start it probes, mm. */
+  depth: number;
+  /** Times round: each from the centre the last found. */
+  passes: number;
 }
 
-export async function runCenterFinder(cfg: any): Promise<boolean> {
-  if (isProbingRunning()) { log('err', 'Probe already running'); return false; }
-  return (await runProbing(() => centerFinder(cfg))) ?? false;
-}
+/** The centre, in machine coordinates, and the size across it in each axis measured. */
+export interface CentreFound { x: number; y: number; sizeX: number | null; sizeY: number | null; }
 
-async function centerFinder(cfg: any): Promise<boolean> {
-  const sp = startPos();
-  let centerX = sp.x;
-  let centerY = sp.y;
-  for (let pass = 0; pass < cfg.passes; pass++) {
-    if (pass > 0) log('info', `Center finder: pass ${pass + 1}/${cfg.passes}`);
-    const result = await probeCenter(cfg, { x: centerX, y: centerY, z: sp.z });
-    if (!result) return false;
-    centerX = result.x;
-    centerY = result.y;
-    if (pass < cfg.passes - 1) {
-      await rapidToMPos(centerX, centerY, null);
+export async function centre(io: Io, sp: Point, c: CentreCfg, P: ProbeSettings): Promise<CentreFound> {
+  return afterMiss(async () => {
+    let found: CentreFound = { x: sp.x, y: sp.y, sizeX: null, sizeY: null };
+    const times = Math.max(1, Math.round(c.passes) || 1);
+    for (let pass = 0; pass < times; pass++) {
+      if (pass > 0) { log('info', `Center finder: pass ${pass + 1}/${times}`); await io.move(found.x, found.y, null, `To the centre found, for time ${pass + 1}`); }
+      found = await once(io, { ...sp, x: found.x, y: found.y }, c, P);
     }
-  }
-  await rapidToMPos(centerX, centerY, null);
-  const opts = { mode: cfg.coordMode, wcs: cfg.wcs };
-  applyXYResult(centerX, centerY, cfg.axes === 'X' ? 'X' : cfg.axes === 'Y' ? 'Y' : 'XY', opts);
-  log('info', `✓ Center found: X=${centerX.toFixed(4)} Y=${centerY.toFixed(4)}`);
-  return true;
+    await io.move(found.x, found.y, null, `Over the centre: ${c.axes === 'XY' ? 'X0 Y0' : c.axes + '0'}`, 'result');
+    log('info', `Center size:${found.sizeX !== null ? ' X=' + found.sizeX.toFixed(3) : ''}${found.sizeY !== null ? ' Y=' + found.sizeY.toFixed(3) : ''} mm`);
+    return found;
+  }, () => io.move(null, null, sp.z, 'Up'));
 }
 
-/** One pass: the two walls of a bore, or the two sides of a boss, in X and then in Y, each from close by.
- *  A bore is probed at depth from inside: the probe goes near each wall (clear of it by the side
- *  clearance, if the bore is that wide) and probes out to it. A boss is probed from outside: the probe
- *  goes out past each side above it, down beside it, probes in, and comes up again. After each axis it
- *  goes to the middle found, so the other axis is measured across the middle. */
-async function probeCenter(cfg: any, sp: { x: number; y: number; z: number }): Promise<{ x: number; y: number } | null> {
-  const radius = cfg.probeDiameter / 2;
-  const clr = cfg.xyClr + radius;
-  const inside = cfg.centerMode === 'inside';
+/** One time round: the two walls of a bore, or the two sides of a boss, in X and then in Y, each from close
+ *  by (the owner, 3 Nov). A bore is probed at depth from inside: the probe goes near each wall (clear of it
+ *  by the side clearance, if the bore is that wide) and probes out to it. A boss is probed from outside:
+ *  the probe goes out past each side above it, down beside it, probes in, and comes up again. After each
+ *  axis it goes to the middle found, so the other axis is measured across the middle. */
+async function once(io: Io, sp: Point, c: CentreCfg, P: ProbeSettings): Promise<CentreFound> {
+  const radius = P.tip / 2;
+  const clr = P.clear + radius;
+  const bore = c.centerMode === 'inside';
   const at = { x: sp.x, y: sp.y };
   const size: { X: number | null; Y: number | null } = { X: null, Y: null };
-  const rapidAlong = (k: 'x' | 'y', v: number) => rapidToMPos(k === 'x' ? v : null, k === 'y' ? v : null, null);
+  const along = (k: 'x' | 'y', v: number, label: string) => io.move(k === 'x' ? v : null, k === 'y' ? v : null, null, label);
 
-  if (inside) await rapidToMPos(null, null, sp.z - cfg.depth);
+  if (bore) await io.move(null, null, sp.z - c.depth, `Down ${c.depth} mm into the bore`);
   for (const axis of ['X', 'Y'] as const) {
-    if (cfg.axes !== 'XY' && cfg.axes !== axis) continue;
+    if (c.axes !== 'XY' && c.axes !== axis) continue;
     const k = axis === 'X' ? 'x' : 'y';
-    const half = (axis === 'X' ? cfg.workpieceSizeX : cfg.workpieceSizeY) / 2;
+    const half = (axis === 'X' ? c.workpieceSizeX : c.workpieceSizeY) / 2;
     const found: number[] = [];
     for (const side of [-1, 1]) {
-      const name = axis + (side < 0 ? '-' : '+');
+      const name = (axis === 'X' ? (side < 0 ? 'left' : 'right') : (side < 0 ? 'front' : 'back')) + (bore ? ' wall' : ' side');
       // The probe's direction of travel: out to a bore's wall, in to a boss's side.
-      const dir = inside ? side : -side;
-      if (inside) {
-        await rapidAlong(k, at[k] + side * Math.max(half - clr, 0));
-      } else {
-        await rapidToMPos(null, null, sp.z);
-        await rapidAlong(k, at[k] + side * (half + clr));
-        await rapidToMPos(null, null, sp.z - cfg.depth);
+      const dir = bore ? side : -side;
+      if (bore) await along(k, at[k] + side * Math.max(half - clr, 0), `Towards the ${name}`);
+      else {
+        await along(k, at[k] + side * (half + clr), `Out past the ${name}`);
+        await io.move(null, null, sp.z - c.depth, `Down ${c.depth} mm`);
       }
-      const r = await probeAxis(axis, dir, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
-      if (!r) { await rapidToMPos(null, null, sp.z); log('err', `✗ Center ${name} probe failed`); return null; }
-      // The tip's centre stops a radius short of the wall or side.
+      const r = await io.touch(axis, dir, P.search, name);
       found.push(r[k] + dir * radius);
-      if (!inside) await rapidToMPos(null, null, sp.z);
+      if (!bore) await io.move(null, null, sp.z, 'Up');
     }
     at[k] = (found[0] + found[1]) / 2;
     size[axis] = found[1] - found[0];
-    await rapidAlong(k, at[k]);
+    await along(k, at[k], `To the middle in ${axis}`);
   }
+  if (bore) await io.move(null, null, sp.z, 'Up out of the bore');
+  return { x: at.x, y: at.y, sizeX: size.X, sizeY: size.Y };
+}
 
-  await rapidToMPos(null, null, sp.z);
-  if (size.X !== null || size.Y !== null) {
-    log('info', `Center size:${size.X !== null ? ' X=' + size.X.toFixed(3) : ''}${size.Y !== null ? ' Y=' + size.Y.toFixed(3) : ''} mm`);
-  }
-  return at;
+/** The old entry (the dead modules): runs it and writes the centre, as before. */
+export async function runCenterFinder(cfg: any): Promise<boolean> {
+  if (isProbingRunning()) { log('err', 'Probe already running'); return false; }
+  return (await runProbing(async () => {
+    try {
+      const f = await centre(machineIo(settingsOf(cfg)), machineAt(), cfg, settingsOf(cfg));
+      applyXYResult(f.x, f.y, cfg.axes === 'X' ? 'X' : cfg.axes === 'Y' ? 'Y' : 'XY', { mode: cfg.coordMode, wcs: cfg.wcs });
+      log('info', `✓ Center found: X=${f.x.toFixed(4)} Y=${f.y.toFixed(4)}`);
+      return true;
+    } catch (e) {
+      if (e instanceof Miss) { log('err', `✗ Center: ${e.message}`); return false; }
+      if (e instanceof Stop) return false;
+      throw e;
+    }
+  })) ?? false;
 }
