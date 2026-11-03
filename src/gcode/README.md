@@ -23,7 +23,7 @@ module. The module has no DOM, three.js, Bun APIs, dependencies, or mutable glob
 state. Re-run it with the original text and fresh context when offsets, machine
 position, tool lengths or rapid rates change.
 
-In BearSender (step 4) everything that reads the program goes through here:
+In BearSender everything that reads the program goes through here:
 `src/stores/program.ts` reads the loaded file with the controller's context and
 gives the Preview, the Jobs list, the Setup list's travel and tools; the flight
 recorder resume (`src/flight-recorder-resume.ts`) takes its modal state and
@@ -138,7 +138,7 @@ changes and operator waits have no duration model, so estimates are lower
 bounds. Unknown move/event times are null; totals sum known durations and set
 `timeComplete=false` when modelled geometry/time or manual waits are unknown.
 
-## Issues and evidence
+## Issues
 
 Unsupported syntax, words, commands or conflicting/invalid blocks stop execution
 at the first such block. The suffix is still lexed to enumerate further
@@ -150,10 +150,9 @@ unknown rather than guessed. M0/M1 and M6 become untimed events; N words,
 parenthesized/semicolon comments and `%` delimiters are accepted. Block delete,
 checksums, expressions and controller `$` commands are unsupported.
 
-No test suites are added. `tools/samples` contains canonical evidence files.
-`tools/plot-gcode.ts` writes XY/XZ SVGs, JSON summaries and optional full program
-JSON (`--dump`). `--overlay-old` extracts and executes the original
-`parseGcodeToToolpath` function with a minimal Vector3 implementation; it does
-not approximate the old parser. `--overlay FILE` overlays another interpreted
-program instead. `--context FILE.json` supplies reproducible machine context.
-The report records plot results, numerical evidence, limitations and inferences.
+## Plotting
+
+`tools/plot-gcode.ts` writes XY/XZ SVGs, a JSON summary and optionally the whole
+program as JSON (`--dump`). `--overlay FILE` draws another interpreted program
+over it, and `--context FILE.json` supplies the machine context. `tools/samples`
+holds sample programs and contexts.
