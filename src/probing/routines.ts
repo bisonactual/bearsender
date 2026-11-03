@@ -287,10 +287,16 @@ export async function measureRotation(plan: Plan | null): Promise<void> {
   });
 }
 
+/** Turns the loaded program, unless some of its lines can't be turned exactly: then it is left as it was,
+ *  and the status says which and why (yellow). */
 export function applyRotation(): void {
   const a = rotAngle.value;
   if (a === null) return;
-  applyRotationToGcode(a);
+  const left = applyRotationToGcode(a);
+  if (left.length) {
+    setRun('rot', { phase: 'held', text: `The program wasn't turned: ${left.length === 1 ? 'a line' : left.length + ' lines'} can't be turned exactly. ${left.slice(0, 3).join(' ')}${left.length > 3 ? ` And ${left.length - 3} more (the console has them all).` : ''}` });
+    return;
+  }
   rotAngle.value = null;
   setRun('rot', { text: `Done. ${job.file.value ?? 'The program'} turned by ${a.toFixed(3)}° about X0 Y0.` });
 }

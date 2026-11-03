@@ -107,55 +107,112 @@ function replaceWords(line: string, put: { XY?: string; IJ?: string }): string {
   return out.trimEnd();
 }
 
-/** Turns the loaded program by the angle about X0 Y0. Every move's end is turned as a point (in G91, as a
- *  step) and written with both X and Y, so a line naming one axis gets the other too; an arc's centre
- *  (I, J) is turned with it. Lines in machine coordinates, offset settings and stored positions are left
- *  as they are, and so are comments. */
-export function applyRotationToGcode(angleDeg: number): void {
-  if (!(state as any).gcodeLines || (state as any).gcodeLines.length === 0) {
-    log('err', 'No G-code loaded to rotate');
-    return;
-  }
+// What a line's G words do to the program's frame: settings that don't move (G10, G28.1, G30.1), moves to
+// positions outside the program's work coordinates (G53, G28, G30), and G92, which shifts the coordinates.
+const SETTINGS = [10, 28.1, 30.1];
+const AWAY = [53, 28, 30];
+const SHIFT = [92, 92.1, 92.2, 92.3];
+const MOTION = [0, 1, 2, 3, 38.2, 38.3, 38.4, 38.5, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89];
+
+/** Turns the loaded program by the angle about X0 Y0, and loads it again. Every move's end is turned as a
+ *  point (in G91, as a step) and written with both X and Y, so a line naming one axis gets the other too;
+ *  an arc's centre (I, J) is turned with it. The units are followed line by line: each line's numbers are
+ *  read and written in its own units (G20 or G21), with the position kept in millimetres between them.
+ *  Lines in machine coordinates, offset settings and stored positions are left as they are, and so are
+ *  comments.
+ *
+ *  Some lines can't be turned exactly: G92 shifting the coordinates part way through, an arc in the XZ or
+ *  YZ plane, a move naming one axis while the other isn't known (after a G53, G28 or G30 move, or before
+ *  any move sets it), numbers before any G20 or G21 in a program that changes units, a line that can't be
+ *  read. Then nothing is replaced, and what can't be turned is returned, in words; empty when it was. */
+export function applyRotationToGcode(angleDeg: number): string[] {
+  const lines = (state as any).gcodeLines as string[] | undefined;
+  if (!lines || lines.length === 0) return ['No program is loaded.'];
   const angleRad = angleDeg * Math.PI / 180;
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);
   const turn = (a: number, b: number) => [a * cos - b * sin, a * sin + b * cos];
   const f = (v: number) => (Math.abs(v) < 5e-5 ? 0 : v).toFixed(4);
+  const lexed = lines.map(l => lexLine(l));
+  const gOf = (b: ReturnType<typeof lexLine>) => b.words.filter(([l]) => l === 'G').map(([, v]) => v);
+  const changesUnits = lexed.some(b => gOf(b).includes(20)) && lexed.some(b => gOf(b).includes(21));
+
   const rotated: string[] = [];
-  let x = 0, y = 0;             // where the program is, unturned
-  let inc = false, arcAbs = false;
+  const cant: string[] = [];
+  // Where the program is, unturned, in mm; null while that axis isn't known.
+  let x: number | null = null, y: number | null = null;
+  let unit = 0;                 // mm per program unit: 1 in G21, 25.4 in G20, 0 until the program says
+  let inc = false, arcAbs = false, plane = 17, motion = 0;
   let left = 0;
-  for (const line of (state as any).gcodeLines as string[]) {
-    const b = lexLine(line);
-    const g = b.words.filter(([l]) => l === 'G').map(([, v]) => v);
+  lexed.forEach((b, i) => {
+    const line = lines[i], n = i + 1;
+    const g = gOf(b);
+    if (b.errors.length) { cant.push(`Line ${n} can't be read (${b.errors[0]}).`); rotated.push(line); return; }
+    if (g.includes(20)) unit = 25.4;
+    if (g.includes(21)) unit = 1;
     if (g.includes(90)) inc = false;
     if (g.includes(91)) inc = true;
     if (g.includes(90.1)) arcAbs = true;
     if (g.includes(91.1)) arcAbs = false;
+    for (const p of [17, 18, 19]) if (g.includes(p)) plane = p;
+    for (const m of MOTION) if (g.includes(m)) motion = m;
     const w = (l: string) => b.words.find(([k]) => k === l)?.[1];
     const X = w('X'), Y = w('Y'), I = w('I'), J = w('J');
     const hasXY = X !== undefined || Y !== undefined, hasIJ = I !== undefined || J !== undefined;
-    const leave = b.errors.length > 0 || g.some(v => LEAVE.includes(v));
-    if ((!hasXY && !hasIJ) || leave) {
-      if (leave && (hasXY || hasIJ)) left++;
+    if (g.some(v => SHIFT.includes(v))) { cant.push(`Line ${n} shifts the coordinates (G92) part way through, so its points aren't where the turn about X0 Y0 expects.`); rotated.push(line); return; }
+    if (g.some(v => SETTINGS.includes(v))) { if (hasXY) left++; rotated.push(line); return; }
+    if (g.some(v => AWAY.includes(v))) {
+      // A move to a machine position, or to a stored one: after it, where the program is in X and Y isn't known.
+      if (hasXY || g.includes(28) || g.includes(30)) { x = null; y = null; }
+      if (hasXY) left++;
       rotated.push(line);
-      continue;
+      return;
     }
+    if (!hasXY && !hasIJ) { rotated.push(line); return; }
+    const arc = motion === 2 || motion === 3;
+    if (arc && plane !== 17) { cant.push(`Line ${n} is an arc in the ${plane === 18 ? 'XZ' : 'YZ'} plane (G${plane}), which isn't an arc once turned about Z.`); rotated.push(line); x = y = null; return; }
+    if (!unit && changesUnits) { cant.push(`Line ${n} has X or Y before the program says G20 or G21, and the program changes units later, so its units aren't known.`); rotated.push(line); x = y = null; return; }
+    const k = unit || 1;
     const put: { XY?: string; IJ?: string } = {};
+    // The arc's start, for absolute centres (G90.1), before the end moves it.
+    const sx = x, sy = y;
     if (hasXY) {
       let rx: number, ry: number;
-      if (inc) { [rx, ry] = turn(X ?? 0, Y ?? 0); x += X ?? 0; y += Y ?? 0; }
-      else { x = X ?? x; y = Y ?? y; [rx, ry] = turn(x, y); }
-      put.XY = `X${f(rx)} Y${f(ry)}`;
+      if (inc) {
+        [rx, ry] = turn((X ?? 0) * k, (Y ?? 0) * k);
+        if (x !== null) x += (X ?? 0) * k;
+        if (y !== null) y += (Y ?? 0) * k;
+      } else {
+        const nx = X !== undefined ? X * k : x, ny = Y !== undefined ? Y * k : y;
+        if (nx === null || ny === null) {
+          cant.push(`Line ${n} names only ${X !== undefined ? 'X' : 'Y'}, and ${X !== undefined ? 'Y' : 'X'} isn't known before it, so its turned end isn't known.`);
+          rotated.push(line);
+          x = nx; y = ny;
+          return;
+        }
+        x = nx; y = ny;
+        [rx, ry] = turn(nx, ny);
+      }
+      put.XY = `X${f(rx / k)} Y${f(ry / k)}`;
     }
     if (hasIJ) {
-      const [ri, rj] = turn(I ?? 0, J ?? 0);
-      put.IJ = `I${f(ri)} J${f(rj)}`;
+      if (arcAbs && (sx === null || sy === null) && (I === undefined || J === undefined)) {
+        cant.push(`Line ${n} gives an absolute arc centre (G90.1) on one axis while the other isn't known.`);
+        rotated.push(line);
+        return;
+      }
+      const ci = I !== undefined ? I * k : arcAbs ? sx! : 0, cj = J !== undefined ? J * k : arcAbs ? sy! : 0;
+      const [ri, rj] = turn(ci, cj);
+      put.IJ = `I${f(ri / k)} J${f(rj / k)}`;
     }
     rotated.push(replaceWords(line, put));
+  });
+  if (cant.length) {
+    for (const c of cant) log('err', `Rotation not applied: ${c}`);
+    return cant;
   }
   // Loaded again, so the 3D view, the limits and the frame show the program as it will now run.
   processGcode(rotated.join('\n'), job.file.value ?? 'rotated.nc');
   log('info', `G-code rotated by ${angleDeg.toFixed(3)}° (${rotated.length} lines)${left ? `; ${left} lines in machine coordinates, offset settings or stored positions left as they were` : ''}`);
-  if (arcAbs) log('info', 'The program uses absolute arc centres (G90.1); they were turned as points');
+  return [];
 }
