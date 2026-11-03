@@ -20,6 +20,7 @@ import { mode, panel, leftPanel, rows, atLine, sectionIndex, nextSection, awaite
 import { plan, rowStarts, queuedMs } from './plan';
 import { bellOn, toggleBell } from './sound';
 import { measureAtToolChange } from '../streaming';
+import { offsetsWaitForHoming } from '../offsets';
 import { CameraPanel as Camera } from './CameraPanel';
 import { ConsolePanel as Console } from './ConsolePanel';
 import { MacrosPanel as Macros } from './MacrosPanel';
@@ -384,7 +385,9 @@ function offsetCheck(): Check {
   const key = 'offset:' + wcs;
   const actions: [string, ui.Popup][] = [['PROBE', 'probe'], ['SET ZERO', 'jog']];
   if (!connection.connected.value) return { key, tone: 'todo', text: `Work offset ${wcs}`, detail: 'read when the controller connects', actions };
-  if (!machine.offsetsRead.value) return { key, tone: 'todo', text: `Reading work offset ${wcs}…`, actions };
+  if (!machine.offsetsRead.value) return offsetsWaitForHoming()
+    ? { key, tone: 'todo', text: `Work offset ${wcs}`, detail: 'read after homing', actions }
+    : { key, tone: 'todo', text: `Reading work offset ${wcs}…`, actions };
   const off = machine.offsets.value[wcs] ?? { x: 0, y: 0, z: 0 };
   const before = machine.offsetsAtConnect.value?.[wcs];
   const how = machine.offsetWrites.value[wcs];
@@ -402,7 +405,9 @@ function tloCheck(): Check {
   const actions: [string, ui.Popup][] = [['MEASURE', 'measure']];
   const tlo = machine.tlo.value;
   if (!connection.connected.value) return { key, tone: 'todo', text: 'Tool length offset', detail: 'read when the controller connects', actions };
-  if (tlo === null) return { key, tone: 'todo', text: 'Reading the tool length offset…', actions };
+  if (tlo === null) return offsetsWaitForHoming()
+    ? { key, tone: 'todo', text: 'Tool length offset', detail: 'read after homing', actions }
+    : { key, tone: 'todo', text: 'Reading the tool length offset…', actions };
   if (tlo === 0) return { key, tone: 'todo', text: 'Set TLO: measure the tool.', detail: 'the offset is 0', actions };
   const tool = machine.tool.value;
   return { key, tone: 'done', text: `TLO set: ${tool ? 'T' + tool + ', ' : ''}${mm(tlo)} mm`, actions };
@@ -447,7 +452,7 @@ function travelCheck(): Check {
   if (!job.file.value) return todo('load a program to check it');
   if (!v) return todo('reading the program…');
   if (travel.some(isNaN)) return todo(connection.connected.value ? 'reading the travel ($130–$132)…' : 'connect to read the travel');
-  if (!machine.offsetsRead.value) return todo('reading the work offsets…');
+  if (!machine.offsetsRead.value) return todo(offsetsWaitForHoming() ? 'the work offsets are read after homing' : 'reading the work offsets…');
   // The travel as grblHAL sets it once homed (machine_limits.c): −$13x to 0; or, with "set machine origin
   // to 0" ($22 bit 3), 0 to +$13x for an axis that homes negative ($23). With hard limits on ($21) the
   // pull-off ($27) comes off both ends. Not known until those are read; until then −$13x to 0.

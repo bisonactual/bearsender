@@ -18,7 +18,7 @@ import { setWCS } from '../streaming';
 import { processGcode } from '../gcode';
 import { loadPreview3D } from '../probing/probe-preview-3d';
 import { log } from '../console';
-import { loadOffsets, writeOffset, zeroOffset, setToCurrentPos, cancelTlo, WCS_ENTRIES } from '../offsets';
+import { loadOffsets, offsetsWaitForHoming, writeOffset, zeroOffset, setToCurrentPos, cancelTlo, WCS_ENTRIES } from '../offsets';
 import { WarmupCards } from './Warmup';
 
 const fix3 = (v: number) => v.toFixed(3);
@@ -445,7 +445,7 @@ export function OffsetsTable() {
             </tbody>
           </table>
         </div>
-      ) : <div class="fs-empty-sm">{linked ? 'No offsets read yet. The controller refuses $# until it is homed; press READ after homing.' : 'Not connected.'}</div>}
+      ) : <div class="fs-empty-sm">{!linked ? 'Not connected.' : offsetsWaitForHoming() ? 'Read after homing: the controller refuses $# in an alarm.' : 'No offsets read yet. Press READ.'}</div>}
     </div>
   );
 }

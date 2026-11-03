@@ -189,9 +189,9 @@ export function setMachineState(s: string): void {
   // An alarm: not homed until the controller's H: says otherwise (the full report asked for on ALARM:).
   if (sl === 'alarm' && prevState !== 'alarm') machine.homed.value = false;
   if (sl === 'idle' && prevState === 'home') machine.homed.value = true;
-  // $# can be refused in the power-up alarm, so the offsets read on connect may not have come: read them
-  // once the machine is idle (homed or unlocked), and so after a reset. The sim refused the first $
-  // command after homing (error:71) and took the next, so a refusal gets one more try.
+  // $# is refused in an alarm, so it isn't sent then (offsets.ts) and the offsets wait: read them once the
+  // machine is idle (homed or unlocked), and so after a reset. A refusal gets one more try. (The first $
+  // command after homing used to get error:71: a real-time byte sent as UTF-8 text, connection.ts.)
   if (sl === 'idle' && prevState !== 'idle' && offsetsUnread() && connection.connected.peek()) {
     loadOffsets().then(ok => { if (!ok) setTimeout(() => { if (connection.connected.peek() && offsetsUnread()) loadOffsets(); }, 1000); });
   }

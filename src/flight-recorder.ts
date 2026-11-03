@@ -315,7 +315,9 @@ function buildPlan(record: FlightRecord, tableRead?: string | null): PlanResult 
   // waits for this connection's $# (the record can come first).
   if (!machine.offsetsRead.value || !machine.offsets.value[record.wcs]) {
     if (!_offsetsAsked) { _offsetsAsked = true; loadOffsets(); }
-    return { waiting: 'Reading the work offsets and the tool length from the controller ($#); the moves back in show here once they are in.' };
+    return { waiting: machine.stateName.value === 'alarm'
+      ? 'The work offsets and the tool length are read after homing or UNLOCK (the controller refuses $# in an alarm); the moves back in show here once they are in.'
+      : 'Reading the work offsets and the tool length from the controller ($#); the moves back in show here once they are in.' };
   }
   const s = resumeModal(record);
   if (typeof s === 'string') return { refused: s };

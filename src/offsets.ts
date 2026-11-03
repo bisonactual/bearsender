@@ -34,10 +34,15 @@ export const WCS_ENTRIES = [
 const OFFSET_KEYS = new Set(['G54','G55','G56','G57','G58','G59',
   'G59.1','G59.2','G59.3','G28','G28.1','G30','G30.1','G92']);
 
+/** The controller is in an alarm, where it refuses $# (error:9, at every power-up in the homing alarm). */
+export function offsetsWaitForHoming(): boolean { return machine.stateName.value === 'alarm'; }
+
 /** Reads the work offsets ($#), and says whether it got them. The [TLO:] line in its reply is a push
- *  message (see below). */
+ *  message (see below). In an alarm nothing is sent: they are read once the machine is idle, after
+ *  homing or an unlock (parser.ts). */
 export async function loadOffsets(): Promise<boolean> {
   if (!connection.connected.peek()) { log('err', 'Not connected'); return false; }
+  if (machine.stateName.peek() === 'alarm') { log('info', 'Work offsets: read after homing (the controller refuses $# in an alarm).'); return false; }
   let reply: command.Reply;
   try { reply = await command.send('$#'); }
   catch (e) { if (e instanceof command.CommandFailed) return false; throw e; }

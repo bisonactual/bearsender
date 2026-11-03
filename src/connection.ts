@@ -179,6 +179,8 @@ async function afterConnect(): Promise<void> {
     frConnected,
     ezConnected,
     async () => { if (lsGet('fs-opt-autoload-settings', false)) await loadSettings(); },
+    // In the power-up alarm $# is refused: loadOffsets sends nothing then, so the state must be known.
+    stateKnown,
     loadOffsets,
     readSetupState,
   ];
@@ -189,6 +191,11 @@ async function afterConnect(): Promise<void> {
       if (!command.isConnected()) return;
     }
   }
+}
+
+/** Waits up to a second for the first status report. */
+async function stateKnown(): Promise<void> {
+  for (let i = 0; i < 20 && !machine.state.peek() && command.isConnected(); i++) await new Promise(r => setTimeout(r, 50));
 }
 
 /** The $I+ reply: firmware, RX buffer, axes and plugins. */
