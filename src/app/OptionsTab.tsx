@@ -1,0 +1,253 @@
+// ═══════════════════════════════════════════════
+// Settings, Options: BearSender's own choices, kept in this browser and used at once
+// ═══════════════════════════════════════════════
+
+import type { ComponentChildren } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
+import { signal, effect } from '@preact/signals';
+import * as connection from '../stores/connection';
+import type { LinkSettings } from '../stores/connection';
+import * as flight from '../stores/flight';
+import * as jobOptions from '../stores/options';
+import * as opt from '../options';
+import { state } from '../state';
+import { lsGet, lsSet } from '../ui';
+import { log } from '../console';
+import { frSetEnabled } from '../flight-recorder';
+import { vpSetExtents, setProjection } from '../viewport';
+import { NumIn } from './SetupScreen';
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/** The number of columns the cards are laid out in, as picked. */
+const columns = signal(lsGet<string>('fs-opt-cols', '2'));
+effect(() => lsSet('fs-opt-cols', columns.value));
+
+function Check({ checked, set, children }: { checked: boolean; set: (v: boolean) => void; children: ComponentChildren }) {
+  return <label class="fs-opt-check"><input type="checkbox" checked={checked} onChange={e => set((e.target as HTMLInputElement).checked)} />{children}</label>;
+}
+
+function Field({ label, children }: { label: string; children: ComponentChildren }) {
+  return <label class="fs-field"><span>{label}</span>{children}</label>;
+}
+
+function Pick({ value, set, opts, label }: { value: string; set: (v: string) => void; opts: [string, string][]; label: string }) {
+  return (
+    <select class="fs-in" aria-label={label} value={value} onChange={e => set((e.target as HTMLSelectElement).value)}>
+      {opts.map(([v, t]) => <option value={v}>{t}</option>)}
+    </select>
+  );
+}
+
+function Seg2<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
+  return (
+    <div role="radiogroup" aria-label={label} class="fs-seg fs-seg-sm fs-self-start">
+      {opts.map(([v, t]) => <button type="button" role="radio" aria-checked={v === value ? 'true' : 'false'} class={v === value ? 'is-on' : ''} onClick={() => set(v)}>{t}</button>)}
+    </div>
+  );
+}
+
+/** A colour: the picker, its hex code to type, and Reset where there is a default. */
+function ColorRow({ label, value, set, reset }: { label: string; value: string; set: (v: string) => void; reset?: () => void }) {
+  const [hex, setHex] = useState(value);
+  useEffect(() => setHex(value), [value]);
+  return (
+    <div class="fs-color-row">
+      <span class="fs-color-label">{label}</span>
+      <input type="color" class="fs-color-pick" aria-label={label} value={value} onInput={e => set((e.target as HTMLInputElement).value)} />
+      <input type="text" class="fs-in fs-mono fs-hex" aria-label={label + ' hex'} value={hex} maxLength={7} spellcheck={false}
+        onInput={e => { const v = (e.target as HTMLInputElement).value; setHex(v); if (HEX.test(v)) set(v); }} />
+      {reset && <button type="button" class="fs-btn fs-btn-xs" onClick={reset}>RESET</button>}
+    </div>
+  );
+}
+
+// ── The cards ─────────────────────────────────────────────────────────────────
+
+function Connection() {
+  const s = connection.settings.value;
+  const linked = connection.connected.value;
+  const set = (patch: Partial<LinkSettings>) => {
+    if (patch.mode && patch.mode !== s.mode && linked) { log('err', 'Disconnect before changing connection type'); return; }
+    connection.settings.value = { ...s, ...patch };
+  };
+  const [url, setUrl] = useState(s.wsUrl);
+  useEffect(() => setUrl(s.wsUrl), [s.wsUrl]);
+  return (
+    <>
+      <Seg2 label="Connection type" value={s.mode} set={mode => set({ mode })} opts={[['websocket', 'WEBSOCKET'], ['serial', 'USB / SERIAL']]} />
+      {linked && <div class="fs-note">Connected: disconnect before changing the connection type.</div>}
+      {s.mode === 'websocket' ? (
+        <>
+          <Field label="WebSocket URL">
+            <input type="text" class="fs-in fs-mono" value={url} placeholder="ws://host:port" spellcheck={false}
+              onInput={e => setUrl((e.target as HTMLInputElement).value)} onChange={e => set({ wsUrl: (e.target as HTMLInputElement).value.trim() })}
+              onKeyDown={e => { if (e.key === 'Enter') set({ wsUrl: (e.target as HTMLInputElement).value.trim() }); }} />
+          </Field>
+          <div class="fs-note">Format: <span class="fs-mono">ws://host:port</span>. CONNECT is in the top bar.</div>
+        </>
+      ) : (
+        <>
+          <div class="fs-note fs-mono">{linked && connection.transport.value === 'serial' ? connection.address.value : 'No port selected'}</div>
+          <div class="fs-fields">
+            <Field label="Baud Rate"><Pick label="Baud Rate" value={s.baud} set={baud => set({ baud })}
+              opts={['9600', '19200', '38400', '57600', '115200', '230400', '250000', '500000', '1000000', '2000000'].map(v => [v, v])} /></Field>
+            <Field label="Data Bits"><Pick label="Data Bits" value={s.dataBits} set={dataBits => set({ dataBits })} opts={[['7', '7'], ['8', '8']]} /></Field>
+            <Field label="Stop Bits"><Pick label="Stop Bits" value={s.stopBits} set={stopBits => set({ stopBits })} opts={[['1', '1'], ['2', '2']]} /></Field>
+            <Field label="Parity"><Pick label="Parity" value={s.parity} set={parity => set({ parity })} opts={[['none', 'None'], ['even', 'Even'], ['odd', 'Odd']]} /></Field>
+          </div>
+          <div class="fs-note">
+            {connection.serialSupported
+              ? 'Press CONNECT in the top bar to open the browser\'s port picker and connect. The browser will remember your last port.'
+              : 'This browser has no Web Serial, so it can\'t open a USB port. Chrome and Edge have it.'}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function ViewExtents() {
+  const [v, setV] = useState({ xMin: String(state.vpXMin), xMax: String(state.vpXMax), yMin: String(state.vpYMin), yMax: String(state.vpYMax) });
+  const [ortho, setOrtho] = useState(state.vpOrtho);
+  const field = (k: keyof typeof v, label: string) => (
+    <Field label={label}>
+      <input type="number" step="10" class="fs-in fs-mono" value={v[k]} onInput={e => {
+        const next = { ...v, [k]: (e.target as HTMLInputElement).value };
+        setV(next);
+        vpSetExtents(parseFloat(next.xMin), parseFloat(next.xMax), parseFloat(next.yMin), parseFloat(next.yMax));
+      }} />
+    </Field>
+  );
+  return (
+    <>
+      <div class="fs-fields">{field('xMin', 'X Minimum (mm)')}{field('xMax', 'X Maximum (mm)')}{field('yMin', 'Y Minimum (mm)')}{field('yMax', 'Y Maximum (mm)')}</div>
+      <div class="fs-opt-line"><span class="fs-dim">Projection</span>
+        <Seg2 label="Projection" value={ortho ? 'o' : 'p'} set={p => { setProjection(p === 'o'); setOrtho(p === 'o'); }} opts={[['p', 'PERSPECTIVE'], ['o', 'ORTHOGRAPHIC']]} />
+      </div>
+    </>
+  );
+}
+
+function Theme() {
+  const c = opt.colors.value;
+  const [ruler, setRuler] = useState(state.rulerCoords);
+  return (
+    <>
+      {opt.COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.optApplyColor(k, v)} reset={() => opt.optResetColor(k)} />)}
+      <div class="fs-color-row">
+        <span class="fs-color-label">Ruler Coordinates</span>
+        <Pick label="Ruler Coordinates" value={ruler} set={v => { state.rulerCoords = v; setRuler(v); }} opts={[['machine', 'Machine'], ['work', 'Work (WCS)']]} />
+      </div>
+      {opt.VP_COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.optApplyColor(k, v)} reset={() => opt.optResetColor(k)} />)}
+      <button type="button" class="fs-btn fs-btn-sm fs-self-start" onClick={() => opt.optResetAllColors()}>RESET ALL COLOURS</button>
+    </>
+  );
+}
+
+function ZoneColors() {
+  const c = opt.zoneColors.value;
+  const set = (k: string, v: string) => { opt.zoneColors.value = { ...opt.zoneColors.value, [k]: v }; };
+  return (
+    <>
+      {opt.ZONE_COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => set(k, v)} />)}
+      <div class="fs-opt-line">
+        <span class="fs-dim">Icon Scale</span>
+        <input type="range" class="fs-range" min="0.02" max="0.3" step="0.005" aria-label="Icon Scale" value={c.optBearScale}
+          onInput={e => set('optBearScale', (e.target as HTMLInputElement).value)} />
+        <span class="fs-mono">{parseFloat(c.optBearScale).toFixed(3)}</span>
+      </div>
+    </>
+  );
+}
+
+function JogSteps() {
+  const s = opt.jogSteps.value;
+  const [bad, setBad] = useState(false);
+  const set = (k: keyof typeof s, v: string) => { opt.jogSteps.value = { ...opt.jogSteps.value, [k]: v }; };
+  const text = (k: 'xy' | 'z', label: string) => (
+    <Field label={label}><input type="text" class="fs-in fs-mono" spellcheck={false} value={s[k]} onInput={e => set(k, (e.target as HTMLInputElement).value)} /></Field>
+  );
+  return (
+    <>
+      <div class="fs-fields fs-fields-2">{text('xy', 'XY Steps (mm)')}{text('z', 'Z Steps (mm)')}</div>
+      <div class="fs-fields">
+        <Field label="Max XY Speed (mm/min)"><NumIn label="Max XY Speed" value={parseInt(s.maxXY) || 3000} min={1} step={100} set={v => set('maxXY', String(v))} wide /></Field>
+        <Field label="Max Z Speed (mm/min)"><NumIn label="Max Z Speed" value={parseInt(s.maxZ) || 500} min={1} step={50} set={v => set('maxZ', String(v))} wide /></Field>
+      </div>
+      <button type="button" class="fs-btn fs-btn-sm fs-self-start" onClick={() => setBad(!opt.optApplyJogSteps())}>APPLY &amp; REBUILD BUTTONS</button>
+      {bad && <div class="fs-note fs-warn-text">Each list needs at least one step above 0; nothing was changed.</div>}
+      <Check checked={opt.jogShowUnits.value} set={v => { opt.jogShowUnits.value = v; }}>Show mm units on distance buttons</Check>
+    </>
+  );
+}
+
+interface OptCard { title: string; desc: ComponentChildren; text: string; body: () => ComponentChildren; }
+
+const CARDS: OptCard[] = [
+  { title: 'CONNECTION TYPE', text: 'connection websocket usb serial url baud',
+    desc: 'Choose how BearSender connects to your controller. WebSocket connects over your network (WiFi/Ethernet). USB/Serial connects directly via a USB cable using the Web Serial API (Chrome & Edge only).',
+    body: () => <Connection /> },
+  { title: 'AUTO-LOAD SETTINGS ON CONNECT', text: 'auto-load settings connect autocomplete',
+    desc: 'Automatically fetch GrblHAL settings when connecting. Enables console autocomplete for setting names.',
+    body: () => <Check checked={opt.autoloadSettings.value} set={v => { opt.autoloadSettings.value = v; }}>Enable</Check> },
+  { title: 'FLIGHT RECORDER', text: 'flight recorder resume connection drops',
+    desc: 'For controllers with the Flight Recorder plugin. Every job is stamped and its lines numbered, so the controller remembers where it got to. If the connection drops it lifts the tool and stops the spindle, and when you reconnect BearSender offers to carry on from that line. Its settings are in Settings, Flight recorder; the record and the event log are on the Job screen, in the Recorder panel. While this is on BearSender doesn\'t reset the controller when it connects.',
+    body: () => <Check checked={flight.enabled.value} set={v => frSetEnabled(v)}>Enable</Check> },
+  { title: 'JOBS AND THE RESUME', text: 'jobs resume m6 m30 hold lift',
+    desc: <>
+      <b>Hold at every M6:</b> the job waits for Resume at each M6 in the file, also for the tool already loaded or when the controller ignores M6 ($341=4). Off, it holds only where the controller really changes tools.
+    </>,
+    body: () => (
+      <>
+        <Check checked={jobOptions.holdEveryM6.value} set={v => { jobOptions.holdEveryM6.value = v; log('info', 'Hold at every M6: ' + (v ? 'on' : 'off')); }}>Hold at every M6</Check>
+        <div class="fs-note"><b>Run lines after M30:</b> grblHAL goes on reading after M2 or M30, with some modes reset. Off, the job ends at the first M2/M30 and the lines after it aren't sent. On, the file is sent whole and the Program panel says lines run after the program end.</div>
+        <Check checked={jobOptions.runAfterM30.value} set={v => { jobOptions.runAfterM30.value = v; log('info', 'Run lines after M30: ' + (v ? 'on' : 'off')); }}>Run lines after M30</Check>
+        <div class="fs-note"><b>Resume lift:</b> the first move of a flight recorder resume goes up to this height, in mm below machine zero, unless the tool is already higher; then it crosses to the start of the line there. It never moves down.</div>
+        <Field label="Resume lift (mm below machine zero)"><NumIn label="Resume lift" value={jobOptions.resumeLiftMm.value} min={0} step={1} set={v => jobOptions.setResumeLift(v)} wide /></Field>
+      </>
+    ) },
+  { title: '3D VIEWPORT EXTENTS', text: '3d viewport extents projection grid',
+    desc: 'Machine-coordinate workspace bounds. 0,0 is home (top-right); enter negative values for your working area. Updates the grid and camera position instantly.',
+    body: () => <ViewExtents /> },
+  { title: 'COLOUR THEME', text: 'colour color theme text background accent ruler 3d',
+    desc: 'Customise the primary text colour and background colour. Click the swatch to open the colour picker, or type a hex value. Reset restores the defaults.',
+    body: () => <Theme /> },
+  { title: 'EXCLUSION ZONE COLOURS', text: 'exclusion zone colours color icon',
+    desc: 'Colours for exclusion zone boxes in the 3D viewport based on what the zone blocks.',
+    body: () => <ZoneColors /> },
+  { title: 'JOG STEP SIZES', text: 'jog step sizes speed units',
+    desc: 'Configure the step size presets and maximum feed rates for XY and Z jogging. Comma-separated values in mm. Max speed caps the slider regardless of its position.',
+    body: () => <JogSteps /> },
+];
+
+export function OptionsTab() {
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const descText = (d: ComponentChildren) => (typeof d === 'string' ? d : '');
+  const shown = CARDS.filter(c => !q || (c.title + ' ' + c.text + ' ' + descText(c.desc)).toLowerCase().includes(q));
+  const cols = columns.value;
+  return (
+    <div class="fs-opts">
+      <div class="fs-card-head">
+        <span class="fs-dim">Kept in this browser, and used at once.</span>
+        <div class="fs-head-end">
+          <input type="search" class="fs-in" placeholder="Search options…" aria-label="Search options" value={query} onInput={e => setQuery((e.target as HTMLInputElement).value)} />
+          <Pick label="Columns" value={cols} set={v => { columns.value = v; }} opts={[['1', '1 col'], ['2', '2 col'], ['3', '3 col']]} />
+        </div>
+      </div>
+      <div class="fs-opts-grid">
+        <div class="fs-opts-cols" style={{ '--opt-cols': cols }}>
+          {shown.map(c => (
+            <section class="fs-card fs-mcard fs-opt-card" aria-label={c.title}>
+              <h2 class="fs-h">{c.title}</h2>
+              <div class="fs-note">{c.desc}</div>
+              {c.body()}
+            </section>
+          ))}
+        </div>
+        {!shown.length && <div class="fs-empty-sm">No option matches "{query}".</div>}
+      </div>
+    </div>
+  );
+}

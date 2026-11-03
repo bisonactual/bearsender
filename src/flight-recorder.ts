@@ -216,8 +216,6 @@ export function frJobLines(): SendLine[] {
 
 export function frFileLoaded(_name: string): void {
   _undercut = false;
-  const box = document.getElementById('frUndercut') as HTMLInputElement | null;
-  if (box) box.checked = false;
   renderRecord();
   // Loading the file a cut short job came from is the cue to offer the resume again.
   if (_record && loadedFileMatches(_record)) {
@@ -517,127 +515,32 @@ function closeModal(): void {
   if (modal) modal.style.display = 'none';
 }
 
-// ── The FLIGHT RECORDER tab ───────────────────────────────────────────────────
+// ── The Settings screen's RECORDER tab (src/app/RecorderTab.tsx) ──────────────
 
-export function renderFlightTab(): void {
-  const enabled = frEnabled();
-  for (const id of ['frTabToggleBtn']) {
-    const btn = document.getElementById(id);
-    if (btn) { btn.textContent = enabled ? 'ON' : 'OFF'; btn.classList.toggle('success', enabled); }
-  }
-  const option = document.getElementById('optFlightRecorder') as HTMLInputElement | null;
-  if (option) option.checked = enabled;
+/** Copies the state into the flight recorder store; the screens show that. */
+export function renderFlightTab(): void { publish(); }
 
-  const badge = document.getElementById('frTabStatusBadge');
-  if (badge) {
-    let text = 'NOT CONNECTED', cls = '';
-    if (state.connected && _pluginDetected && !_noStorage) { text = 'PLUGIN v' + _version; cls = 'active'; }
-    else if (state.connected && _noStorage) text = 'NO FRAM ON THE BOARD';
-    else if (state.connected) text = 'NO PLUGIN FOUND';
-    badge.textContent = text;
-    badge.className = 'ez-status-badge ' + cls;
-  }
-  const notice = document.getElementById('frPluginNotice');
-  if (notice) notice.style.display = _pluginDetected && !_noStorage ? 'none' : '';
+function renderRecord(): void { publish(); }
 
-  renderRecord();
-  renderSettings();
-  renderEvents();
-}
-
-function renderRecord(): void {
-  publish();
-  const el = document.getElementById('frRecord');
-  if (!el) return;
-  if (!_record) {
-    el.innerHTML = `<div class="fr-empty">${state.connected && _pluginDetected ? 'No job recorded yet.' : 'Connect to read the record.'}</div>`;
-    return;
-  }
-  const record = _record;
-  const matches = loadedFileMatches(record);
-  const rows: [string, string][] = [
-    ['State', `<b>${esc(record.state)}</b>`],
-    ['Why', esc(record.state === 'Running' || record.state === 'Completed' || record.state === 'Idle' ? '—' : REASONS[record.why] || record.why)],
-    ['Job', record.job === '00000000' ? '—' : esc(record.job) + (state.gcodeLines.length
-      ? (matches ? ' <span class="fr-good">(the loaded file)</span>' : ' <span class="fr-dim">(not the loaded file)</span>') : '')],
-    ['Line', String(record.ln || '—')],
-    ['Tool / offset', 'T' + record.tool + ' / ' + esc(record.wcs)],
-    ['Boot', String(record.boot)],
-  ];
-  el.innerHTML = `<table class="fr-table">${rows.map(([k, v]) => `<tr><td class="fr-key">${k}</td><td>${v}</td></tr>`).join('')}</table>` +
-    `<div class="fr-row-actions">` +
-    `<button class="tb-btn success" id="frResumeBtn" ${resumable(record) ? '' : 'disabled'}>▶ RESUME…</button>` +
-    `<button class="tb-btn danger" id="frClearBtn">DISCARD</button></div>`;
-  document.getElementById('frResumeBtn')?.addEventListener('click', () => { _promptedFor = recordKey(record); frOpenResume(); });
-  document.getElementById('frClearBtn')?.addEventListener('click', () => { discardRecord(false); });
-}
-
-interface SettingRow { id: number; name: string; unit: string; help: string; kind: 'bool' | 'number'; }
-
-const SETTINGS: SettingRow[] = [
-  { id: 790, name: 'Retract when the sender is lost', unit: '', kind: 'bool',
-    help: 'Lift the tool straight up and stop the spindle if the sender goes quiet with the spindle on.' },
-  { id: 791, name: 'Sender lost after', unit: 's', kind: 'number',
-    help: 'How long the machine can sit with nothing to do and the spindle on before it retracts. Dwells don\'t count.' },
-  { id: 792, name: 'Retract to', unit: 'mm below machine zero', kind: 'number',
-    help: 'Machine Z, measured down from the top of the axis (never from work zero).' },
-  { id: 793, name: 'Watchdog', unit: 's', kind: 'number',
-    help: 'Resets the controller, which stops the spindle, if it hangs for this long. 3 to 10, 0 is off. Takes effect at the next restart.' },
-];
-
-function renderSettings(): void {
-  publish();
-  const el = document.getElementById('frSettings');
-  if (!el) return;
-  if (!state.connected || !_pluginDetected || _noStorage) {
-    el.innerHTML = '<div class="fr-empty">Connect to a controller with the plugin to change these.</div>';
-    return;
-  }
-  el.innerHTML = SETTINGS.filter(s => s.id !== 793 || _watchdogSupported).map(s => {
-    const value = state.settingsValues[s.id] ?? '';
-    const input = s.kind === 'bool'
-      ? `<label class="fr-toggle"><input type="checkbox" data-fr-setting="${s.id}" ${value === '1' ? 'checked' : ''}> On</label>`
-      : `<input class="limits-safe-input fr-number" type="number" step="any" data-fr-setting="${s.id}" value="${esc(value)}">` +
-        `<span class="fr-unit">${esc(s.unit)}</span><button class="tb-btn" data-fr-write="${s.id}">WRITE</button>`;
-    return `<div class="fr-setting"><div class="fr-setting-name">${esc(s.name)} <span class="fr-dim">$${s.id}</span></div>` +
-      `<div class="fr-setting-help">${esc(s.help)}</div><div class="fr-setting-input">${input}</div></div>`;
-  }).join('') + (_watchdogSupported === false
-    ? '<div class="fr-dim" style="margin-top:6px">This firmware has no watchdog. The _FR_WD builds have it.</div>' : '');
-
-  const write = (id: number, value: string) => {
-    sendCmd('$' + id + '=' + value);
-    command.send('$' + id).then(renderSettings, ignoreFailed);
-  };
-  el.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-fr-setting]').forEach(box =>
-    box.addEventListener('change', () => write(parseInt(box.dataset.frSetting!), box.checked ? '1' : '0')));
-  el.querySelectorAll<HTMLButtonElement>('[data-fr-write]').forEach(btn => btn.addEventListener('click', () => {
-    const id = parseInt(btn.dataset.frWrite!);
-    const input = el.querySelector<HTMLInputElement>(`input[data-fr-setting="${id}"]`);
-    if (input && input.value.trim() !== '') write(id, input.value.trim());
-  }));
-}
+function renderSettings(): void { publish(); }
 
 function renderEvents(): void {
   publish();
   if (!_eventsLoading && _events.length) flight.eventsReadAt.value = Date.now();
-  const el = document.getElementById('frEvents');
-  if (!el) return;
-  if (_eventsLoading) { el.innerHTML = '<div class="fr-empty">Reading…</div>'; return; }
-  if (!_events.length) {
-    el.innerHTML = '<div class="fr-empty">Press ↻ to read the last 100 events from the controller.</div>';
-    return;
-  }
-  const rows = _events.slice().reverse().map(line => {
-    // [EVENT:812|boot=7|t=1523.410|LIMIT|min=X|max=-|n=1]
-    const fields = line.slice(1, -1).split('|');
-    const field = (key: string) => (fields.find(f => f.startsWith(key + '=')) || '').slice(key.length + 1);
-    const type = fields[3] || '?';
-    const details = fields.slice(4).filter(f => !f.startsWith('n=')).join('  ');
-    const count = parseInt(field('n')) || 1;
-    return `<tr><td>${esc(field('boot'))}</td><td>${esc(field('t'))}</td><td class="fr-event-${esc(type.toLowerCase())}">${esc(type)}</td>` +
-      `<td>${esc(details)}</td><td>${count > 1 ? '×' + count : ''}</td></tr>`;
-  }).join('');
-  el.innerHTML = `<table class="fr-table fr-events"><tr><th>Boot</th><th>Time (s)</th><th>Event</th><th></th><th></th></tr>${rows}</table>`;
+}
+
+/** Reads the record and the recorder's settings again. */
+export function frRefresh(): void {
+  if (state.connected && _pluginDetected) queryController().catch(ignoreFailed);
+}
+
+/** "Uses undercut tools", for the loaded job. */
+export function frSetUndercut(on: boolean): void { _undercut = on; publish(); }
+
+/** Writes one of the recorder's settings ($790-$793), then reads it back. */
+export function frWriteSetting(id: number, value: string): void {
+  sendCmd('$' + id + '=' + value);
+  command.send('$' + id).then(renderSettings, ignoreFailed);
 }
 
 /** Reads the last 100 events from the controller, unless a job is running. */
@@ -656,16 +559,7 @@ export async function frLoadEvents(): Promise<void> {
 
 export function initFlightRecorderTab(): void {
   const on = (id: string, fn: () => void) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
-  on('frTabToggleBtn', () => frSetEnabled(!frEnabled()));
-  on('frTabRefreshBtn', () => { if (state.connected && _pluginDetected) queryController().catch(ignoreFailed); });
-  on('frEventsRefreshBtn', () => frLoadEvents());
-  on('frEventsClearBtn', () => { if (state.connected && _pluginDetected) { sendCmd('$EVENTSCLEAR'); _events = []; renderEvents(); } });
   on('frModalClose', () => closeModal());
-
-  const option = document.getElementById('optFlightRecorder') as HTMLInputElement | null;
-  if (option) option.addEventListener('change', () => frSetEnabled(option.checked));
-  const undercut = document.getElementById('frUndercut') as HTMLInputElement | null;
-  if (undercut) undercut.addEventListener('change', () => { _undercut = undercut.checked; publish(); });
 
   onBus('status', ['state'], () => updateResumeDialog());
   renderFlightTab();

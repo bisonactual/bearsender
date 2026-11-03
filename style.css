@@ -1513,6 +1513,81 @@
   .fs-tt-legend { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 13px; color: var(--text2); }
   .fs-tt-legend > span { display: inline-flex; align-items: center; gap: 6px; }
   .fs-pstatus.is-warn { border-color: var(--warn-text); color: var(--warn-text); }
+  /* Settings: the controller's settings, a group list beside the group's rows; each scrolls on its own. */
+  .fs-gs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
+  .fs-gs-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .fs-gs-search { width: 220px; font-family: var(--sans); }
+  .fs-gs-status { font-size: 14px; }
+  .fs-gs-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
+  .fs-gs-groups { flex: 0 0 210px; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+  .fs-gs-group { flex: none; padding: 8px 10px; border: 0; border-radius: 6px; background: none; color: var(--text-mid); font-size: 14px; text-align: left; }
+  .fs-gs-group.is-on { background: var(--surface2); color: var(--text); font-weight: 600; box-shadow: inset 3px 0 0 var(--tab-active); }
+  .fs-gs-list { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+  .fs-gs-head { position: sticky; top: 0; z-index: 1; padding: 8px 14px; background: var(--card); border-bottom: 1px solid var(--border); font-family: var(--cond); font-size: 14px; font-weight: 700; letter-spacing: 0.12em; color: var(--text2); }
+  .fs-gs-row { display: flex; gap: 16px; padding: 10px 14px; border-top: 1px solid var(--surface3); }
+  .fs-gs-row:first-of-type { border-top: 0; }
+  .fs-gs-row.is-dirty { background: rgba(255, 140, 66, 0.06); box-shadow: inset 3px 0 0 var(--accent2); }
+  .fs-gs-meta { flex: 1 1 50%; min-width: 0; }
+  .fs-gs-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .fs-gs-id { font-family: var(--mono); font-size: 13px; color: var(--text2); }
+  .fs-gs-desc { margin-top: 4px; font-size: 13px; color: var(--text2); white-space: pre-line; }
+  .fs-gs-ctrl { flex: 1 1 50%; min-width: 0; display: flex; align-items: flex-start; justify-content: flex-end; gap: 10px; }
+  .fs-gs-ctrl > .fs-in { flex: 1 1 auto; max-width: 280px; }
+  .fs-gs-bits { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .fs-gs-bits label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text-mid); }
+  .fs-gs-bits label.is-off { opacity: 0.45; }
+  .fs-gs-bits input { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); }
+  .fs-gs-write { flex: none; min-width: 120px; }
+  @media (max-width: 1000px) {
+    .fs-gs-groups { flex-basis: 160px; }
+    .fs-gs-row { flex-direction: column; gap: 8px; }
+    .fs-gs-ctrl { justify-content: flex-start; }
+  }
+
+  /* Settings: options in cards, as many columns as picked; the cards scroll, the page doesn't. */
+  .fs-opts { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
+  .fs-opts .fs-head-end select.fs-in { width: auto; }
+  .fs-opts-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .fs-opts-cols { --opt-cols: 2; column-count: var(--opt-cols); column-gap: 12px; }
+  .fs-opts-cols > .fs-opt-card { break-inside: avoid; margin-bottom: 12px; }
+  .fs-opt-card .fs-note { margin-top: 0; }
+  .fs-opt-check { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 14px; color: var(--text-mid); }
+  .fs-opt-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+  .fs-fields-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fs-opt-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .fs-color-row { display: flex; align-items: center; gap: 8px; }
+  .fs-color-label { flex: 1 1 auto; min-width: 0; font-size: 14px; color: var(--text-mid); }
+  .fs-color-pick { flex: none; width: 40px; height: 32px; padding: 0 2px; border: 1px solid var(--border2); border-radius: 6px; background: var(--bg); }
+  .fs-hex { flex: none; width: 96px; }
+  .fs-color-row > select.fs-in { width: auto; }
+  .fs-warn-text { color: var(--warn-text); }
+  .fs-stop-text { color: var(--stop-text); }
+
+  /* Settings: exclusion zones and the flight recorder */
+  .fs-zone-state { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .fs-tt-pill.is-warn { border-color: var(--warn-text); color: var(--warn-text); background: rgba(251, 191, 36, 0.1); }
+  .fs-zonetable td, .fs-zonetable th { white-space: nowrap; width: 1%; }
+  .fs-zonetable .fs-zone-blocks { width: auto; }
+  .fs-zonetable .fs-zone-slot { text-align: left; font-family: var(--mono); font-weight: 700; }
+  .fs-zonetable .fs-zone-blocks { text-align: left; font-family: var(--cond); font-weight: 700; letter-spacing: 0.06em; }
+  .fs-zonetable tbody tr.is-off { opacity: 0.45; }
+  .fs-zonetable tbody tr.is-atci { background: rgba(255, 140, 66, 0.06); }
+  .fs-zonetable tbody tr.is-atci .fs-zone-slot { color: var(--accent); }
+  .fs-zonetable td.fs-zone-act { text-align: right; }
+  .fs-zone-actbox { display: inline-flex; gap: 6px; }
+  .fs-zone-form { flex: none; }
+  .fs-zone-axes { display: flex; flex-direction: column; gap: 6px; }
+  .fs-zone-axis { display: flex; align-items: center; gap: 8px; }
+  .fs-zone-axis b { width: 16px; color: var(--text2); font-family: var(--mono); }
+  .fs-zone-axis .fs-in { flex: 1 1 0; max-width: 180px; }
+  .fs-zone-flags { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .fs-zone-btns { display: flex; gap: 8px; }
+  .fs-fr-cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-items: start; gap: 12px; }
+  .fs-fr-setting { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid var(--surface3); }
+  .fs-fr-input { display: flex; align-items: center; gap: 8px; }
+  .fs-fr-input .fs-in { width: 120px; }
+  @media (max-width: 900px) { .fs-fr-cards { grid-template-columns: minmax(0, 1fr); } }
+  .fs-col-probe { flex: 0 1 560px; }
   .fs-offname { white-space: nowrap; }
   .fs-offname > span:first-child { display: inline-block; min-width: 64px; font-family: var(--mono); font-size: 15px; color: var(--text); }
   .fs-offname .fs-small { margin-left: 8px; font-family: var(--sans); font-weight: 400; letter-spacing: 0; }

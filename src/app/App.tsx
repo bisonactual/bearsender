@@ -4,7 +4,6 @@
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
-import type { Signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
@@ -15,11 +14,11 @@ import { mode, moving, nextSection, awaitedSection, toolLabel, toolChangeMode } 
 import { toggleConnect, rtSend, sendCmd } from '../connection';
 import { startJob, pauseJob, stopJob, sendReset, sendHome, unlockAlarm, resumeToolChange } from '../streaming';
 import { alarmText } from '../parser';
-import { Legacy } from './Legacy';
 import { JobScreen } from './JobScreen';
 import { SetupScreen } from './SetupScreen';
 import { ProbingScreen } from './ProbingScreen';
 import { ToolsScreen } from './ToolsScreen';
+import { SettingsScreen } from './SettingsScreen';
 import { WarmupButton } from './Warmup';
 import * as warmup from '../warmup';
 import { PopupHost } from './Popup';
@@ -371,35 +370,6 @@ function BottomBar() {
         <button type="button" class="fs-run-btn is-stop" disabled={!canStop} onClick={() => warming ? warmup.stop() : stopJob()}><IconStop />STOP</button>
       </div>
     </footer>
-  );
-}
-
-// ── Screens ───────────────────────────────────────────────────────────────────
-
-function SubTabs<T extends string>({ tabs, value }: { tabs: [T, string][]; value: Signal<T> }) {
-  return (
-    <div role="tablist" class="fs-subtabs">
-      {tabs.map(([id, label]) => (
-        <button type="button" role="tab" aria-selected={value.value === id ? 'true' : 'false'} class={value.value === id ? 'is-on' : ''}
-          onClick={() => { value.value = id; }}>{label}</button>
-      ))}
-    </div>
-  );
-}
-
-// Camera, Console and Macros are tabs of the job screen's right panel.
-const SETTINGS_TABS: [ui.SettingsTab, string][] = [['grbl', 'GRBL SETTINGS'], ['zones', 'EXCLUSION ZONES'], ['options', 'OPTIONS'], ['flight', 'FLIGHT RECORDER']];
-
-function SettingsScreen() {
-  const tab = ui.settingsTab.value;
-  return (
-    <section class="fs-screen" hidden={ui.screen.value !== 'settings'}>
-      <SubTabs tabs={SETTINGS_TABS} value={ui.settingsTab} />
-      <div class="fs-sub" hidden={tab !== 'grbl'}><Legacy class="fs-legacy" ids={['tabpanel-settings']} /></div>
-      <div class="fs-sub" hidden={tab !== 'zones'}><Legacy class="fs-legacy" ids={['tabpanel-exclusions']} /></div>
-      <div class="fs-sub" hidden={tab !== 'options'}><Legacy class="fs-legacy" ids={['tabpanel-options']} /></div>
-      <div class="fs-sub" hidden={tab !== 'flight'}><Legacy class="fs-legacy" ids={['tabpanel-flight']} /></div>
-    </section>
   );
 }
 

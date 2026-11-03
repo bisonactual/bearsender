@@ -594,14 +594,13 @@ export function vpRefreshColors(): void {
   executedLine?.material.color.setHex(cssColorToHex('--vp-executed', 0x00ff88));
 }
 
-export function vpApply(): void {
-  const xMin = parseFloat((document.getElementById('vpXMin') as HTMLInputElement).value);
-  const xMax = parseFloat((document.getElementById('vpXMax') as HTMLInputElement).value);
-  const yMin = parseFloat((document.getElementById('vpYMin') as HTMLInputElement).value);
-  const yMax = parseFloat((document.getElementById('vpYMax') as HTMLInputElement).value);
-  if (isNaN(xMin) || isNaN(xMax) || isNaN(yMin) || isNaN(yMax)) return;
-  if (xMin >= xMax || yMin >= yMax) return;
+/** Sets the workspace bounds (Settings, Options), in machine mm. False, and nothing changed, unless each
+ *  minimum is below its maximum. */
+export function vpSetExtents(xMin: number, xMax: number, yMin: number, yMax: number): boolean {
+  if (isNaN(xMin) || isNaN(xMax) || isNaN(yMin) || isNaN(yMax)) return false;
+  if (xMin >= xMax || yMin >= yMax) return false;
   state.vpXMin = xMin; state.vpXMax = xMax; state.vpYMin = yMin; state.vpYMax = yMax;
   vpSaveExtents();
   rebuildViewportGrid();
+  return true;
 }

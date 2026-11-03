@@ -10,9 +10,9 @@ import { lsGet } from './ui';
 import { log } from './console';
 import * as command from './command';
 import { updateRunButtons } from './streaming';
-import { ezResetPluginState, renderEzTab, renderEzModule, ezCheckPlugin, ezConnected } from './exclusion-zones';
+import { ezResetPluginState, ezCheckPlugin, ezConnected } from './exclusion-zones';
 import { frEnabled, frCheckPlugin, frConnected, frDisconnected } from './flight-recorder';
-import { loadSettings } from './settings';
+import { loadSettings, forgetSettings } from './settings';
 import { loadOffsets, renderOffsetsTable } from './offsets';
 import { readSetupState } from './app/asks';
 import { batch } from '@preact/signals';
@@ -39,18 +39,18 @@ export function toggleConnect(): void {
 }
 
 function connect(): void {
-  if (state.connMode === 'serial') connectSerial();
+  if (connection.settings.value.mode === 'serial') connectSerial();
   else connectWs();
 }
 
 function disconnect(): void {
-  if (state.connMode === 'serial') disconnectSerial();
+  if (connection.settings.value.mode === 'serial') disconnectSerial();
   else disconnectWs();
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function connectWs(): void {
-  const url = (document.getElementById('wsUrl') as HTMLInputElement).value.trim();
+  const url = connection.settings.value.wsUrl.trim();
   if (!url) { messages.push('link', 'No controller address. Set it in Settings, Options.'); return; }
   connection.transport.value = 'websocket';
   connection.address.value = url;
@@ -93,17 +93,17 @@ async function connectSerial(): Promise<void> {
     setStatus('connecting');
     log('info', 'Opening port picker…');
     state.serialPort = await (navigator as any).serial.requestPort();
-    const baud = parseInt((document.getElementById('optBaudRate') as HTMLSelectElement).value) || 115200;
-    const dataBits = parseInt((document.getElementById('optDataBits') as HTMLSelectElement).value) || 8;
-    const stopBits = parseInt((document.getElementById('optStopBits') as HTMLSelectElement).value) || 1;
-    const parity = (document.getElementById('optParity') as HTMLSelectElement).value || 'none';
+    const link = connection.settings.value;
+    const baud = parseInt(link.baud) || 115200;
+    const dataBits = parseInt(link.dataBits) || 8;
+    const stopBits = parseInt(link.stopBits) || 1;
+    const parity = link.parity || 'none';
     await state.serialPort.open({ baudRate: baud, dataBits, stopBits, parity });
 
     const info = state.serialPort.getInfo();
     const label = info.usbVendorId
       ? `USB ${info.usbVendorId.toString(16).toUpperCase()}:${(info.usbProductId || 0).toString(16).toUpperCase()} @ ${baud}`
       : `Serial @ ${baud}`;
-    document.getElementById('serialPortLabel')!.textContent = label;
     connection.transport.value = 'serial';
     connection.address.value = label;
 
@@ -141,7 +141,6 @@ async function disconnectSerial(): Promise<void> {
     if (state.serialWriter) { state.serialWriter.releaseLock(); state.serialWriter = null; }
     if (state.serialPort) { await state.serialPort.close(); state.serialPort = null; }
   } catch (_) { /* ignore close errors */ }
-  document.getElementById('serialPortLabel')!.textContent = 'No port selected';
   onClose();
 }
 
@@ -150,7 +149,7 @@ function onOpen(): void {
   state.connected = true;
   state._rxBuf = '';
   setStatus('connected');
-  log('info', state.connMode === 'serial' ? 'Serial connected' : 'WebSocket connected');
+  log('info', connection.settings.value.mode === 'serial' ? 'Serial connected' : 'WebSocket connected');
   messages.push('link', 'Connected to ' + connection.address.value + '.');
   setPollRate(POLL_NORM);
   // No reset with the flight recorder on. If the last job lost its sender the controller may
@@ -244,8 +243,7 @@ function onClose(): void {
   state.tloActive = false;
   renderOffsetsTable();
   ezResetPluginState();
-  renderEzTab();
-  renderEzModule();
+  forgetSettings();
   frDisconnected();
 }
 
@@ -253,7 +251,7 @@ function onClose(): void {
 
 /** Writes to the open link. Only the command layer calls it. */
 function write(data: string): boolean {
-  if (state.connMode === 'serial') {
+  if (connection.settings.value.mode === 'serial') {
     if (!state.serialWriter) return false;
     state.serialWriter.write(new TextEncoder().encode(data)).catch(() => {});
     return true;
