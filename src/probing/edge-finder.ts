@@ -79,9 +79,11 @@ async function probeCorner(cfg: any, sp: { x: number; y: number; z: number }, cl
     C: { x: -1, y: -1 },
     D: { x: 1, y: -1 },
   };
-  const s = cfg.mode === 'external' ? signs[edge] : { x: -signs[edge].x, y: -signs[edge].y };
+  // into: from the corner along its sides, onto the part or into the pocket. s: the probe's direction of travel.
+  const into = signs[edge];
+  const s = cfg.mode === 'external' ? into : { x: -into.x, y: -into.y };
   log('info', `Edge finder: probing corner ${edge}…`);
-  await rapidToMPos(null, sp.y + cfg.offset * s.y, null);
+  await rapidToMPos(null, sp.y + cfg.offset * into.y, null);
   await rapidToMPos(sp.x - s.x * clr, null, null);
   await rapidToMPos(null, null, sp.z - cfg.depth);
   const rx = await probeAxis('X', s.x, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
@@ -92,7 +94,7 @@ async function probeCorner(cfg: any, sp: { x: number; y: number; z: number }, cl
   }
   await rapidToMPos(null, null, sp.z);
   await rapidToMPos(sp.x, sp.y, null);
-  await rapidToMPos(sp.x + cfg.offset * s.x, null, null);
+  await rapidToMPos(sp.x + cfg.offset * into.x, null, null);
   await rapidToMPos(null, sp.y - s.y * clr, null);
   await rapidToMPos(null, null, sp.z - cfg.depth);
   const ry = await probeAxis('Y', s.y, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
@@ -109,7 +111,6 @@ async function probeCorner(cfg: any, sp: { x: number; y: number; z: number }, cl
   let ez: number | null = null;
   if (cfg.probeZ) {
     // Z on the part (or the pocket floor), the corner offset in from both sides.
-    const into = signs[edge];
     await rapidToMPos(ex + into.x * cfg.offset, ey + into.y * cfg.offset, null);
     const rz = await probeAxis('Z', -1, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
     if (rz) ez = rz.z;
