@@ -28,7 +28,7 @@ import { RunPanel } from './RunPanel';
 import { Preview } from './Preview';
 import { WarmupStrip } from './Warmup';
 import { progress as warmupProgress } from '../warmup';
-import { frOpenResume, frLoadEvents, frClearEvents, frReadRecord } from '../flight-recorder';
+import { openResumeDialog, loadRecorderEvents, clearRecorderEvents, readFlightRecord } from '../flight-recorder';
 import { IconChevron, IconBell, IconCheck, IconTodo, IconWarn, IconArrow, IconClose } from './icons';
 
 const num = (v: number) => v.toLocaleString('en-GB');
@@ -692,7 +692,7 @@ function RecorderPanel() {
 
   // Read the record and the events each time the panel opens, and again once the controller can answer.
   const canRead = blocked === null;
-  useEffect(() => { if (canRead) { frReadRecord(); frLoadEvents(); } }, [canRead]);
+  useEffect(() => { if (canRead) { readFlightRecord(); loadRecorderEvents(); } }, [canRead]);
 
   const resumable = record && (record.state === 'Stopped' || record.state === 'Retracted') && record.ln > 0 && flight.enabled.value;
   const fileMatches = record && job.lines.value.length > 0 && job.fileId.value === record.job;
@@ -722,7 +722,7 @@ function RecorderPanel() {
               ? 'Resume plan: BearSender lifts to the retract height, moves over the start of the line, starts the spindle and comes straight down, then carries on with the file. The dialog shows each move.'
               : 'Load the file it was running to resume it.'}
           </div>
-          <button type="button" class="fs-btn-light" onClick={() => frOpenResume()}>{fileMatches ? 'RESUME FROM LINE ' + num(record!.ln) : 'RESUME…'}</button>
+          <button type="button" class="fs-btn-light" onClick={() => openResumeDialog()}>{fileMatches ? 'RESUME FROM LINE ' + num(record!.ln) : 'RESUME…'}</button>
         </div>
       )}
       <div class="fs-grid2">
@@ -751,15 +751,15 @@ function RecorderPanel() {
       </div>
       <div class="fs-row-gap">
         <button type="button" class="fs-btn fs-btn-sm" disabled={!events.length && !!blocked}
-          onClick={() => { ui.allEvents.value = !ui.allEvents.value; if (!blocked) frLoadEvents(); }}>{ui.allEvents.value ? 'RECENT EVENTS' : 'FULL EVENT LOG'}</button>
+          onClick={() => { ui.allEvents.value = !ui.allEvents.value; if (!blocked) loadRecorderEvents(); }}>{ui.allEvents.value ? 'RECENT EVENTS' : 'FULL EVENT LOG'}</button>
         <button type="button" class="fs-btn fs-btn-sm" onClick={() => ui.openSettings('flight')}>RECORDER SETTINGS</button>
-        {ui.allEvents.value && <button type="button" class="fs-btn fs-btn-sm" disabled={!!blocked} onClick={() => frClearEvents()}>CLEAR LOG</button>}
+        {ui.allEvents.value && <button type="button" class="fs-btn fs-btn-sm" disabled={!!blocked} onClick={() => clearRecorderEvents()}>CLEAR LOG</button>}
       </div>
     </div>
   );
 }
 
-// ── Right panel: Preview, Camera, Console, Macros ─────────────────────────────
+// Right panel: Preview, Camera, Console, Macros
 //
 // These stay mounted, hidden while another tab shows, so the console keeps its place and the 3D view its
 // scene. Each fills the panel's height (fs-fill).

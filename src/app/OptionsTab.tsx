@@ -13,7 +13,7 @@ import * as machine from '../stores/machine';
 import * as opt from '../options';
 import { lsGet, lsSet } from '../ui';
 import { log } from '../console';
-import { frSetEnabled } from '../flight-recorder';
+import { setRecorderEnabled } from '../flight-recorder';
 import { vpSetExtents, setProjection, vpExtents } from '../viewport';
 import { NumIn } from './SetupScreen';
 
@@ -238,7 +238,7 @@ const CARDS: OptCard[] = [
     body: () => <Check checked={opt.autoloadSettings.value} set={v => { opt.autoloadSettings.value = v; }}>Enable</Check> },
   { title: 'FLIGHT RECORDER', text: 'flight recorder resume connection drops',
     desc: 'For controllers with the Flight Recorder plugin. Every job is stamped and its lines numbered, so the controller remembers where it got to. If the connection drops it lifts the tool and stops the spindle, and when you reconnect BearSender offers to carry on from that line. Its settings are in Settings, Flight recorder; the record and the event log are on the Job screen, in the Recorder panel. While this is on BearSender doesn\'t reset the controller when it connects.',
-    body: () => <Check checked={flight.enabled.value} set={v => frSetEnabled(v)}>Enable</Check> },
+    body: () => <Check checked={flight.enabled.value} set={v => setRecorderEnabled(v)}>Enable</Check> },
   { title: 'JOBS AND THE RESUME', text: 'jobs resume m6 m30 hold lift',
     desc: <>
       <b>Hold at every M6:</b> the job waits for Resume at each M6 in the file, also for the tool already loaded or when the controller ignores M6 ($341=4). Off, it holds only where the controller really changes tools.

@@ -1,36 +1,31 @@
-// ═══════════════════════════════════════════════
-// Flight recorder — job id, line numbering and the resume plan
-// ═══════════════════════════════════════════════
-//
-// Pure functions, no DOM. Same rules as the Flight-Recorder repo's test sender
-// (tools/stream.py) and its docs/COMMANDS.md:
-//   - every line goes out as N<line> + the line, where <line> counts the loaded
-//     file's lines (job.lines, so blank lines don't count)
-//   - the job is stamped first with $FLIGHT=<CRC-32 of the file>
-//   - to resume, work out the modal state up to the recorded line and where each
-//     axis was, put the file's tool length offset back, go up to the lift height
-//     unless the tool is higher, over the start of the line, straight down, and
-//     stream on from that line
-// The modal state and the position come from the G-code interpreter (src/gcode), read from the modes
-// the job started from (stores/starts.ts) and the offsets and tool length as they are when Resume is pressed.
+// The flight recorder's job id, line numbering and resume plan, as pure functions. The rules are the
+// Flight-Recorder repo's test sender's (tools/stream.py) and its docs/COMMANDS.md:
+// - every line goes out as N<line> and the line, <line> counting the loaded file's lines (job.lines,
+//   so blank lines don't count);
+// - the job is stamped first with $FLIGHT=<CRC-32 of the file>;
+// - a resume works out the modal state and position at the recorded line, puts the file's tool length
+//   offset back, goes up to the lift height unless the tool is higher, over the start of the line and
+//   straight down, then streams on from that line.
+// The state and position come from the G-code interpreter (src/gcode), read from the modes the job
+// started from (stores/starts.ts) and the offsets and tool length as they are when Resume is pressed.
 
 import { interpretGcode, lexLine } from './gcode/index';
 import type { InterpreterContext, ModalState } from './gcode/index';
 
-const _enc = new TextEncoder();
-let _crcTable: number[] | null = null;
+const encoder = new TextEncoder();
+let crcTable: number[] | null = null;
 
 export function crc32(text: string): number {
-  if (!_crcTable) {
-    _crcTable = [];
+  if (!crcTable) {
+    crcTable = [];
     for (let n = 0; n < 256; n++) {
       let c = n;
       for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-      _crcTable.push(c >>> 0);
+      crcTable.push(c >>> 0);
     }
   }
   let crc = 0xFFFFFFFF;
-  for (const byte of _enc.encode(text)) crc = _crcTable[(crc ^ byte) & 0xFF] ^ (crc >>> 8);
+  for (const byte of encoder.encode(text)) crc = crcTable[(crc ^ byte) & 0xFF] ^ (crc >>> 8);
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
@@ -52,7 +47,7 @@ export function numberedLine(raw: string, line: number): string | null {
   return 'N' + line + text;
 }
 
-// ── Resume plan ───────────────────────────────────────────────────────────────
+// Resume plan
 
 export class ResumeRefused extends Error {}
 
@@ -71,81 +66,80 @@ export function resumeState(text: string, upto: number, context: InterpreterCont
   if (before) throw new ResumeRefused(`line ${before.line}, before it, can't be read (${before.message.replace(/ Interpretation stops here.*$/, '')}), so the state there isn't known`);
   const here = program.issues.find(i => i.severity === 'error' && i.line === upto);
   if (here) throw new ResumeRefused(`line ${upto}: ${here.message.replace(/ Interpretation stops here.*$/, '')}`);
-  const s = program.stateAfterLine(upto - 1);
-  if (s.programEnd && context.afterProgramEnd !== 'continue') throw new ResumeRefused(`line ${upto} comes after the program end, and isn't sent (Options: Run lines after M30 is off)`);
-  if (s.cycle || gWords(program.lines[upto - 1].raw).some(g => CYCLES.has(g)) || CYCLES.has(parseFloat(s.motion.slice(1))))
+  const state = program.stateAfterLine(upto - 1);
+  if (state.programEnd && context.afterProgramEnd !== 'continue') throw new ResumeRefused(`line ${upto} comes after the program end, and isn't sent (Options: Run lines after M30 is off)`);
+  if (state.cycle || gWords(program.lines[upto - 1].raw).some(g => CYCLES.has(g)) || CYCLES.has(parseFloat(state.motion.slice(1))))
     throw new ResumeRefused(`line ${upto}: canned cycles can't be resumed`);
   const g92 = context.initialG92 ?? { x: 0, y: 0, z: 0 };
-  if ((['x', 'y', 'z'] as const).some(a => s.g92[a] !== g92[a])) throw new ResumeRefused('G92 offsets set by the program can\'t be resumed');
-  if (s.position.x === null || s.position.y === null || s.position.z === null)
+  if ((['x', 'y', 'z'] as const).some(a => state.g92[a] !== g92[a])) throw new ResumeRefused('G92 offsets set by the program can\'t be resumed');
+  if (state.position.x === null || state.position.y === null || state.position.z === null)
     throw new ResumeRefused('no position before the resume line, start the job again instead');
-  return s;
+  return state;
 }
 
 /** The modal state as the resume dialog lists it: "G21 G90 G17 G54 · T2 · M3 S16000 · F900 · coolant off". */
-export function describeState(s: ModalState): string {
-  const coolant = s.coolant.mist || s.coolant.flood ? [s.coolant.mist ? 'M7' : '', s.coolant.flood ? 'M8' : ''].filter(Boolean).join(' ') : 'coolant off';
+export function describeState(state: ModalState): string {
+  const coolant = state.coolant.mist || state.coolant.flood ? [state.coolant.mist ? 'M7' : '', state.coolant.flood ? 'M8' : ''].filter(Boolean).join(' ') : 'coolant off';
   return [
-    [s.units, s.distance, s.plane, s.feedMode, s.workOffset, s.motion].join(' '),
-    s.tool !== null ? 'T' + s.tool : 'no tool named',
-    s.spindle === 'M5' ? 'spindle off' : `${s.spindle} S${s.spindleSpeed ?? '?'}`,
-    s.programmedFeed !== null ? 'F' + s.programmedFeed : 'no feed yet',
+    [state.units, state.distance, state.plane, state.feedMode, state.workOffset, state.motion].join(' '),
+    state.tool !== null ? 'T' + state.tool : 'no tool named',
+    state.spindle === 'M5' ? 'spindle off' : `${state.spindle} S${state.spindleSpeed ?? '?'}`,
+    state.programmedFeed !== null ? 'F' + state.programmedFeed : 'no feed yet',
     coolant,
-    s.lengthOffset.mode === 'G49' ? 'G49' : s.lengthOffset.h !== null ? 'G43 H' + s.lengthOffset.h
-      : `tool length offset as on the controller (Z ${s.lengthOffset.value.z?.toFixed(3) ?? '?'})`,
+    state.lengthOffset.mode === 'G49' ? 'G49' : state.lengthOffset.h !== null ? 'G43 H' + state.lengthOffset.h
+      : `tool length offset as on the controller (Z ${state.lengthOffset.value.z?.toFixed(3) ?? '?'})`,
   ].filter(Boolean).join(' · ');
 }
 
-/** The tool length offset in force at the resume line, as one line to send: G49 where the file cancelled
- *  it (or nothing was in force), G43 H<n> where the file set it, or, where the job ran on the offset the
- *  controller had when it started (G43.1, $TPW), that offset as it is now, in mm. */
-export function lengthOffsetLine(s: ModalState): string {
-  const o = s.lengthOffset;
-  if (o.mode === 'G49') return 'G49';
-  if (o.h !== null) return `G43H${o.h}`;
-  if (o.value.x === null || o.value.y === null || o.value.z === null) throw new ResumeRefused('the tool length offset before the resume line isn\'t known');
-  return 'G21G43.1' + (['x', 'y'] as const).filter(k => o.value[k] !== 0).map(k => k.toUpperCase() + o.value[k]!.toFixed(4)).join('') + 'Z' + o.value.z.toFixed(4);
+/** The tool length offset in force at the resume line, as one line to send: G49 where the file
+ *  cancelled it or none was in force, G43 H<n> where the file set it, or the controller's offset as
+ *  it is now, in mm, where the job ran on the one it had at the start (G43.1, $TPW). */
+export function lengthOffsetLine(state: ModalState): string {
+  const offset = state.lengthOffset;
+  if (offset.mode === 'G49') return 'G49';
+  if (offset.h !== null) return `G43H${offset.h}`;
+  if (offset.value.x === null || offset.value.y === null || offset.value.z === null) throw new ResumeRefused('the tool length offset before the resume line isn\'t known');
+  return 'G21G43.1' + (['x', 'y'] as const).filter(k => offset.value[k] !== 0).map(k => k.toUpperCase() + offset.value[k]!.toFixed(4)).join('') + 'Z' + offset.value.z.toFixed(4);
 }
 
 /** The first move: up to `liftZ` (machine Z) unless the tool is already higher, so it never goes down. */
 export interface Lift { liftZ: number; currentZ: number; }
 
 /**
- * The lines that take the machine back onto the start of the resume line. The tool length offset is
- * put back first, as the file had it there, before any move, and the spindle and coolant are stopped
- * where the file had them off (an operator may have switched them on). The moves back in are in
- * machine coordinates (G53), mm and feed per minute, to the interpreter's machine position: up to the
- * lift height (or not at all, if the tool is higher), across, then straight down, with the spindle and
- * coolant started above the line where the file had them on. Then the program's own modes are put
- * back: units, distance, plane, feed mode, work offset, the cycle retract, and its feed.
+ * The lines that take the machine back onto the start of the resume line. Before any move, the tool
+ * length offset goes back as the file had it there, and the spindle and coolant are stopped where the
+ * file had them off (the operator may have switched them on). The moves are in machine coordinates
+ * (G53), mm and mm/min: up to the lift height unless the tool is higher, across, then straight down,
+ * with the spindle and coolant started above the line where the file had them on. Then the program's
+ * own modes go back: units, distance, plane, feed mode, work offset, cycle retract and feed.
  */
-export function resumePreamble(job: string, noRetract: boolean, s: ModalState, lift: Lift, spinup = 2): string[] {
-  const p = s.position;
-  const on = s.spindle === 'M3' || s.spindle === 'M4';
-  if (on && !s.spindleSpeed) throw new ResumeRefused('the spindle is on with no speed set before the resume line');
-  const plungeFeed = s.feedMode === 'G94' && s.feed ? s.feed : 100;   // mm/min
-  const f4 = (v: number | null) => v!.toFixed(4);
-  const preamble = [`$FLIGHT=${job}${noRetract ? ',1' : ''}`, `G21G90G94${s.plane}`, lengthOffsetLine(s)];
-  if (!on) preamble.push('M5');
-  if (!s.coolant.mist || !s.coolant.flood) preamble.push('M9');   // what should be on comes back on below
+export function resumePreamble(job: string, noRetract: boolean, state: ModalState, lift: Lift, spinup = 2): string[] {
+  const position = state.position;
+  const spindleOn = state.spindle === 'M3' || state.spindle === 'M4';
+  if (spindleOn && !state.spindleSpeed) throw new ResumeRefused('the spindle is on with no speed set before the resume line');
+  const plungeFeed = state.feedMode === 'G94' && state.feed ? state.feed : 100;   // mm/min
+  const fixed4 = (v: number | null) => v!.toFixed(4);
+  const preamble = [`$FLIGHT=${job}${noRetract ? ',1' : ''}`, `G21G90G94${state.plane}`, lengthOffsetLine(state)];
+  if (!spindleOn) preamble.push('M5');
+  if (!state.coolant.mist || !state.coolant.flood) preamble.push('M9');   // what should be on comes back on below
   if (lift.currentZ < lift.liftZ - 0.0005) preamble.push(`G53G0Z${lift.liftZ.toFixed(4)}`);   // up to the lift height
-  preamble.push(`G53G0X${f4(p.x)}Y${f4(p.y)}`);               // over the start of the resume line
-  if (on) preamble.push(`S${s.spindleSpeed!.toFixed(0)}${s.spindle}`, `G4P${spinup.toFixed(1)}`);
-  if (s.coolant.mist) preamble.push('M7');
-  if (s.coolant.flood) preamble.push('M8');
-  preamble.push(`G53G1Z${f4(p.z)}F${plungeFeed.toFixed(1)}`);   // straight down, the tool has been there before
+  preamble.push(`G53G0X${fixed4(position.x)}Y${fixed4(position.y)}`);               // over the start of the resume line
+  if (spindleOn) preamble.push(`S${state.spindleSpeed!.toFixed(0)}${state.spindle}`, `G4P${spinup.toFixed(1)}`);
+  if (state.coolant.mist) preamble.push('M7');
+  if (state.coolant.flood) preamble.push('M8');
+  preamble.push(`G53G1Z${fixed4(position.z)}F${plungeFeed.toFixed(1)}`);   // straight down, the tool has been there before
   // G91.1 is grblHAL's only arc mode; G98/G99 always, as an earlier job or the console may have left either.
-  const feed = s.feedMode === 'G94' && s.programmedFeed !== null ? `F${s.programmedFeed.toFixed(1)}` : '';
-  preamble.push(s.units + s.distance + s.feedMode + s.workOffset + (s.arcDistance === 'G90.1' ? 'G90.1' : '') + s.retract + feed);
+  const feed = state.feedMode === 'G94' && state.programmedFeed !== null ? `F${state.programmedFeed.toFixed(1)}` : '';
+  preamble.push(state.units + state.distance + state.feedMode + state.workOffset + (state.arcDistance === 'G90.1' ? 'G90.1' : '') + state.retract + feed);
   return preamble;
 }
 
-/** Index into gcodeLines of the line to resume from, and that line with its motion mode put back. */
-export function resumeStart(gcodeLines: string[], recordLine: number, motion: string): { index: number; first: string } {
-  for (let i = Math.max(0, recordLine - 1); i < gcodeLines.length; i++) {
-    const first = numberedLine(gcodeLines[i], i + 1);
+/** The index in `lines` of the line to resume from, and that line with its motion mode put back. */
+export function resumeStart(lines: string[], recordLine: number, motion: string): { index: number; first: string } {
+  for (let i = Math.max(0, recordLine - 1); i < lines.length; i++) {
+    const first = numberedLine(lines[i], i + 1);
     if (!first || first.startsWith('$') || first.startsWith('[') || first === '%') continue;
-    const hasMotion = gWords(gcodeLines[i]).some(g => g === 0 || g === 1 || g === 2 || g === 3);
+    const hasMotion = gWords(lines[i]).some(g => g === 0 || g === 1 || g === 2 || g === 3);
     return { index: i, first: hasMotion ? first : first.replace(/^(N\d+)/, '$1' + motion) };
   }
   throw new ResumeRefused('nothing left to run after the recorded line');

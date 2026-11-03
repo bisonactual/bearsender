@@ -8,7 +8,7 @@
 
 import { effect } from '@preact/signals';
 import { log } from './console';
-import { frFileLoaded } from './flight-recorder';
+import { onJobFileLoaded } from './flight-recorder';
 import type { Bounds } from './gcode/index';
 import * as job from './stores/job';
 import * as program from './stores/program';
@@ -18,7 +18,7 @@ export function processGcode(text: string, name: string): void {
   const lines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l.length > 0);
   job.loaded(name, lines);
   log('info', 'Loaded: ' + name + ' (' + lines.length + ' lines)');
-  frFileLoaded(name);
+  onJobFileLoaded(name);
 }
 
 /** The work offsets or the tool length changed (offsets.ts): read the program again with them. */

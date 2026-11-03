@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Command layer — every line sent to the controller, and its reply
-// ═══════════════════════════════════════════════
+// The command layer: every line sent to the controller, and its reply.
 //
 // grblHAL reads lines in the order they arrive and answers each with exactly one `ok` or
 // `error:N`. So a reply belongs to a command by position: the oldest command still waiting owns
@@ -163,16 +161,16 @@ const pushSubs = new Map<PushKind, ((line: string) => void)[]>();
 const replySubs: ((reply: Reply, info: { job: boolean; quiet: boolean }) => void)[] = [];
 const syncSubs: ((s: SyncState) => void)[] = [];
 
-// ── Trace, for the debug copy and the evidence runs ──────────────────────────
+// The last 3000 lines each way, for debugging (window.commandTrace() in main.ts).
 export interface TraceEntry { t: number; dir: 'tx' | 'rx' | 'rt' | 'sync'; text: string; }
-const _trace: TraceEntry[] = [];
+const traceEntries: TraceEntry[] = [];
 function trace(dir: TraceEntry['dir'], text: string): void {
-  _trace.push({ t: Date.now(), dir, text });
-  if (_trace.length > 3000) _trace.splice(0, _trace.length - 3000);
+  traceEntries.push({ t: Date.now(), dir, text });
+  if (traceEntries.length > 3000) traceEntries.splice(0, traceEntries.length - 3000);
 }
-export function traceLog(): TraceEntry[] { return _trace.slice(); }
+export function traceLog(): TraceEntry[] { return traceEntries.slice(); }
 
-// ── The link ─────────────────────────────────────────────────────────────────
+// The link
 
 /** A link is open. With `reset`, a soft reset goes first; without it the line is synced as it is. */
 export function connected(writer: (data: string) => boolean, opts: { reset: boolean }): void {
@@ -207,7 +205,7 @@ export function stats(): { phase: string; waiting: string[]; queued: number; byt
   return { phase, waiting: waiting.map(e => e.command), queued: queued.length, bytes: bytesInFlight, rxSize };
 }
 
-// ── Sending ──────────────────────────────────────────────────────────────────
+// Sending
 
 /** Sends one line and resolves with its reply. error:N resolves too; only a timeout, reset or lost link rejects. */
 export function send(line: string, opts: SendOptions = {}): Promise<Reply> {
@@ -236,9 +234,8 @@ export function post(text: string, opts: { log?: boolean } = {}): void {
 
 /** A real-time byte. It has no reply; a reset and a jog cancel take the line out of step. */
 export function realtime(byte: string): void {
-  // The tool change acknowledge lets grblHAL read new lines ahead of the job's buffered ones, so
-  // their replies would come out of order. Nothing here sends it.
-  // It goes only from acknowledgeToolChange(), which sends it when nothing is in flight.
+  // 0xA3 lets grblHAL read new lines ahead of the job's buffered ones, so their replies would come
+  // out of order: only acknowledgeToolChange() sends it, with nothing in flight.
   if (byte === TOOL_ACK) throw new Error('The tool change acknowledge (0xA3) would reorder replies');
   if (!write || phase === 'offline') return;
   // A jog cancel cancels the jogs not sent yet too: a released key must not start one later.
@@ -260,7 +257,7 @@ function dropQueued(which: (e: Entry) => boolean, why: Failure): void {
   }
 }
 
-// ── Tool changes ─────────────────────────────────────────────────────────────
+// Tool changes
 
 /** Sends the tool change acknowledge (0xA3) if nothing is in flight, so grblHAL reads lines again
  *  during the tool change (jogging; it refuses other motion until the cycle start). */
@@ -392,24 +389,24 @@ function dropSource(why: Failure): void {
   s?.dropped(why);
 }
 
-// ── Receiving ────────────────────────────────────────────────────────────────
+// Receiving
 
 /** One line from the controller, without its line ending. */
 export function receive(line: string): void {
   if (!line.startsWith('<')) trace('rx', line);
   const kind = pushKind(line);
-  if (kind) { pushed(kind, line); return; }
-  if (phase === 'syncing') { syncLine(line); return; }
+  if (kind) { handlePush(kind, line); return; }
+  if (phase === 'syncing') { readSyncLine(line); return; }
   if (phase === 'offline') return;
 
-  const done = line === 'ok' || line.startsWith('error:');
+  const isReply = line === 'ok' || line.startsWith('error:');
   const head = waiting[0];
   if (!head) {
-    if (done) log('err', `Stray "${line}" with no command waiting, ignored`);
+    if (isReply) log('err', `Stray "${line}" with no command waiting, ignored`);
     else { log('rx', line); deliver('other', line); }
     return;
   }
-  if (!done) { head.lines.push(line); return; }
+  if (!isReply) { head.lines.push(line); return; }
 
   waiting.shift();
   bytesInFlight = Math.max(0, bytesInFlight - head.bytes);
@@ -444,12 +441,12 @@ function pushKind(line: string): PushKind | null {
   return null;
 }
 
-function pushed(kind: PushKind, line: string): void {
+function handlePush(kind: PushKind, line: string): void {
   // Out of step first, so whatever a subscriber sends waits for the sync.
   // A banner while syncing can be a network client's greeting, which empties nothing, and the
   // commands held then were never sent, so they stay.
   if (kind === 'banner' && phase !== 'offline') {
-    if (sync?.awaitingBanner) { trace('sync', 'banner after reset'); probe(); }
+    if (sync?.awaitingBanner) { trace('sync', 'banner after reset'); sendSyncProbe(); }
     else resync('banner', { awaitBanner: false, dropQueued: phase === 'ready' });
   }
   if (kind === 'alarm') {
@@ -473,7 +470,7 @@ function deliver(kind: PushKind, line: string): void {
   for (const fn of pushSubs.get(kind) ?? []) fn(line);
 }
 
-// ── Subscriptions ────────────────────────────────────────────────────────────
+// Subscriptions
 
 export function on(kind: PushKind, fn: (line: string) => void): () => void {
   const list = pushSubs.get(kind) ?? [];
@@ -487,7 +484,7 @@ export function onReply(fn: (reply: Reply, info: { job: boolean; quiet: boolean 
 
 export function onSync(fn: (s: SyncState) => void): void { syncSubs.push(fn); }
 
-// ── Getting in step ──────────────────────────────────────────────────────────
+// Getting in step
 //
 // Every command still waiting is rejected (the queued ones too after a reset), and new ones are
 // held. Then probes go out until one is answered: "\n$\n". The newline ends any half-received line
@@ -514,11 +511,11 @@ function resync(why: Failure, opts: { awaitBanner: boolean; dropQueued: boolean 
   if (why === 'reset') endToolChange();
   sync = { attempts, retries: 0, since: Date.now(), awaitingBanner: opts.awaitBanner, confirming: false, sawHelp: false, sawVer: false, gaveUp: false };
   trace('sync', 'out of step: ' + why + (opts.awaitBanner ? ', waiting for the banner' : ''));
-  if (opts.awaitBanner) sync.timer = setTimeout(probe, RESET_WAIT);
-  else probe();
+  if (opts.awaitBanner) sync.timer = setTimeout(sendSyncProbe, RESET_WAIT);
+  else sendSyncProbe();
 }
 
-function probe(): void {
+function sendSyncProbe(): void {
   const s = sync;
   if (!s || !write) return;
   if (s.timer) clearTimeout(s.timer);
@@ -535,16 +532,16 @@ function probe(): void {
   s.attempts++;
   write('\n$\n');
   trace('sync', 'probe ' + s.attempts);
-  s.timer = setTimeout(retry, SYNC_RETRY);
+  s.timer = setTimeout(retrySync, SYNC_RETRY);
   notifySync();
 }
 
-function retry(): void {
+function retrySync(): void {
   if (sync) sync.retries++;
-  probe();
+  sendSyncProbe();
 }
 
-function syncLine(line: string): void {
+function readSyncLine(line: string): void {
   const s = sync!;
   if (s.awaitingBanner || s.gaveUp) return;
   if (!s.confirming) {
@@ -556,7 +553,7 @@ function syncLine(line: string): void {
       if (s.timer) clearTimeout(s.timer);
       write!('\n$I+\n');
       trace('sync', 'confirm');
-      s.timer = setTimeout(retry, SYNC_RETRY * 2);
+      s.timer = setTimeout(retrySync, SYNC_RETRY * 2);
       return;
     }
     s.sawHelp = false;

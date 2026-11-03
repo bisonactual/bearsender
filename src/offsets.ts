@@ -1,35 +1,29 @@
-// ═══════════════════════════════════════════════
-// WCS Coordinate Offset Table
-// ═══════════════════════════════════════════════
+// The work offsets: the $# table, read into the machine store, and the writes from the Setup screen.
 
 import { log } from './console';
 import { sendCmd } from './connection';
 import * as command from './command';
-import { lsGet, lsSet } from './ui';
 import { refreshWcsMarkers } from './viewport';
 import { reportMm } from './units';
 import * as machine from './stores/machine';
 import * as connection from './stores/connection';
 import * as job from './stores/job';
 
-// ── Coordinate systems in display order ──────────────────────────────────────
-
-export const WCS_ENTRIES = [
-  { code: 'G54',   label: 'G54',   id: 1  },
-  { code: 'G55',   label: 'G55',   id: 2  },
-  { code: 'G56',   label: 'G56',   id: 3  },
-  { code: 'G57',   label: 'G57',   id: 4  },
-  { code: 'G58',   label: 'G58',   id: 5  },
-  { code: 'G59',   label: 'G59',   id: 6  },
-  { code: 'G59.1', label: 'G59.1', id: 7  },
-  { code: 'G59.2', label: 'G59.2', id: 8  },
-  { code: 'G59.3', label: 'G59.3 — Toolsetter', id: 9 },
-  { code: 'G28',   label: 'G28 — Home 1', id: 0 },
-  { code: 'G30',   label: 'G30 — Home 2', id: 0 },
-  { code: 'TLO',   label: 'TLO — Tool Length Offset', id: 0 },
+// The offsets table's rows in order, with G10 L2's P number for each; G28, G30 and the TLO have no write.
+export const WCS_ENTRIES: { code: string; id: number; note?: string }[] = [
+  { code: 'G54',   id: 1 },
+  { code: 'G55',   id: 2 },
+  { code: 'G56',   id: 3 },
+  { code: 'G57',   id: 4 },
+  { code: 'G58',   id: 5 },
+  { code: 'G59',   id: 6 },
+  { code: 'G59.1', id: 7 },
+  { code: 'G59.2', id: 8 },
+  { code: 'G59.3', id: 9, note: 'Toolsetter' },
+  { code: 'G28',   id: 0, note: 'Home 1' },
+  { code: 'G30',   id: 0, note: 'Home 2' },
+  { code: 'TLO',   id: 0, note: 'Tool Length Offset' },
 ];
-
-// ── Load / parse ──────────────────────────────────────────────────────────────
 
 const OFFSET_KEYS = new Set(['G54','G55','G56','G57','G58','G59',
   'G59.1','G59.2','G59.3','G28','G28.1','G30','G30.1','G92']);
@@ -52,7 +46,7 @@ export async function loadOffsets(): Promise<boolean> {
     const m = raw.match(/^\[([A-Z0-9.]+):([^\]]+)\]$/);
     if (!m || !OFFSET_KEYS.has(m[1])) continue;
     const vals = m[2].split(',').map(v => reportMm(Number(v)));
-    // Store normalised: x, y, z (pad with 0 if fewer axes reported)
+    // An axis not reported counts as 0.
     read[m[1]] = { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
   }
   if (reply.result !== 'ok') return false;
@@ -60,26 +54,26 @@ export async function loadOffsets(): Promise<boolean> {
   setOffsets(read);
   machine.offsetsRead.value = true;
   if (!machine.offsetsAtConnect.value) machine.offsetsAtConnect.value = { ...machine.offsets.peek() };
-  _staleAfterReset = false;
+  staleAfterReset = false;
   refreshLoadedProgramPreviewIfNeeded();
   return true;
 }
 
 // After a reset the tool length offset may be kept or cleared: on this build a warm reset keeps the
-// numbers while $G says G49 (gcode.c gc_init), a cold start or another compatibility level clears
-// them. So $# and $G are read again rather than assumed, now and, if the controller refuses them (in
-// an alarm), once it is idle (parser.ts).
-let _staleAfterReset = false;
+// numbers while $G says G49 (gcode.c gc_init), and a cold start or another compatibility level clears
+// them. So $# and $G are read again rather than assumed: now, and if refused in an alarm, once the
+// machine is idle (parser.ts).
+let staleAfterReset = false;
 
 /** A reset went (Stop, RESET, probe Cancel): read the offsets, the tool length and the modes again. */
 export function rereadAfterReset(): void {
-  _staleAfterReset = true;
+  staleAfterReset = true;
   loadOffsets();
   command.send('$G').catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
 }
 
 /** The offsets are still to be read: never yet, or not since a reset. */
-export function offsetsUnread(): boolean { return !machine.offsetsRead.value || _staleAfterReset; }
+export function offsetsUnread(): boolean { return !machine.offsetsRead.value || staleAfterReset; }
 
 // [TLO:z] or [TLO:x,y,z], in the $# reply and pushed after a status report when it changes.
 command.on('tlo', raw => {
@@ -94,7 +88,7 @@ function refreshLoadedProgramPreviewIfNeeded(): void {
   import('./gcode').then(g => g.refreshLoadedProgramPreview());
 }
 
-// ── The store ─────────────────────────────────────────────────────────────────
+// The store
 
 /** Offsets read or written, into the store the views read, and the 3D view's markers. */
 function setOffsets(changed: Record<string, machine.Vec3>): void {
@@ -102,10 +96,10 @@ function setOffsets(changed: Record<string, machine.Vec3>): void {
   refreshWcsMarkers();
 }
 
-// ── Writes ────────────────────────────────────────────────────────────────────
+// Writes
 // $# is read again once the controller has answered each one (parser.ts, noteOffsetWrite).
 
-/** G10 L2 P<n>, in mm: a work offset as typed. The G28/G30 rows have no write (A6). */
+/** G10 L2 P<n>, in mm: a work offset as typed. */
 export function writeOffset(code: string, vals: { x: number; y: number; z: number }): void {
   if (!connection.connected.peek()) { log('err', 'Not connected'); return; }
   const entry = WCS_ENTRIES.find(e => e.code === code);

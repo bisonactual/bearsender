@@ -1,16 +1,12 @@
-// ═══════════════════════════════════════════════
-// Connection layer — WebSocket & USB/Serial
-// ═══════════════════════════════════════════════
-//
-// The transports only. Every line and every real-time byte goes through the command layer
-// (command.ts), which matches the replies.
+// The transports, WebSocket and Web Serial. Every line and real-time byte goes through the command
+// layer (command.ts), which matches the replies.
 
 import { lsGet } from './ui';
 import { log } from './console';
 import * as command from './command';
-import { updateRunButtons, clearRunFlags } from './streaming';
+import { publishRunState, clearRunFlags } from './streaming';
 import { ezResetPluginState, ezCheckPlugin, ezConnected } from './exclusion-zones';
-import { frEnabled, frCheckPlugin, frConnected, frDisconnected } from './flight-recorder';
+import { isRecorderEnabled, detectRecorderPlugin, readRecorderOnConnect, resetRecorderState } from './flight-recorder';
 import { loadSettings, forgetSettings } from './settings';
 import { loadOffsets } from './offsets';
 import { resetMachineState } from './parser';
@@ -21,31 +17,27 @@ import * as machine from './stores/machine';
 import * as job from './stores/job';
 import * as messages from './stores/messages';
 
-// The open link: a WebSocket, or a serial port with its reader and writer; what came in short of a line
-// end; the status poll; and whether a jog is under way (it polls faster).
 let ws: WebSocket | null = null;
 let serialPort: any = null;
 let serialWriter: any = null;
 let serialReader: any = null;
-let serialAbort: AbortController | null = null;
-let rxBuf = '';
-let statusInterval: ReturnType<typeof setInterval> | null = null;
-let jogging = false;
-const POLL_NORM = 100;
+let partialLine = '';   // what came in short of a line end
+let statusTimer: ReturnType<typeof setInterval> | null = null;
+let jogging = false;    // a jog is under way, so status is polled faster
+const POLL_MS = 100;
+const JOG_POLL_MS = 50;
 
-// ── Poll rate ─────────────────────────────────────────────────────────────────
 export function setPollRate(ms: number): void {
-  if (statusInterval) clearInterval(statusInterval);
-  statusInterval = setInterval(() => { if (connection.connected.peek()) rtSend('?'); }, ms);
+  if (statusTimer) clearInterval(statusTimer);
+  statusTimer = setInterval(() => { if (connection.connected.peek()) rtSend('?'); }, ms);
 }
 
 export function setJogging(active: boolean): void {
   if (jogging === active) return;
   jogging = active;
-  if (connection.connected.peek()) setPollRate(active ? 50 : POLL_NORM);
+  if (connection.connected.peek()) setPollRate(active ? JOG_POLL_MS : POLL_MS);
 }
 
-// ── Top-level connect/disconnect ──────────────────────────────────────────────
 export function toggleConnect(): void {
   connection.connected.peek() ? disconnect() : connect();
 }
@@ -60,7 +52,6 @@ function disconnect(): void {
   else disconnectWs();
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────────
 function connectWs(): void {
   const url = connection.settings.value.wsUrl.trim();
   if (!url) { messages.push('link', 'No controller address. Set it in Settings, Options.'); return; }
@@ -73,32 +64,31 @@ function connectWs(): void {
     ws.onopen = onOpen;
     ws.onmessage = onMessage;
     ws.onclose = onClose;
-    ws.onerror = () => { log('err', 'WebSocket error — check URL and that the controller is reachable'); };
+    ws.onerror = () => { log('err', 'WebSocket error: check URL and that the controller is reachable'); };
   } catch (e: any) { log('err', 'Connection failed: ' + e.message); setStatus('disconnected'); }
 }
 
 function disconnectWs(): void { if (ws) ws.close(); }
 
-function feedBuffer(chunk: string): void {
-  rxBuf += chunk;
+function receiveChunk(chunk: string): void {
+  partialLine += chunk;
   batch(() => {
     let nl;
-    while ((nl = rxBuf.indexOf('\n')) !== -1) {
-      const line = rxBuf.slice(0, nl).replace(/\r$/, '').trim();
-      rxBuf = rxBuf.slice(nl + 1);
+    while ((nl = partialLine.indexOf('\n')) !== -1) {
+      const line = partialLine.slice(0, nl).replace(/\r$/, '').trim();
+      partialLine = partialLine.slice(nl + 1);
       if (line) command.receive(line);
     }
   });
 }
 
 function onMessage(evt: MessageEvent): void {
-  feedBuffer(evt.data);
+  receiveChunk(evt.data);
 }
 
-// ── USB / Serial ──────────────────────────────────────────────────────────────
 async function connectSerial(): Promise<void> {
   if (!(navigator as any).serial) {
-    log('err', 'Web Serial API not supported — use Chrome or Edge');
+    log('err', 'Web Serial API not supported: use Chrome or Edge');
     return;
   }
   try {
@@ -119,13 +109,12 @@ async function connectSerial(): Promise<void> {
     connection.transport.value = 'serial';
     connection.address.value = label;
 
-    serialAbort = new AbortController();
     serialWriter = serialPort.writable.getWriter();
     serialReader = serialPort.readable.getReader();
 
     serialReadLoop();
     onOpen();
-    log('info', `Serial connected — ${baud} baud`);
+    log('info', `Serial connected, ${baud} baud`);
   } catch (e: any) {
     if (e.name !== 'NotFoundError') log('err', 'Serial error: ' + e.message);
     setStatus('disconnected');
@@ -138,7 +127,7 @@ async function serialReadLoop(): Promise<void> {
     while (true) {
       const { value, done } = await serialReader.read();
       if (done) break;
-      feedBuffer(new TextDecoder().decode(value));
+      receiveChunk(new TextDecoder().decode(value));
     }
   } catch (e: any) {
     if (e.name !== 'AbortError') log('err', 'Serial read error: ' + e.message);
@@ -156,17 +145,16 @@ async function disconnectSerial(): Promise<void> {
   onClose();
 }
 
-// ── Shared open / close handlers ─────────────────────────────────────────────
 function onOpen(): void {
-  rxBuf = '';
+  partialLine = '';
   setStatus('connected');
   log('info', connection.settings.value.mode === 'serial' ? 'Serial connected' : 'WebSocket connected');
   messages.push('link', 'Connected to ' + connection.address.value + '.');
-  setPollRate(POLL_NORM);
-  // No reset with the flight recorder on. If the last job lost its sender the controller may
-  // still be retracting, and a reset would stop it half way. Either way the command layer gets
-  // the line in step first, waiting as long as the controller takes to answer.
-  command.connected(write, { reset: !frEnabled() });
+  setPollRate(POLL_MS);
+  // No reset with the flight recorder on: if the last job lost its sender the controller may still
+  // be retracting, and a reset would stop it half way. Either way the command layer syncs first,
+  // waiting as long as the controller takes to answer.
+  command.connected(write, { reset: !isRecorderEnabled() });
   afterConnect();
 }
 
@@ -174,13 +162,13 @@ function onOpen(): void {
 async function afterConnect(): Promise<void> {
   const steps: (() => Promise<unknown>)[] = [
     async () => readBuildInfo((await command.send('$I+', { log: true })).lines),
-    // Report units first: positions and offsets are read into mm by it (units.ts).
+    // Report units first: positions and offsets are converted to mm by it (units.ts).
     () => command.send('$13', { quiet: true }),
-    frConnected,
+    readRecorderOnConnect,
     ezConnected,
     async () => { if (lsGet('fs-opt-autoload-settings', false)) await loadSettings(); },
-    // In the power-up alarm $# is refused: loadOffsets sends nothing then, so the state must be known.
-    stateKnown,
+    // $# is refused in the power-up alarm, so loadOffsets needs the state first.
+    waitForFirstStatus,
     loadOffsets,
     readSetupState,
   ];
@@ -194,7 +182,7 @@ async function afterConnect(): Promise<void> {
 }
 
 /** Waits up to a second for the first status report. */
-async function stateKnown(): Promise<void> {
+async function waitForFirstStatus(): Promise<void> {
   for (let i = 0; i < 20 && !machine.state.peek() && command.isConnected(); i++) await new Promise(r => setTimeout(r, 50));
 }
 
@@ -214,12 +202,12 @@ function readBuildInfo(lines: string[]): void {
       log('info', 'Axes: ' + machine.axes.value.join(','));
     }
     ezCheckPlugin(line);
-    frCheckPlugin(line);
+    detectRecorderPlugin(line);
   }
 }
 
 command.onSync(s => {
-  if (s.syncing && s.retries === 1) log('info', frEnabled()
+  if (s.syncing && s.retries === 1) log('info', isRecorderEnabled()
     ? '✈ Waiting for the controller to answer. It may be finishing a retract after the lost connection.'
     : 'Waiting for the controller to answer.');
   if (s.gaveUp) log('err', 'The controller has not answered for 90 s. Reset it to carry on.');
@@ -229,10 +217,9 @@ function onClose(): void {
   const wasRunning = job.running.peek();
   setStatus('disconnected');
   command.disconnected();
-  setStatus('disconnected');
   log('info', 'Disconnected');
   messages.push('link', 'Disconnected.');
-  if (statusInterval) clearInterval(statusInterval);
+  if (statusTimer) clearInterval(statusTimer);
   clearRunFlags();
   if (wasRunning) job.finished('link lost');
   batch(() => {
@@ -255,20 +242,18 @@ function onClose(): void {
     machine.spindle.value = 0;
     connection.firmware.value = '';
   });
-  updateRunButtons();
+  publishRunState();
   resetMachineState();
   ezResetPluginState();
   forgetSettings();
-  frDisconnected();
+  resetRecorderState();
 }
 
-// ── Send helpers ──────────────────────────────────────────────────────────────
-
-/** Writes to the open link. Only the command layer calls it. A real-time byte from 0x80 up (0x85, 0x87,
- *  the overrides, the coolant toggles) goes as that one byte. As text it would go as UTF-8, 0xC2 first:
- *  grblHAL acts on the second byte and keeps the 0xC2, which starts the next line, so a $ line after it
- *  is read as G-code (error:9 in an alarm, error:71 when idle). Over WebSocket it goes in a binary
- *  frame, whose bytes grblHAL's websocketd puts into the input as it does a text frame's. */
+/** Writes to the open link; only the command layer calls it. A real-time byte from 0x80 up (0x85,
+ *  0x87, the overrides, the coolant toggles) goes as that one raw byte. Sent as text it would go as
+ *  UTF-8, 0xC2 first: grblHAL acts on the second byte and keeps the 0xC2, which starts the next line,
+ *  so a $ line after it is read as G-code (error:9 in an alarm, error:71 when idle). Over WebSocket it
+ *  goes in a binary frame, which grblHAL's websocketd reads into the input as it does a text frame. */
 function write(data: string): boolean {
   const raw = data.length === 1 && data.charCodeAt(0) >= 0x80 ? new Uint8Array([data.charCodeAt(0)]) : null;
   if (connection.settings.value.mode === 'serial') {
@@ -290,9 +275,7 @@ export function sendCmd(cmd: string): void {
   command.post(cmd);
 }
 
-// ── Status display ────────────────────────────────────────────────────────────
 export function setStatus(s: 'disconnected' | 'connecting' | 'connected'): void {
   connection.status.value = s;
 }
-
 

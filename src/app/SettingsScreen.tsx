@@ -131,8 +131,8 @@ function GrblSettings() {
   return (
     <div class="fs-gs">
       <div class="fs-gs-bar">
-        <button type="button" class="fs-btn fs-btn-sm" disabled={!linked || settings.reading.value} onClick={() => settings.loadSettings()}>
-          {settings.reading.value ? 'READING…' : 'READ FROM CONTROLLER'}
+        <button type="button" class="fs-btn fs-btn-sm" disabled={!linked || settings.isReading.value} onClick={() => settings.loadSettings()}>
+          {settings.isReading.value ? 'READING…' : 'READ FROM CONTROLLER'}
         </button>
         <button type="button" class={'fs-btn fs-btn-sm' + (changed ? ' is-accent' : '')} disabled={!linked || !changed} onClick={() => settings.writeAllDirty()}>
           WRITE ALL CHANGES{changed ? ' (' + changed + ')' : ''}

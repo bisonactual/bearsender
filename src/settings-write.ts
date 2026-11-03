@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Settings engine — changes & write
-// ═══════════════════════════════════════════════
+// Writes the controller's $ settings from the Settings screen, and keeps the values any reply reports.
 
 import { signal } from '@preact/signals';
 import { log } from './console';
@@ -13,10 +11,10 @@ export const dirty = signal<Record<number, string>>({});
 /** Each setting's last write: under way, written, or the controller's error code. Cleared after a moment. */
 export const writes = signal<Record<number, 'pending' | 'ok' | number>>({});
 
-function setWrite(id: number, s: 'pending' | 'ok' | number | null, clearAfter = 0): void {
+function setWrite(id: number, state: 'pending' | 'ok' | number | null, clearAfter = 0): void {
   const { [id]: _, ...rest } = writes.value;
-  writes.value = s === null ? rest : { ...rest, [id]: s };
-  if (clearAfter) setTimeout(() => { if (writes.value[id] === s) setWrite(id, null); }, clearAfter);
+  writes.value = state === null ? rest : { ...rest, [id]: state };
+  if (clearAfter) setTimeout(() => { if (writes.value[id] === state) setWrite(id, null); }, clearAfter);
 }
 
 export function markDirty(id: number, val: string): void {

@@ -9,7 +9,7 @@ import { useState } from 'preact/hooks';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as flight from '../stores/flight';
-import { frSetEnabled, frRefresh, frSetUndercut, frWriteSetting } from '../flight-recorder';
+import { setRecorderEnabled, refreshRecorder, setUndercutTools, writeRecorderSetting } from '../flight-recorder';
 
 interface SettingRow { id: number; name: string; unit: string; help: string; kind: 'bool' | 'number'; }
 
@@ -26,7 +26,7 @@ const SETTINGS: SettingRow[] = [
 
 function NumberSetting({ row, value, live }: { row: SettingRow; value: string; live: boolean }) {
   const [typed, setTyped] = useState<string | null>(null);
-  const write = (raw: string) => { const v = raw.trim(); if (v !== '') frWriteSetting(row.id, v); setTyped(null); };
+  const write = (raw: string) => { const v = raw.trim(); if (v !== '') writeRecorderSetting(row.id, v); setTyped(null); };
   return (
     <div class="fs-fr-input">
       <input type="number" step="any" class="fs-in fs-mono" aria-label={row.name} value={typed ?? value} disabled={!live}
@@ -53,15 +53,15 @@ export function RecorderTab() {
         </span>
         <div class="fs-head-end">
           <button type="button" class={'fs-btn fs-btn-sm' + (on ? ' is-go' : '')} title="Switch the flight recorder on or off" aria-pressed={on ? 'true' : 'false'}
-            onClick={() => frSetEnabled(!on)}>{on ? 'ON' : 'OFF'}</button>
-          <button type="button" class="fs-btn fs-btn-sm" disabled={!live} onClick={() => frRefresh()}>REFRESH</button>
+            onClick={() => setRecorderEnabled(!on)}>{on ? 'ON' : 'OFF'}</button>
+          <button type="button" class="fs-btn fs-btn-sm" disabled={!live} onClick={() => refreshRecorder()}>REFRESH</button>
         </div>
       </div>
       {!(plugin && plugin.storage) && <div class="fs-pstatus">Needs the Flight Recorder plugin for grblHAL on the controller (the Flexi-HAL A7 _FR firmware, with FRAM at U27).</div>}
       <div class="fs-fr-cards">
         <section class="fs-card fs-mcard" aria-label="This job">
           <h2 class="fs-h">THIS JOB</h2>
-          <label class="fs-opt-check"><input type="checkbox" checked={flight.undercut.value} onChange={e => frSetUndercut((e.target as HTMLInputElement).checked)} />Uses undercut tools</label>
+          <label class="fs-opt-check"><input type="checkbox" checked={flight.undercut.value} onChange={e => setUndercutTools((e.target as HTMLInputElement).checked)} />Uses undercut tools</label>
           <div class="fs-note">T-slot, dovetail, lollipop and the like can't come straight up out of the cut. Tick this and the controller won't lift the tool if the connection drops. The machine stops where it is and the spindle keeps running until you stop it, so stay with the machine.</div>
         </section>
         <section class="fs-card fs-mcard fs-fr-settings" aria-label="Controller settings">
@@ -73,7 +73,7 @@ export function RecorderTab() {
                   <div class="fs-gs-name">{s.name} <span class="fs-dim fs-mono">${s.id}</span></div>
                   <div class="fs-note">{s.help}</div>
                   {s.kind === 'bool'
-                    ? <label class="fs-opt-check"><input type="checkbox" checked={values[s.id] === '1'} onChange={e => frWriteSetting(s.id, (e.target as HTMLInputElement).checked ? '1' : '0')} />On</label>
+                    ? <label class="fs-opt-check"><input type="checkbox" checked={values[s.id] === '1'} onChange={e => writeRecorderSetting(s.id, (e.target as HTMLInputElement).checked ? '1' : '0')} />On</label>
                     : <NumberSetting row={s} value={values[s.id] ?? ''} live={live} />}
                 </div>
               ))}

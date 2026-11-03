@@ -14,7 +14,7 @@ import * as jog from '../jog';
 import * as frame from '../frame';
 import * as surfacing from '../surfacing';
 import { sendCmd, rtSend } from '../connection';
-import { setWCS } from '../streaming';
+import { selectWcs } from '../streaming';
 import { processGcode } from '../gcode';
 import { loadPreview3D } from '../probing/probe-preview-3d';
 import { log } from '../console';
@@ -62,7 +62,7 @@ export function PositionCard() {
     <Card title="POSITION" end={
       <label class="fs-inline">
         <span class="fs-cap">WCS</span>
-        <select class="fs-in" value={WCS6.includes(wcs) ? wcs : ''} disabled={!linked} onChange={e => setWCS((e.target as HTMLSelectElement).value)}>
+        <select class="fs-in" value={WCS6.includes(wcs) ? wcs : ''} disabled={!linked} onChange={e => selectWcs((e.target as HTMLSelectElement).value)}>
           {!WCS6.includes(wcs) && <option value="">{wcs}</option>}
           {WCS6.map(c => <option value={c}>{c}</option>)}
         </select>
@@ -427,7 +427,7 @@ export function OffsetsTable() {
                   <tr class={(code === active ? 'is-active' : '') + (dirty ? ' is-dirty' : '') + (isHome ? ' is-home' : '')}>
                     <th class="fs-offname">
                       {code === active ? <span class="fs-wcs fs-wcs-sm">{code}</span> : <span>{code}</span>}
-                      <span class="fs-dim fs-small">{entry.label.includes('—') ? entry.label.split('— ')[1] : ''}</span>
+                      <span class="fs-dim fs-small">{entry.note ?? ''}</span>
                     </th>
                     {input('x')}{input('y')}{input('z')}
                     <td class="fs-offact">

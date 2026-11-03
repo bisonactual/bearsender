@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Tool table — reads $TTLIST into the machine store
-// ═══════════════════════════════════════════════
+// Reads the tool table ($TTLIST) into the machine store.
 //
 // The tool table comes from a plugin: the Expatria ATC plugin, or grblHAL's file based tooltable.c.
 // $TTLIST answers a heading, a line per tool, then ok:
@@ -17,13 +15,13 @@ import * as machine from './stores/machine';
 import type { ToolEntry } from './stores/machine';
 
 /** A read is under way. */
-export const reading = signal(false);
+export const isReading = signal(false);
 /** What the controller said besides its tools on the last read: "table is empty", "file not accessible". */
-export const said = signal<string[]>([]);
+export const otherLines = signal<string[]>([]);
 /** Why the last read got no answer (a reset, the link lost, a timeout); cleared by the next read. */
-export const cutShort = signal<command.Failure | null>(null);
+export const lastFailure = signal<command.Failure | null>(null);
 /** When the controller last answered $TTLIST. */
-export const readAt = signal<number | null>(null);
+export const lastReadAt = signal<number | null>(null);
 
 function parseToolTableLine(line: string): ToolEntry {
   const text = line.replace(/^\[(TOOL:)?\s*/i, '').replace(/\]\s*$/, '');
@@ -45,24 +43,24 @@ function parseToolTableLine(line: string): ToolEntry {
   return entry;
 }
 
-let pending: Promise<string | null> | null = null;
+let pendingRead: Promise<string | null> | null = null;
 
 /** Reads the tool table ($TTLIST). A read already under way is joined, not sent again. Resolves with
  *  null when the table came in, or why it didn't (the error, no answer, not connected): the table held
  *  is then the one from before. */
 export function loadToolTable(): Promise<string | null> {
   if (!connection.connected.value) return Promise.resolve('not connected');
-  if (!pending) pending = read().finally(() => { pending = null; reading.value = false; });
-  return pending;
+  if (!pendingRead) pendingRead = readToolTable().finally(() => { pendingRead = null; isReading.value = false; });
+  return pendingRead;
 }
 
-async function read(): Promise<string | null> {
-  reading.value = true;
-  cutShort.value = null;
+async function readToolTable(): Promise<string | null> {
+  isReading.value = true;
+  lastFailure.value = null;
   try {
     const reply = await command.send('$TTLIST', { log: true, quiet: true });
-    readAt.value = Date.now();
-    said.value = reply.lines
+    lastReadAt.value = Date.now();
+    otherLines.value = reply.lines
       .filter(l => /^\[TOOL:/i.test(l) && parseToolTableLine(l).tool <= 0)
       .map(l => l.replace(/^\[TOOL:\s*/i, '').replace(/\]\s*$/, ''));
     if (reply.result === 'ok') {
@@ -78,7 +76,7 @@ async function read(): Promise<string | null> {
     return raw;
   } catch (e) {
     if (!(e instanceof command.CommandFailed)) throw e;
-    cutShort.value = e.why;
+    lastFailure.value = e.why;
     return e.why;
   }
 }

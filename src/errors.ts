@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // grblHAL error codes, for saying why a line was refused
-// ═══════════════════════════════════════════════
 //
 // From grblHAL's errors.c, shortened. Codes not here are shown by number only.
 

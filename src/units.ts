@@ -1,10 +1,6 @@
-// ═══════════════════════════════════════════════
-// Units — BearSender works in millimetres
-// ═══════════════════════════════════════════════
-//
-// Every command BearSender makes itself (jogs, probing, zeros, offset writes) says G21, so it means
-// millimetres whatever the last job left (G20). grblHAL reports positions, offsets and feeds in
-// inches when $13 bit 0 is set; they are read into millimetres here.
+// BearSender works in millimetres. Every command it makes itself (jogs, probing, zeros, offset writes)
+// says G21, whatever the last job left. grblHAL reports positions, offsets and feeds in inches when
+// $13 bit 0 is set; they are converted to millimetres here.
 
 import * as machine from './stores/machine';
 

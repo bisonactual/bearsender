@@ -1,11 +1,9 @@
-// ═══════════════════════════════════════════════
-// Shared UI helpers
-// ═══════════════════════════════════════════════
+// Small helpers: byte length, HTML escaping, input focus, and localStorage that never throws.
 
-const _enc = new TextEncoder();
+const encoder = new TextEncoder();
 
 export function byteLen(s: string): number {
-  return _enc.encode(s).length;
+  return encoder.encode(s).length;
 }
 
 export function esc(s: string): string {

@@ -1,9 +1,5 @@
-// ═══════════════════════════════════════════════
-// Console logging
-// ═══════════════════════════════════════════════
-//
-// The log is kept here, the last LOG_MAX lines, whether or not the job screen's Console tab shows; the
-// tab (src/app/ConsolePanel.tsx) draws them and the lines added after.
+// The console's log: the last LOG_MAX lines, kept whether or not the job screen's Console tab shows
+// (src/app/ConsolePanel.tsx draws them).
 
 import { signal } from '@preact/signals';
 
@@ -17,9 +13,9 @@ export const LOG_MAX = 1000;
 const lines: LogLine[] = [];
 const listeners = new Set<(line: LogLine | null) => void>();
 
-export function log(type: string, msg: string): void {
-  if (type === 'err') lastError.value = { at: Date.now(), text: msg };
-  const line = { type, text: msg };
+export function log(type: string, text: string): void {
+  if (type === 'err') lastError.value = { at: Date.now(), text };
+  const line = { type, text };
   lines.push(line);
   if (lines.length > LOG_MAX) lines.shift();
   for (const fn of listeners) fn(line);

@@ -1,9 +1,6 @@
-// ═══════════════════════════════════════════════
-// Settings engine — load sequence
-// ═══════════════════════════════════════════════
-//
-// The groups ($EG), the definitions with their descriptions ($ESH, $ES) and the values ($$), into
-// signals for the Settings screen and the console's autocomplete. The values go to the machine store.
+// Reads the controller's $ settings: the groups ($EG), the definitions with their descriptions ($ESH,
+// $ES) and the values ($$), for the Settings screen and the console's autocomplete. The values go to
+// the machine store.
 
 import { signal, batch } from '@preact/signals';
 import { log } from './console';
@@ -12,7 +9,7 @@ import * as machine from './stores/machine';
 import * as connection from './stores/connection';
 
 // $ESH's type names, as the dtype numbers $ES uses.
-const DTYPE_MAP: Record<string, number> = {
+const DTYPE_BY_NAME: Record<string, number> = {
   'bool': 0, 'boolean': 0, 'bitfield': 1, 'xbitfield': 2, 'radiobuttons': 3, 'radio': 3, 'axismask': 4,
   'integer': 5, 'int': 5, 'float': 6, 'decimal': 6, 'string': 7, 'text': 7, 'password': 8, 'ipv4': 9,
 };
@@ -27,7 +24,7 @@ export interface SettingDef {
 export const groups = signal<Record<number, SettingGroup>>({});
 export const defs = signal<Record<number, SettingDef>>({});
 /** A read is under way. */
-export const reading = signal(false);
+export const isReading = signal(false);
 /** What the last read did: the step it is on, why it failed, or null once read. */
 export const readNote = signal<string | null>(null);
 /** The definitions and values have been read since connecting. */
@@ -36,30 +33,30 @@ export const loaded = signal(false);
 /** Reads the groups ($EG), the definitions ($ESH, $ES) and the values ($$). */
 export async function loadSettings(): Promise<void> {
   if (!connection.connected.value) { log('info', 'Connect first'); return; }
-  if (reading.value) return;
-  const g: Record<number, SettingGroup> = {}, d: Record<number, SettingDef> = {}, v: Record<number, string> = {};
-  reading.value = true;
+  if (isReading.value) return;
+  const newGroups: Record<number, SettingGroup> = {}, newDefs: Record<number, SettingDef> = {}, newValues: Record<number, string> = {};
+  isReading.value = true;
   try {
     readNote.value = 'Reading groups…';
-    readGroups((await command.send('$EG')).lines, g);
+    readGroups((await command.send('$EG')).lines, newGroups);
     readNote.value = 'Reading setting definitions…';
-    readHalDefs((await command.send('$ESH')).lines, d);
-    readDefs((await command.send('$ES')).lines, d);
+    readHalDefs((await command.send('$ESH')).lines, newDefs);
+    readDefs((await command.send('$ES')).lines, newDefs);
     readNote.value = 'Reading current values…';
-    readValues((await command.send('$$')).lines, v);
+    readValues((await command.send('$$')).lines, newValues);
   } catch (e) {
     if (!(e instanceof command.CommandFailed)) throw e;
     readNote.value = 'The settings could not be read: ' + e.why;
-    reading.value = false;
+    isReading.value = false;
     return;
   }
   batch(() => {
-    groups.value = g;
-    defs.value = d;
-    machine.settings.value = { ...machine.settings.peek(), ...v };
+    groups.value = newGroups;
+    defs.value = newDefs;
+    machine.settings.value = { ...machine.settings.peek(), ...newValues };
     loaded.value = true;
     readNote.value = null;
-    reading.value = false;
+    isReading.value = false;
   });
 }
 
@@ -72,9 +69,9 @@ export function forgetSettings(): void {
 function readGroups(lines: string[], out: Record<number, SettingGroup>): void {
   for (const raw of lines) {
     if (!raw.startsWith('[SETTINGGROUP:')) continue;
-    const p = raw.slice(14, -1).split('|');
-    if (p.length >= 3) {
-      const id = parseInt(p[0]), parentId = parseInt(p[1]), name = p[2];
+    const fields = raw.slice(14, -1).split('|');
+    if (fields.length >= 3) {
+      const id = parseInt(fields[0]), parentId = parseInt(fields[1]), name = fields[2];
       out[id] = { id, parentId, name };
     }
   }
@@ -84,17 +81,17 @@ function readGroups(lines: string[], out: Record<number, SettingGroup>): void {
 function readHalDefs(lines: string[], out: Record<number, SettingDef>): void {
   for (const raw of lines) {
     if (!/^\d+\t/.test(raw)) continue;
-    const p = raw.split('\t');
-    if (p.length < 4) continue;
-    const id = parseInt(p[0]);
-    const name = p[1] || ('$' + id);
-    const unit = p[2] || '';
-    const dtypeStr = (p[3] || 'string').toLowerCase();
-    const fmt = p[4] || '';
-    const description = p[5] || '';
-    const minV = p[6] || '';
-    const maxV = p[7] || '';
-    const dtype = DTYPE_MAP[dtypeStr] !== undefined ? DTYPE_MAP[dtypeStr] : 7;
+    const fields = raw.split('\t');
+    if (fields.length < 4) continue;
+    const id = parseInt(fields[0]);
+    const name = fields[1] || ('$' + id);
+    const unit = fields[2] || '';
+    const dtypeStr = (fields[3] || 'string').toLowerCase();
+    const fmt = fields[4] || '';
+    const description = fields[5] || '';
+    const minV = fields[6] || '';
+    const maxV = fields[7] || '';
+    const dtype = DTYPE_BY_NAME[dtypeStr] !== undefined ? DTYPE_BY_NAME[dtypeStr] : 7;
     const formatLabels = (dtype >= 1 && dtype <= 3 && fmt) ? fmt.split(',') : [];
     out[id] = { id, groupId: 0, name, unit, dtype, dtypeStr, fmt, formatLabels, description, minV, maxV, reboot: false, nullOk: false };
   }
@@ -104,18 +101,18 @@ function readHalDefs(lines: string[], out: Record<number, SettingDef>): void {
 function readDefs(lines: string[], out: Record<number, SettingDef>): void {
   for (const raw of lines) {
     if (!raw.startsWith('[SETTING:')) continue;
-    const p = raw.slice(9, -1).split('|');
-    if (p.length < 2) continue;
-    const id = parseInt(p[0]), groupId = parseInt(p[1]);
-    const reboot = p[8] === '1', nullOk = p[9] === '1';
+    const fields = raw.slice(9, -1).split('|');
+    if (fields.length < 2) continue;
+    const id = parseInt(fields[0]), groupId = parseInt(fields[1]);
+    const reboot = fields[8] === '1', nullOk = fields[9] === '1';
     if (out[id]) {
       out[id].groupId = groupId;
       out[id].reboot = reboot;
       out[id].nullOk = nullOk;
     } else {
-      const name = p[2] || ('$' + id), unit = p[3] || '';
-      const dtype = parseInt(p[4]) || 7;
-      const fmt = p[5] || '', minV = p[6] || '', maxV = p[7] || '';
+      const name = fields[2] || ('$' + id), unit = fields[3] || '';
+      const dtype = parseInt(fields[4]) || 7;
+      const fmt = fields[5] || '', minV = fields[6] || '', maxV = fields[7] || '';
       const formatLabels = (dtype >= 1 && dtype <= 3 && fmt) ? fmt.split(',') : [];
       out[id] = { id, groupId, name, unit, dtype, dtypeStr: '', fmt, formatLabels, description: '', minV, maxV, reboot, nullOk };
     }

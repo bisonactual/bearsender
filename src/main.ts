@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Main entry point — starts the parser, the 3D view and the keyboard jog, then mounts the shell
-// ═══════════════════════════════════════════════
+// The entry point: starts the parser, the 3D view and the keyboard jog, then mounts the shell.
 
 import { render, h } from 'preact';
 import { log } from './console';
@@ -8,11 +6,11 @@ import * as command from './command';
 import { initParser } from './parser';
 import { initViewport } from './viewport';
 import { loadFile } from './gcode';
-import { updateRunButtons } from './streaming';
+import { publishRunState } from './streaming';
 import { initKeyboardJog } from './jog';
 import { optLoadColors, optApplyJogSteps } from './options';
 import { initZones } from './exclusion-zones';
-import { initFlightRecorderTab } from './flight-recorder';
+import { initFlightRecorder } from './flight-recorder';
 import { App } from './app/App';
 
 const w = window as any;
@@ -33,16 +31,16 @@ initParser();
 initViewport();
 initKeyboardJog();
 
-log('info', 'BearSender ready — IOSender-compatible character-counting stream.');
+log('info', 'BearSender ready: IOSender-compatible character-counting stream.');
 log('info', 'Open a G-code file to preview the toolpath, then connect and run.');
-updateRunButtons();
+publishRunState();
 
 window.addEventListener('load', () => {
   // The kept theme, jog steps and zone drawing (Settings, Options).
   optLoadColors();
   optApplyJogSteps();
   initZones();
-  initFlightRecorderTab();
+  initFlightRecorder();
 });
 
 render(h(App, null), document.getElementById('app')!);

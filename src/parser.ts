@@ -1,9 +1,5 @@
-// ═══════════════════════════════════════════════
-// Push messages & status reports
-// ═══════════════════════════════════════════════
-//
-// What the controller sends unasked, from the command layer's subscriptions, and what any
-// matched reply tells the stores. Replies to a command are read by whoever sent it.
+// What the controller sends unasked (push messages and status reports), and what any matched reply
+// tells the stores. The reply to a command is read by whoever sent it.
 
 import { log } from './console';
 import { rtSend } from './connection';
@@ -85,8 +81,8 @@ function onAlarm(raw: string): void {
   rtSend('\x87');
 }
 
-function parseStatusReport(s: string): void {
-  const parts = s.split('|');
+function parseStatusReport(report: string): void {
+  const parts = report.split('|');
   setMachineState(parts[0]);
   // A full report (0x87) on each change of state: it carries the alarm code, H (homed), T (tool) and WCO,
   // which the plain report leaves out.
@@ -97,10 +93,10 @@ function parseStatusReport(s: string): void {
   let pins = '';
   let overrides = false;
   // Positions in mm whatever $13 says. The report gives MPos, or WPos with WCO now or earlier.
-  const vec = (vals: string[]): machine.Vec3 => ({ x: reportMm(parseFloat(vals[0]) || 0), y: reportMm(parseFloat(vals[1]) || 0), z: reportMm(parseFloat(vals[2]) || 0) });
+  const toMmVector = (vals: string[]): machine.Vec3 => ({ x: reportMm(parseFloat(vals[0]) || 0), y: reportMm(parseFloat(vals[1]) || 0), z: reportMm(parseFloat(vals[2]) || 0) });
   // The axes after Z: A, B and C in degrees as reported, U, V and W in mm like X, Y and Z.
   const letters = machine.axes.peek();
-  const rest = (vals: string[]): number[] => vals.slice(3).map((v, i) => {
+  const extraAxes = (vals: string[]): number[] => vals.slice(3).map((v, i) => {
     const n = parseFloat(v) || 0;
     return 'UVW'.includes(letters[3 + i] ?? '') ? reportMm(n) : n;
   });
@@ -115,18 +111,18 @@ function parseStatusReport(s: string): void {
     if (colon === -1) continue;
     const key = parts[i].slice(0, colon);
     const vals = parts[i].slice(colon + 1).split(',');
-    if (key === 'WPos') { wpos = vec(vals); wposExtra = rest(vals); }
-    if (key === 'MPos') { mpos = vec(vals); mposExtra = rest(vals); }
-    if (key === 'WCO') { machine.wco.value = vec(vals); machine.wcoExtra.value = rest(vals); }
+    if (key === 'WPos') { wpos = toMmVector(vals); wposExtra = extraAxes(vals); }
+    if (key === 'MPos') { mpos = toMmVector(vals); mposExtra = extraAxes(vals); }
+    if (key === 'WCO') { machine.wco.value = toMmVector(vals); machine.wcoExtra.value = extraAxes(vals); }
     if (key === 'H') machine.homed.value = vals[0] === '1';
     if (key === 'FS' || key === 'F') {
       machine.feed.value = reportMm(parseFloat(vals[0]) || 0);
       machine.spindle.value = parseFloat(vals[1]) || 0;
     }
     if (key === 'T') {
-      const tn = parseInt(vals[0]);
-      if (!isNaN(tn)) {
-        machine.tool.value = tn;
+      const toolNumber = parseInt(vals[0]);
+      if (!isNaN(toolNumber)) {
+        machine.tool.value = toolNumber;
       }
     }
     if (key === 'Ln') {
@@ -139,16 +135,16 @@ function parseStatusReport(s: string): void {
     }
     if (key === 'A') accessories = vals[0] ?? '';
     if (key === 'Ov') {
-      const feed = parseInt(vals[0]), rapid = parseInt(vals[1]), spin = parseInt(vals[2]);
-      if (!isNaN(feed) && !isNaN(rapid) && !isNaN(spin)) {
+      const feed = parseInt(vals[0]), rapid = parseInt(vals[1]), spindle = parseInt(vals[2]);
+      if (!isNaN(feed) && !isNaN(rapid) && !isNaN(spindle)) {
         overrides = true;
-        machine.overrides.value = { feed, rapid, spindle: spin };
+        machine.overrides.value = { feed, rapid, spindle };
       }
     }
     if (key === 'Ct') {
-      const ct = parseInt(vals[0]);
-      if (!isNaN(ct)) {
-        machine.tool.value = ct;
+      const currentTool = parseInt(vals[0]);
+      if (!isNaN(currentTool)) {
+        machine.tool.value = currentTool;
       }
     }
     if (key === 'WCS') {
@@ -168,11 +164,11 @@ function parseStatusReport(s: string): void {
   // A report in WPos: the machine position is the work position plus the offset in force (WCO, which
   // has G92 and the tool length offset in it). Until a WCO has come it isn't known: ask for one.
   if (wpos && !mpos) {
-    const o = machine.wco.value;
-    if (o) {
-      mpos = { x: wpos.x + o.x, y: wpos.y + o.y, z: wpos.z + o.z };
-      const ox = machine.wcoExtra.value ?? [];
-      mposExtra = (wposExtra ?? []).map((v, i) => v + (ox[i] ?? 0));
+    const wco = machine.wco.value;
+    if (wco) {
+      mpos = { x: wpos.x + wco.x, y: wpos.y + wco.y, z: wpos.z + wco.z };
+      const wcoExtra = machine.wcoExtra.value ?? [];
+      mposExtra = (wposExtra ?? []).map((v, i) => v + (wcoExtra[i] ?? 0));
     }
     else rtSend('\x87');
   }
@@ -184,27 +180,26 @@ function parseStatusReport(s: string): void {
   }
 }
 
-// The machine state the last report gave, lowercase, to tell a change: homed after homing, offsets
-// after the power-up alarm, the modes after a move.
-let prevState = '';
+// The last report's state, lowercase, to tell a change: homed after homing, the offsets after the
+// power-up alarm, the modes after a move.
+let lastState = '';
 
 /** The link went (connection.ts): the next report is the first. */
-export function resetMachineState(): void { prevState = ''; }
+export function resetMachineState(): void { lastState = ''; }
 
-export function setMachineState(s: string): void {
-  const sl = s.toLowerCase().split(':')[0];
+export function setMachineState(reported: string): void {
+  const stateName = reported.toLowerCase().split(':')[0];
   // An alarm: not homed until the controller's H: says otherwise (the full report asked for on ALARM:).
-  if (sl === 'alarm' && prevState !== 'alarm') machine.homed.value = false;
-  if (sl === 'idle' && prevState === 'home') machine.homed.value = true;
-  // $# is refused in an alarm, so it isn't sent then (offsets.ts) and the offsets wait: read them once the
-  // machine is idle (homed or unlocked), and so after a reset. A refusal gets one more try. (The first $
-  // command after homing used to get error:71: a real-time byte sent as UTF-8 text, connection.ts.)
-  if (sl === 'idle' && prevState !== 'idle' && offsetsUnread() && connection.connected.peek()) {
+  if (stateName === 'alarm' && lastState !== 'alarm') machine.homed.value = false;
+  if (stateName === 'idle' && lastState === 'home') machine.homed.value = true;
+  // $# is refused in an alarm, so the offsets are read once the machine is idle (homed or unlocked),
+  // and so after a reset. A refusal gets one more try.
+  if (stateName === 'idle' && lastState !== 'idle' && offsetsUnread() && connection.connected.peek()) {
     loadOffsets().then(ok => { if (!ok) setTimeout(() => { if (connection.connected.peek() && offsetsUnread()) loadOffsets(); }, 1000); });
   }
   // At rest after moving, an alarm or homing: what the next job starts from may have changed.
-  if (sl === 'idle' && prevState && prevState !== 'idle' && connection.connected.peek() && !job.running.peek()) readModesSoon();
-  prevState = sl;
+  if (stateName === 'idle' && lastState && lastState !== 'idle' && connection.connected.peek() && !job.running.peek()) readModesSoon();
+  lastState = stateName;
 }
 
 const WCS_BY_P: Record<number, string> = { 1: 'G54', 2: 'G55', 3: 'G56', 4: 'G57', 5: 'G58', 6: 'G59', 7: 'G59.1', 8: 'G59.2', 9: 'G59.3' };
