@@ -60,8 +60,8 @@ export const rot = saved<RotCfg>('rot', {
   probeDistance: 10, latchDistance: 1, xyClr: 5, depth: 3, offset: 50, probeDiameter: 2,
 });
 
-/** Where a result goes: a work offset ('' is the active one) and how (G10, G92 or measure only). Picked each time, as before. */
-export interface Target { wcs: string; mode: 'G10' | 'G92' | 'measure'; }
+/** Where a result goes: a work offset ('' is the active one) and how (G10 or measure only). Picked each time, as before. */
+export interface Target { wcs: string; mode: 'G10' | 'measure'; }
 export const efTarget = signal<Target>({ wcs: '', mode: 'G10' });
 export const cfTarget = signal<Target>({ wcs: '', mode: 'G10' });
 

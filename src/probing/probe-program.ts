@@ -60,10 +60,8 @@ export function applyXYResult(x: number, y: number, axes: string, opts: { mode?:
   const yOff = opts.yOffset ?? 0;
   const fx = (x + xOff).toFixed(4);
   const fy = (y + yOff).toFixed(4);
-  if (opts.mode === 'G92') {
-    const parts = axes === 'XY' ? `X${fx}Y${fy}` : axes === 'X' ? `X${fx}` : `Y${fy}`;
-    sendCmd(`G21G92${parts}`);
-  } else if (opts.mode === 'G10') {
+  // G10 writes the work offset; anything else is measure only. (G92 was dropped: the owner, 3 Nov.)
+  if (opts.mode === 'G10') {
     const p = WCS_P[wcs] ?? 1;
     const parts = axes === 'XY' ? `X${fx}Y${fy}` : axes === 'X' ? `X${fx}` : `Y${fy}`;
     sendCmd(`G21G10L2P${p}${parts}`);
@@ -74,9 +72,7 @@ export function applyXYResult(x: number, y: number, axes: string, opts: { mode?:
 export function applyZResult(z: number, plateHeight: number, wcsHeight: number, opts: { mode?: string; wcs?: string }): void {
   const wcs = opts.wcs || getActiveWcs();
   const fz = (z - plateHeight - wcsHeight).toFixed(4);
-  if (opts.mode === 'G92') {
-    sendCmd(`G21G92Z${fz}`);
-  } else if (opts.mode === 'G10') {
+  if (opts.mode === 'G10') {
     const p = WCS_P[wcs] ?? 1;
     sendCmd(`G21G10L2P${p}Z${fz}`);
   }

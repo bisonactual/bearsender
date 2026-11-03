@@ -65,7 +65,6 @@ function TargetFields({ sig }: { sig: Signal<pr.Target> }) {
       <label class="fs-field"><span>As</span>
         <select class="fs-in" aria-label="How the result is written" value={t.mode} onChange={e => { sig.value = { ...t, mode: (e.target as HTMLSelectElement).value as pr.Target['mode'] }; }}>
           <option value="G10">G10: kept</option>
-          <option value="G92">G92: this session</option>
           <option value="measure">Measure only</option>
         </select>
       </label>
