@@ -1,6 +1,6 @@
 # BearSender: how it is put together
 
-Where each file is, in a line, is in `CLANKER_INDEX.md`. This is how the parts fit together.
+How the parts fit together. `runbook.md` has the project layout and how to build, run and publish.
 
 ## Build
 - **Bun and TypeScript:** `bun run build` (`build.ts`) type-checks with `tsc`, so a type error fails the build. It then bundles `src/main.ts`, and inlines the JS and `style.css` into `index.html`, with the fonts in `fonts/` as data, so the page needs no internet for them.
@@ -25,13 +25,14 @@ Where each file is, in a line, is in `CLANKER_INDEX.md`. This is how the parts f
 - **The G-code interpreter** (`src/gcode/`) reads the program for the preview, the tool sections, the times, the limits and the resume plan.
 - **The status parser** (`src/parser.ts`) reads the status report into the machine and job stores. That includes MPos, WPos and WCO for every axis: A, B and C in degrees, U, V and W in mm.
 
-## What is left of the old code
-- **No old shared state or status bus.** Each value lives with what owns it:
+## Where state lives
+- **No shared state object or status bus.** Each value lives with what owns it:
   - the job's lines and run state in the job store, streaming's own flags in `streaming.ts`;
   - the link's socket and buffers in `connection.ts`;
   - positions, offsets, axes and `$` values in the machine store;
   - the 3D view's bounds in `viewport.ts`.
-- **One piece of the old style is left: the resume dialog** (`#frModal` in `index.html`). `flight-recorder.ts` still builds it as HTML strings, and it is reviewed resume code. An effect on the machine state, the link and the job keeps it current.
+- **The resume dialog** (`#frModal` in `index.html`) is not Preact: `flight-recorder.ts` builds it as HTML strings, which keeps the resume code as it was tested. An effect on the machine state, the link and the job keeps it current.
+- **Kept from the first page's stylesheet:** the resume dialog's `fr-` rules and `tb-btn` buttons, and the probe preview overlay's `pp-` rules, at the top of `style.css`. The shell's rules (`fs-`) follow them.
 
 ## Kept in the browser
 Nothing is kept on the controller except its own settings, offsets and tool table.

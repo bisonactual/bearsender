@@ -39,4 +39,4 @@ Type-checks, then writes `dist/` (not in git):
 | `serve.ts` | The dev server |
 | `build.ts` | The build |
 
-`CLANKER_INDEX.md` says what each file does, and `reference.md` how they fit together.
+`reference.md` says how the parts fit together.
