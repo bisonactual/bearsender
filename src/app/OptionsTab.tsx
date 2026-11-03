@@ -131,14 +131,9 @@ function ViewExtents() {
 
 function Theme() {
   const c = opt.colors.value;
-  const [ruler, setRuler] = useState(state.rulerCoords);
   return (
     <>
       {opt.COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.optApplyColor(k, v)} reset={() => opt.optResetColor(k)} />)}
-      <div class="fs-color-row">
-        <span class="fs-color-label">Ruler Coordinates</span>
-        <Pick label="Ruler Coordinates" value={ruler} set={v => { state.rulerCoords = v; setRuler(v); }} opts={[['machine', 'Machine'], ['work', 'Work (WCS)']]} />
-      </div>
       {opt.VP_COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => opt.optApplyColor(k, v)} reset={() => opt.optResetColor(k)} />)}
       <button type="button" class="fs-btn fs-btn-sm fs-self-start" onClick={() => opt.optResetAllColors()}>RESET ALL COLOURS</button>
     </>
@@ -148,17 +143,7 @@ function Theme() {
 function ZoneColors() {
   const c = opt.zoneColors.value;
   const set = (k: string, v: string) => { opt.zoneColors.value = { ...opt.zoneColors.value, [k]: v }; };
-  return (
-    <>
-      {opt.ZONE_COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => set(k, v)} />)}
-      <div class="fs-opt-line">
-        <span class="fs-dim">Icon Scale</span>
-        <input type="range" class="fs-range" min="0.02" max="0.3" step="0.005" aria-label="Icon Scale" value={c.optBearScale}
-          onInput={e => set('optBearScale', (e.target as HTMLInputElement).value)} />
-        <span class="fs-mono">{parseFloat(c.optBearScale).toFixed(3)}</span>
-      </div>
-    </>
-  );
+  return <>{opt.ZONE_COLOR_ROWS.map(([k, label]) => <ColorRow label={label} value={c[k]} set={v => set(k, v)} />)}</>;
 }
 
 function JogSteps() {
@@ -210,10 +195,10 @@ const CARDS: OptCard[] = [
   { title: '3D VIEWPORT EXTENTS', text: '3d viewport extents projection grid',
     desc: 'Machine-coordinate workspace bounds. 0,0 is home (top-right); enter negative values for your working area. Updates the grid and camera position instantly.',
     body: () => <ViewExtents /> },
-  { title: 'COLOUR THEME', text: 'colour color theme text background accent ruler 3d',
+  { title: 'COLOUR THEME', text: 'colour color theme text background accent 3d',
     desc: 'Customise the primary text colour and background colour. Click the swatch to open the colour picker, or type a hex value. Reset restores the defaults.',
     body: () => <Theme /> },
-  { title: 'EXCLUSION ZONE COLOURS', text: 'exclusion zone colours color icon',
+  { title: 'EXCLUSION ZONE COLOURS', text: 'exclusion zone colours color',
     desc: 'Colours for exclusion zone boxes in the 3D viewport based on what the zone blocks.',
     body: () => <ZoneColors /> },
   { title: 'JOG STEP SIZES', text: 'jog step sizes speed units',

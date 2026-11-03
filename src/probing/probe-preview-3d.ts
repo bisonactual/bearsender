@@ -4,7 +4,7 @@
 
 import { state } from '../state';
 import { scene, cutLines, rapidLines, executedLine } from '../viewport';
-import type { Waypoint } from './preview';
+import type { Waypoint } from '../surfacing';
 
 import * as THREE from 'three';
 

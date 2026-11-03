@@ -83,13 +83,11 @@ export const ZONE_COLOR_ROWS: [string, string][] = [
 ];
 const ZONE_DEFAULTS: Record<string, string> = {
   optBearColorAll: '#ff2222', optBearColorGcode: '#ff6600', optBearColorJog: '#ffcc00', optBearColorTool: '#cc44ff',
-  optBearColorSafe: '#22cc66', optBearScale: '0.0875',
+  optBearColorSafe: '#22cc66',
 };
-/** The colours by what a zone blocks, and the icon scale, under the old field names. */
+/** The colours by what a zone blocks, under the old field names. */
 export const zoneColors = signal<Record<string, string>>({ ...ZONE_DEFAULTS, ...lsGet<Record<string, string>>('fs-opt-bearcolors', {}) });
 effect(() => lsSet('fs-opt-bearcolors', zoneColors.value));
-
-export function optGetBearScale(): number { return parseFloat(zoneColors.value.optBearScale) || 0.0875; }
 
 export function optGetBearColor(flags: number): string {
   const c = zoneColors.value;

@@ -67,7 +67,6 @@ export const state = {
   tloOffset: 0 as number,
   tloActive: false as boolean,
   activeWcs: 'G54' as string,
-  rulerCoords: 'machine' as string,
 
   // Program limits
   progLimits: null as any,
