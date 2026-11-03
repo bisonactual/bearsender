@@ -1,10 +1,7 @@
-// ═══════════════════════════════════════════════
-// The Probing screen, as the agreed mockup (3 Nov): four routines, each in three numbered columns in the
-// order of the work. 1: what to measure, picked on a picture of the part. 2: where to start the probe
-// and what it does, drawn from the routine itself (plan.ts). 3: the probe light, the jog pad, then the
-// status, the result and PROBE and CANCEL, always in view. The job screen's PROBE and MEASURE popups
-// show the same columns.
-// ═══════════════════════════════════════════════
+// The Probing screen: four routines, each in three numbered columns in the order of the work.
+// 1: what to measure, picked on a picture of the part. 2: where to start the probe and what it does,
+// drawn from the routine itself (plan.ts). 3: the probe light, the jog pad, then the status, the result
+// and PROBE and CANCEL, always in view. The job screen's PROBE and MEASURE popups show the same columns.
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -26,12 +23,12 @@ import { getActiveWcs } from '../probing/probe-program';
 import { JogButton, Steps, NumIn } from './SetupScreen';
 import { ProbeSettingsCard, UnitField } from './ProbeSettings';
 
-const f3 = (v: number) => (v < 0 ? '−' : '') + Math.abs(v).toFixed(3);
+const signedMm = (v: number) => (v < 0 ? '−' : '') + Math.abs(v).toFixed(3);
 const ROUTINES: Routine[] = ['tl', 'ef', 'cf', 'rot'];
 const PROBING_TABS: [ui.ProbingTab, string][] = [['tl', 'TOOL LENGTH'], ['ef', 'EDGE & CORNER'], ['cf', 'CENTRE'], ['rot', 'ROTATION']];
 const TAB_NAME = Object.fromEntries(PROBING_TABS) as Record<Routine, string>;
 
-export function Seg<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
+export function Segmented<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
   return (
     <div role="radiogroup" aria-label={label} class="fs-seg fs-seg-sm fs-self-start">
       {opts.map(([v, t]) => <button type="button" role="radio" aria-checked={v === value ? 'true' : 'false'} class={v === value ? 'is-on' : ''} onClick={() => set(v)}>{t}</button>)}
@@ -39,7 +36,7 @@ export function Seg<T extends string>({ value, set, opts, label }: { value: T; s
   );
 }
 
-/** The mockup's segmented choice: taller text, and the full width with `full`. */
+/** A segmented choice with taller text, the full width with `full`. */
 function Choice<T extends string>({ value, set, opts, label, full }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string; full?: boolean }) {
   return (
     <div role="radiogroup" aria-label={label} class={'fs-seg fs-pseg' + (full ? ' is-full' : '')}>
@@ -71,24 +68,24 @@ effect(() => {
 
 /** The preview's step, per routine, and whether the drawing follows a run that ended badly (until the
  *  preview is stepped). */
-const pvStep = signal<Record<Routine, number>>({ tl: 0, ef: 0, cf: 0, rot: 0 });
-const pvFree = signal<Record<Routine, boolean>>({ tl: true, ef: true, cf: true, rot: true });
-let pvTimer: ReturnType<typeof setInterval> | null = null;
-const pvPlaying = signal<Routine | null>(null);
+const previewStep = signal<Record<Routine, number>>({ tl: 0, ef: 0, cf: 0, rot: 0 });
+const previewFree = signal<Record<Routine, boolean>>({ tl: true, ef: true, cf: true, rot: true });
+let previewTimer: ReturnType<typeof setInterval> | null = null;
+const previewPlaying = signal<Routine | null>(null);
 
 function setStep(r: Routine, i: number): void {
-  pvStep.value = { ...pvStep.value, [r]: i };
-  pvFree.value = { ...pvFree.value, [r]: true };
+  previewStep.value = { ...previewStep.value, [r]: i };
+  previewFree.value = { ...previewFree.value, [r]: true };
 }
-function stopPlay(): void { if (pvTimer) clearInterval(pvTimer); pvTimer = null; pvPlaying.value = null; }
-function play(r: Routine, n: number): void {
-  if (pvPlaying.value === r) { stopPlay(); return; }
-  stopPlay();
+function stopPreview(): void { if (previewTimer) clearInterval(previewTimer); previewTimer = null; previewPlaying.value = null; }
+function playPreview(r: Routine, n: number): void {
+  if (previewPlaying.value === r) { stopPreview(); return; }
+  stopPreview();
   setStep(r, 0);
-  pvPlaying.value = r;
-  pvTimer = setInterval(() => {
-    const i = pvStep.value[r];
-    if (i >= n - 1) { stopPlay(); return; }
+  previewPlaying.value = r;
+  previewTimer = setInterval(() => {
+    const i = previewStep.value[r];
+    if (i >= n - 1) { stopPreview(); return; }
     setStep(r, i + 1);
   }, 420);
 }
@@ -96,19 +93,19 @@ function play(r: Routine, n: number): void {
 const settingsOpen = signal(false);
 
 async function probeNow(r: Routine, asReference = false): Promise<void> {
-  stopPlay();
+  stopPreview();
   // Planned again now, from where the machine is: the drawing then follows the run step for step.
   const plan = await makePlan(r, { ...inputs(), at: machine.mpos.peek() });
-  pvFree.value = { ...pvFree.value, [r]: false };
+  previewFree.value = { ...previewFree.value, [r]: false };
   if (r === 'tl') await pr.measureTool(asReference, plan);
   else if (r === 'ef') await pr.findEdge(plan);
   else if (r === 'cf') await pr.findCentre(plan);
   else await pr.measureRotation(plan);
   const run = pr.runs.value[r];
-  if (run?.phase === 'ok' && run.plan) pvStep.value = { ...pvStep.value, [r]: run.plan.wps.length - 1 };
+  if (run?.phase === 'ok' && run.plan) previewStep.value = { ...previewStep.value, [r]: run.plan.wps.length - 1 };
 }
 
-// ── Column 1: what to measure ─────────────────────────────────────────────────
+// Column 1: what to measure
 
 const WCS8 = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'G59.1', 'G59.2'];
 
@@ -284,17 +281,17 @@ function ToolWhat() {
     </div>
     <div class="fs-psect"><div class="fs-cap">REFERENCE TOOL</div>
       <div class="fs-note">{ref
-        ? <><b>{T(ref.tool)}, touched at machine Z <span class="fs-mono">{f3(ref.z)}</span> on the {here}</b>, {when(ref.at)}. Later tools measured on the {here} are measured against it.</>
+        ? <><b>{T(ref.tool)}, touched at machine Z <span class="fs-mono">{signedMm(ref.z)}</span> on the {here}</b>, {when(ref.at)}. Later tools measured on the {here} are measured against it.</>
         : <><b>Not set on the {here}.</b> Measure the reference tool on the {here} first. Every later tool is measured against it, and the difference becomes its tool length offset.</>}</div>
-      {!ref && other && <div class="fs-note is-warn">The {pr.SURFACE_NAME[otherMode]}'s reference ({T(other.tool)}, Z {f3(other.z)}) doesn't apply on the {here}: a touch on one isn't comparable with a touch on the other.</div>}
-      {!ref && c.tloReference !== null && <div class="fs-note is-warn">A reference kept from before ({T(c.refTool)}, Z {f3(c.tloReference)}) doesn't say whether it was on the plate or the toolsetter, so it isn't used. Measure it again.</div>}
+      {!ref && other && <div class="fs-note is-warn">The {pr.SURFACE_NAME[otherMode]}'s reference ({T(other.tool)}, Z {signedMm(other.z)}) doesn't apply on the {here}: a touch on one isn't comparable with a touch on the other.</div>}
+      {!ref && c.tloReference !== null && <div class="fs-note is-warn">A reference kept from before ({T(c.refTool)}, Z {signedMm(c.tloReference)}) doesn't say whether it was on the plate or the toolsetter, so it isn't used. Measure it again.</div>}
       <div class="fs-row-gap">
         <button type="button" class="fs-btn" disabled={!linked || busy} title={`Probe this tool on the ${here} as the reference the others are measured from`} onClick={() => probeNow('tl', true)}>MEASURE AS REFERENCE</button>
         {(ref || c.tloReference !== null) && <button type="button" class="fs-btn" title={`Forget the ${here}'s reference and cancel the tool length offset (G49)`} onClick={() => pr.clearReference()}>CLEAR</button>}
       </div>
     </div>
     <div class="fs-psect"><div class="fs-cap">TOOL LENGTH OFFSET NOW</div>
-      <div class="fs-mono fs-ptlo">{tlo === null ? 'not read' : f3(tlo)} <span class="fs-dim">mm{tool !== null ? ` · T${tool} in the spindle` : ''}</span></div>
+      <div class="fs-mono fs-ptlo">{tlo === null ? 'not read' : signedMm(tlo)} <span class="fs-dim">mm{tool !== null ? ` · T${tool} in the spindle` : ''}</span></div>
       <div class="fs-note">At a tool change in a job, the job screen's MEASURE has the controller measure the tool itself ($TPW).</div>
     </div>
     <ProbeLine toolLength />
@@ -305,7 +302,7 @@ function What({ tab }: { tab: Routine }) {
   return tab === 'tl' ? <ToolWhat /> : tab === 'ef' ? <EdgeWhat /> : tab === 'cf' ? <CentreWhat /> : <RotationWhat />;
 }
 
-// ── Column 2: where it starts, and what it does ───────────────────────────────
+// Column 2: where it starts, and what it does
 
 let viewIds = 0;
 
@@ -325,11 +322,11 @@ function Where({ tab, plan }: { tab: Routine; plan: Plan | null }) {
   const run = pr.runs.value[tab];
   const runningHere = pr.running.value === tab;
   // A run on show follows its own plan: under way, or ended in a miss or a cancel, until the preview is stepped.
-  const follow = !!run?.plan && run.start && (runningHere || ((run.phase === 'fail' || run.phase === 'cancelled') && !pvFree.value[tab]));
+  const follow = !!run?.plan && run.start && (runningHere || ((run.phase === 'fail' || run.phase === 'cancelled') && !previewFree.value[tab]));
   const m = follow ? run!.plan! : plan;
   if (!m) return <div class="fs-where">…</div>;
   const n = m.wps.length;
-  const cur = follow ? Math.min(run!.step, n - 1) : Math.min(pvStep.value[tab], Math.max(n - 1, 0));
+  const cur = follow ? Math.min(run!.step, n - 1) : Math.min(previewStep.value[tab], Math.max(n - 1, 0));
   let at = null;
   if (follow && n) {
     const p = machine.mpos.value, s0 = run!.start!, w0 = m.wps[0];
@@ -345,11 +342,11 @@ function Where({ tab, plan }: { tab: Routine; plan: Plan | null }) {
       {m.views.map(v => <View v={v} m={m} s={s} />)}
     </div>}
     {n > 0 && <div class="fs-play">
-      <button type="button" class="fs-btn fs-btn-sm" aria-label="Previous move" disabled={busy || cur <= 0} onClick={() => { stopPlay(); setStep(tab, cur - 1); }}>◀</button>
-      <button type="button" class="fs-btn fs-btn-sm" aria-label={pvPlaying.value === tab ? 'Pause' : 'Play the moves'} disabled={busy} onClick={() => play(tab, n)}>{pvPlaying.value === tab ? '❚❚' : '▶'}</button>
-      <button type="button" class="fs-btn fs-btn-sm" aria-label="Next move" disabled={busy || cur >= n - 1} onClick={() => { stopPlay(); setStep(tab, cur + 1); }}>▶|</button>
+      <button type="button" class="fs-btn fs-btn-sm" aria-label="Previous move" disabled={busy || cur <= 0} onClick={() => { stopPreview(); setStep(tab, cur - 1); }}>◀</button>
+      <button type="button" class="fs-btn fs-btn-sm" aria-label={previewPlaying.value === tab ? 'Pause' : 'Play the moves'} disabled={busy} onClick={() => playPreview(tab, n)}>{previewPlaying.value === tab ? '❚❚' : '▶'}</button>
+      <button type="button" class="fs-btn fs-btn-sm" aria-label="Next move" disabled={busy || cur >= n - 1} onClick={() => { stopPreview(); setStep(tab, cur + 1); }}>▶|</button>
       <span class="fs-pstep">{cur + 1} / {n} · {follow && run ? run.label : w.label}</span>
-      <span class="fs-mono fs-dim fs-pxyz" title="This step's position, mm from where the probe starts">X {f3(w.x - w0.x)} Y {f3(w.y - w0.y)} Z {f3(w.z - w0.z)}</span>
+      <span class="fs-mono fs-dim fs-pxyz" title="This step's position, mm from where the probe starts">X {signedMm(w.x - w0.x)} Y {signedMm(w.y - w0.y)} Z {signedMm(w.z - w0.z)}</span>
       <button type="button" class="fs-btn fs-btn-sm" title="Draw these moves in the job screen's 3D view" onClick={() => pr.showInJobPreview(m)}>3D VIEW</button>
     </div>}
     {n > 0 && <div class="fs-plegend" aria-label="Key">
@@ -361,7 +358,7 @@ function Where({ tab, plan }: { tab: Routine; plan: Plan | null }) {
 
 /** Rotation's angle from its result line, once APPLY has cleared the one to apply. */
 function lastAngle(run: pr.Run | undefined): number | null {
-  const v = run?.lines.find(l => l.k === 'ANGLE')?.v;
+  const v = run?.lines.find(l => l.label === 'ANGLE')?.value;
   return v ? parseFloat(v) : null;
 }
 
@@ -373,7 +370,7 @@ function ProbeLight({ tab }: { tab: Routine }) {
   const what = tab === 'tl' && pr.toolLengthConfig.value.mode === 'touchplate' ? 'plate on the tool' : 'stylus';
   return (
     <div class={'fs-plamp' + (hit ? ' is-hit' : '')} role="status">
-      <span class="fs-lamp" /><span class="w">PROBE {!linked ? '—' : hit ? 'TOUCHING' : 'OPEN'}</span>
+      <span class="fs-lamp" /><span class="w">PROBE {!linked ? '-' : hit ? 'TOUCHING' : 'OPEN'}</span>
       <span>{!linked ? 'Not connected: this follows the controller\'s probe input.' : hit ? 'Contact.' : `Tap the ${what}: this lights when the probe triggers.`}</span>
     </div>
   );
@@ -381,7 +378,7 @@ function ProbeLight({ tab }: { tab: Routine }) {
 
 const PAD: [string, string][] = [['X-Y+', '↖'], ['Y+', 'Y+'], ['X+Y+', '↗'], ['Z+', 'Z+'], ['X-', 'X−'], ['STOP', 'STOP'], ['X+', 'X+'], ['Z-', 'Z−'], ['X-Y-', '↙'], ['Y-', 'Y−'], ['X+Y-', '↘'], ['XY0', 'XY0']];
 
-/** The jog pad, compact: no feed slider here (the owner, 3 Nov), the feed as a number. */
+/** The jog pad, compact: the feed as a number, with no slider. */
 function ProbeJog() {
   const hold = jog.holdMode.value, linked = connection.connected.value;
   const busy = !!pr.running.value;
@@ -423,7 +420,7 @@ function RunFoot({ tab }: { tab: Routine }) {
   return <>
     <div class={'fs-pstatus2' + (tone ? ' is-' + tone : '')} role="status">{text}</div>
     {lines.length > 0 && <div class="fs-pres fs-mono">
-      {lines.map(l => <div><span class="k">{l.k}</span>{l.v}{l.old && <span class="old">{l.v ? ' ' : ''}{l.old}</span>}</div>)}
+      {lines.map(l => <div><span class="k">{l.label}</span>{l.value}{l.note && <span class="old">{l.value ? ' ' : ''}{l.note}</span>}</div>)}
     </div>}
     <div class="fs-prunb">
       <button type="button" class="fs-pgo" disabled={!linked || !!busy} onClick={() => probeNow(tab)}>PROBE</button>
@@ -443,13 +440,13 @@ function ProbingTabs() {
     <div role="tablist" aria-label="What to measure" class="fs-subtabs">
       {PROBING_TABS.map(([id, label]) => (
         <button type="button" role="tab" aria-selected={tab === id ? 'true' : 'false'} class={tab === id ? 'is-on' : ''}
-          onClick={() => { stopPlay(); ui.probingTab.value = id; }}>{label}{pr.running.value === id && <span class="fs-pdot" aria-label="running"> ●</span>}</button>
+          onClick={() => { stopPreview(); ui.probingTab.value = id; }}>{label}{pr.running.value === id && <span class="fs-pdot" aria-label="running"> ●</span>}</button>
       ))}
     </div>
   );
 }
 
-function Col({ n, title, class: cls, foot, children }: { n: number; title: string; class: string; foot?: ComponentChildren; children: ComponentChildren }) {
+function Column({ n, title, class: cls, foot, children }: { n: number; title: string; class: string; foot?: ComponentChildren; children: ComponentChildren }) {
   return (
     <section class={'fs-pbcol ' + cls} aria-label={title}>
       <div class="fs-pbhead"><span class="n">{n}</span><span class="t">{title}</span></div>
@@ -484,9 +481,9 @@ function Columns() {
   const plan = plans.value[tab] ?? null;
   return (
     <div class="fs-pb">
-      <Col n={1} title="WHAT TO MEASURE" class="fs-pb1"><What tab={tab} /></Col>
-      <Col n={2} title="WHERE IT STARTS · WHAT IT DOES" class="fs-pb2"><Where tab={tab} plan={plan} /></Col>
-      <Col n={3} title="POSITION AND PROBE" class="fs-pb3" foot={<RunFoot tab={tab} />}><ProbeLight tab={tab} /><ProbeJog /></Col>
+      <Column n={1} title="WHAT TO MEASURE" class="fs-pb1"><What tab={tab} /></Column>
+      <Column n={2} title="WHERE IT STARTS · WHAT IT DOES" class="fs-pb2"><Where tab={tab} plan={plan} /></Column>
+      <Column n={3} title="POSITION AND PROBE" class="fs-pb3" foot={<RunFoot tab={tab} />}><ProbeLight tab={tab} /><ProbeJog /></Column>
       {settingsOpen.value && <SettingsPopup />}
     </div>
   );
@@ -502,7 +499,7 @@ export function ProbingScreen() {
   );
 }
 
-/** The job screen's probe and measure popups: the same columns, the jog pad with them (the owner, 3 Nov). */
+/** The job screen's probe and measure popups: the same columns, with the jog pad. */
 export function ProbingPopupBody() {
   return (
     <div class="fs-probe-popup">

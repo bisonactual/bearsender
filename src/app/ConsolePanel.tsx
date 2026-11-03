@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // The job screen's Console tab: the log, a command line, and the touch keyboard
-// ═══════════════════════════════════════════════
 //
 // The log keeps its last lines in console.ts; this draws them, and adds each new one as it comes.
 // Typing $ and part of a setting's name offers the settings (once they have been read); $n= shows its name
@@ -14,16 +12,16 @@ import { sendCmd } from '../connection';
 import * as settings from '../settings';
 import * as machine from '../stores/machine';
 
-const PRE: Record<string, string> = { tx: '→', rx: '←', ok: '✓', err: '✗', info: 'ℹ', alarm: '⚠' };
+const LINE_MARKS: Record<string, string> = { tx: '→', rx: '←', ok: '✓', err: '✗', info: 'ℹ', alarm: '⚠' };
 
 /** The command being typed, shared with the touch keyboard. */
 const typed = signal('');
 const keyboard = signal(false);
 
-function lineEl(l: LogLine): HTMLElement {
+function lineElement(l: LogLine): HTMLElement {
   const div = document.createElement('div');
-  div.className = 'fs-con-line is-' + (PRE[l.type] ? l.type : 'rx');
-  div.textContent = (PRE[l.type] ?? '·') + ' ' + l.text;
+  div.className = 'fs-con-line is-' + (LINE_MARKS[l.type] ? l.type : 'rx');
+  div.textContent = (LINE_MARKS[l.type] ?? '·') + ' ' + l.text;
   return div;
 }
 
@@ -32,13 +30,13 @@ function LogView() {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = box.current!;
-    el.replaceChildren(...logLines().map(lineEl));
+    el.replaceChildren(...logLines().map(lineElement));
     el.scrollTop = el.scrollHeight;
     let frame = 0;
     return onLog(line => {
       if (!line) { el.replaceChildren(); return; }
       const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      el.appendChild(lineEl(line));
+      el.appendChild(lineElement(line));
       while (el.childElementCount > LOG_MAX) el.firstElementChild!.remove();
       if (atEnd && !frame) frame = requestAnimationFrame(() => { frame = 0; el.scrollTop = el.scrollHeight; });
     });

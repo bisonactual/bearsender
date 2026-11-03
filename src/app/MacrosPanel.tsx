@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // The job screen's Macros tab: the built-in commands and the operator's own macros
-// ═══════════════════════════════════════════════
 //
 // A macro's lines go one at a time, each waiting for the controller's ok; the first error stops the rest.
 // What the controller answers shows under the buttons. The operator's macros are kept in this browser.

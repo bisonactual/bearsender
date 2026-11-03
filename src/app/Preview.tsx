@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Preview — the program in 3D, from the G-code interpreter
-// ═══════════════════════════════════════════════
+// The Preview: the program in 3D, from the G-code interpreter.
 //
 // Machine coordinates: the work offsets, G92 and the tool length offset as the controller has them.
 // Arcs draw as curves; the done part of the path follows the line being cut; the cone is the tool,

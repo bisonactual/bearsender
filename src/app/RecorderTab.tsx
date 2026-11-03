@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // Settings, Flight recorder: switching it on, this job, and the plugin's own settings ($790-$793)
-// ═══════════════════════════════════════════════
 //
 // The record and the event log are on the job screen, in the Recorder panel. Its SETTINGS button opens
 // this tab in a popup.

@@ -1,7 +1,5 @@
-// ═══════════════════════════════════════════════
 // Settings, Probe: the one set of probe settings every routine uses (src/probing/settings.ts). The
 // Probing screen opens it in a popup from its one-line summary; the Settings screen can mount it too.
-// ═══════════════════════════════════════════════
 
 import * as ps from '../probing/settings';
 import { Card, NumIn } from './SetupScreen';

@@ -1,9 +1,7 @@
-// ═══════════════════════════════════════════════
-// What the shell asks the controller for by itself, so the Setup list needn't say "not checked yet"
-// ═══════════════════════════════════════════════
+// What the shell asks the controller for by itself, so the Setup list needn't say "not checked yet".
 //
-// $# (offsets and TLO) is read on connect by the old code, and the program limits when a file loads.
-// This adds homing ($22), the travel ($130-$132), what sets the travel's ends (hard limits $21, homing
+// $# (the offsets and the TLO) is read on connecting (offsets.ts), and the program limits when a file
+// loads. This adds homing ($22), the travel ($130-$132), what sets the travel's ends (hard limits $21, homing
 // direction $23, pull-off $27), the tool change mode ($341), the G73 retract ($28), the maximum spindle
 // speed ($30, for the warmup's note), the modes a job starts from ($G) and the tool table ($TTLIST), once
 // per connection, as the last of what is read on connecting (connection.ts). $G is read again whenever a

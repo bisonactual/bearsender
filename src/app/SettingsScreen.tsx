@@ -1,9 +1,6 @@
-// ═══════════════════════════════════════════════
-// The Settings screen: the controller's settings, exclusion zones, options, probe, flight recorder
-// ═══════════════════════════════════════════════
-//
-// The controller's settings tab is here; the others are in their own files. Each tab is built only
-// while it shows, so what it reads is read when it opens, as the old tabs did.
+// The Settings screen: the controller's settings, exclusion zones, options, probe and flight recorder.
+// The controller's settings tab is here and the others are in their own files. Each tab is mounted only
+// while it shows, so what it reads is read each time it opens.
 
 import { useEffect, useState } from 'preact/hooks';
 import * as connection from '../stores/connection';
@@ -17,7 +14,7 @@ import { OptionsTab } from './OptionsTab';
 import { RecorderTab } from './RecorderTab';
 import { ProbeSettingsCard } from './ProbeSettings';
 
-// ── The controller's settings ($ settings) ────────────────────────────────────
+// The controller's settings ($ settings)
 
 /** The groups that hold settings, in the controller's tree order, with their depth. */
 function groupList(): { id: number; name: string; depth: number }[] {
@@ -96,7 +93,7 @@ function SettingRow({ def }: { def: SettingDef }) {
         <div class="fs-gs-name">{def.name}</div>
         <div class="fs-gs-id">${def.id}{def.unit ? ' · ' + def.unit : ''}{def.reboot ? ' · ⟳ reboot' : ''}</div>
         {def.description && <div class="fs-gs-desc">{def.description.replace(/\\n/g, '\n')}</div>}
-        {(def.minV || def.maxV) && <div class="fs-gs-id">Range: {def.minV || '—'} … {def.maxV || '∞'}</div>}
+        {(def.minV || def.maxV) && <div class="fs-gs-id">Range: {def.minV || '-'} … {def.maxV || '∞'}</div>}
       </div>
       <div class="fs-gs-ctrl">
         <Widget def={def} value={dirty ?? stored} />
@@ -159,7 +156,7 @@ function GrblSettings() {
   );
 }
 
-// ── The screen ────────────────────────────────────────────────────────────────
+// The screen
 
 const SETTINGS_TABS: [ui.SettingsTab, string][] = [
   ['grbl', 'GRBL SETTINGS'], ['zones', 'EXCLUSION ZONES'], ['options', 'OPTIONS'], ['probe', 'PROBE'], ['flight', 'FLIGHT RECORDER'],

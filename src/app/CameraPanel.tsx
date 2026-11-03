@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // The job screen's Camera tab: the webcam with a crosshair, and the camera's offset from the spindle
-// ═══════════════════════════════════════════════
 //
 // The camera runs only while this tab shows on the job screen. Drag the picture (mouse or finger) to move
 // the crosshair; CENTRE, or a right-click, puts it back in the middle.
@@ -16,7 +14,7 @@ import * as ui from './ui';
 
 const STYLES: [cam.CrossStyle, string, string][] = [['cross', '+', 'Cross'], ['circle', '○', 'Circle'], ['both', '⊕', 'Cross and circle'], ['dot', '·', 'Dot']];
 const COLOURS: [string, string][] = [['#00d4ff', 'CYN'], ['#00e676', 'GRN'], ['#ff3d3d', 'RED'], ['#ffffff', 'WHT']];
-const fix = (v: number) => v.toFixed(3);
+const fixed3 = (v: number) => v.toFixed(3);
 
 function Picture() {
   const video = useRef<HTMLVideoElement>(null);
@@ -69,7 +67,7 @@ function Controls() {
     <div class="fs-cam-side">
       <label class="fs-field"><span>Camera source</span>
         <select class="fs-in" value={cam.picked.value} onChange={e => { if (active) cam.stopCamera(); cam.picked.value = (e.target as HTMLSelectElement).value; }}>
-          <option value="">— select camera —</option>
+          <option value="">(select camera)</option>
           {cam.devices.value.map(d => <option value={d.id}>{d.label}</option>)}
         </select>
       </label>
@@ -112,10 +110,10 @@ function Controls() {
           {measuring ? 'CONFIRM OFFSET' : 'MEASURE OFFSET'}</button>
         {measuring && <button type="button" class="fs-btn fs-btn-sm" onClick={() => cam.cancelMeasure()}>CANCEL</button>}
       </div>
-      {measuring && <div class="fs-note">Spindle taken at X {fix(measuring.x)} Y {fix(measuring.y)}. Jog until the crosshair is over the same mark, then CONFIRM OFFSET.</div>}
+      {measuring && <div class="fs-note">Spindle taken at X {fixed3(measuring.x)} Y {fixed3(measuring.y)}. Jog until the crosshair is over the same mark, then CONFIRM OFFSET.</div>}
       <div class="fs-cam-pos fs-mono">
-        <div><span class="fs-dim">Spindle</span> X {fix(m.x)} Y {fix(m.y)}</div>
-        <div><span class="fs-dim">Camera</span> X {fix(m.x + v.offsetX)} Y {fix(m.y + v.offsetY)}</div>
+        <div><span class="fs-dim">Spindle</span> X {fixed3(m.x)} Y {fixed3(m.y)}</div>
+        <div><span class="fs-dim">Camera</span> X {fixed3(m.x + v.offsetX)} Y {fixed3(m.y + v.offsetY)}</div>
       </div>
       <button type="button" class="fs-btn fs-btn-sm" disabled={!canMove} onClick={() => cam.goToCamera()}>→ MOVE TO CAMERA POS</button>
       <button type="button" class="fs-btn fs-btn-sm" disabled={!canMove} onClick={() => cam.goToSpindle()}>← MOVE TO SPINDLE POS</button>

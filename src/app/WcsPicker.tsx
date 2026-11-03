@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // The work offset picker: the position line's G54 chip opens it
-// ═══════════════════════════════════════════════
 //
 // A tap sends the code (G21 G55), as the other manual commands go; the chip then shows the work offset the
 // controller reports (WCS: in the status report, or $G), not the one pressed. While a job runs, or a job
@@ -15,7 +13,7 @@ import { recordToResume } from './mode';
 import { sendCmd } from '../connection';
 import { WCS_ENTRIES, offsetsWaitForHoming } from '../offsets';
 
-const fix3 = (v: number) => v.toFixed(3);
+const fixed3 = (v: number) => v.toFixed(3);
 
 export function WcsPicker() {
   const linked = connection.connected.value;
@@ -42,7 +40,7 @@ export function WcsPicker() {
               onClick={() => { sendCmd('G21 ' + e.code); }}>
               <span class="fs-wcspick-code">{e.code}</span>
               <span class="fs-wcspick-what">{on ? 'ACTIVE' : e.code === 'G59.3' ? 'the toolsetter\'s place' : ''}</span>
-              {o ? <span class="fs-wcspick-vals fs-mono">X {fix3(o.x)}  Y {fix3(o.y)}  Z {fix3(o.z)}</span>
+              {o ? <span class="fs-wcspick-vals fs-mono">X {fixed3(o.x)}  Y {fixed3(o.y)}  Z {fixed3(o.z)}</span>
                 : <span class="fs-wcspick-vals fs-dim">{!linked ? '' : read ? 'not in $#' : offsetsWaitForHoming() ? 'read after homing' : 'not read yet'}</span>}
             </button>
           );

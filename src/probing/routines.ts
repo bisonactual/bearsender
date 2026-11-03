@@ -121,7 +121,7 @@ export function routineProblems(r: Routine): string[] {
 
 /** 'held': nothing was sent, because something it would be built on can't be used (said in yellow). */
 export type Phase = 'running' | 'ok' | 'fail' | 'cancelled' | 'held';
-export interface ResultLine { k: string; v: string; old?: string; }
+export interface ResultLine { label: string; value: string; note?: string; }
 export interface Run {
   phase: Phase;
   /** The plan when PROBE was pressed: the drawing follows the run on it. */
@@ -252,12 +252,12 @@ export function cancel(): void {
  *  offsets in force taken off them. */
 function zeroLines(wcs: string, w: ZeroWrite): ResultLine[] {
   const axes = AXES.filter(a => w.wrote[a] !== undefined);
-  const lines: ResultLine[] = [{ k: wcs, v: axesText(w.wrote), old: w.was ? 'was ' + axesText(Object.fromEntries(axes.map(a => [a, w.was![a]]))) : undefined }];
+  const lines: ResultLine[] = [{ label: wcs, value: axesText(w.wrote), note: w.was ? 'was ' + axesText(Object.fromEntries(axes.map(a => [a, w.was![a]]))) : undefined }];
   const off = [['G92', w.g92], ['TLO', w.tlo]].flatMap(([name, v]) => {
     const used = axes.filter(a => Math.abs((v as Point)[a]) > 5e-4);
     return used.length ? [`${name} ${axesText(Object.fromEntries(used.map(a => [a, (v as Point)[a]])))}`] : [];
   });
-  if (off.length) lines.push({ k: 'LESS', v: '', old: `${off.join(' and ')} in force, so the zero lands on what was found` });
+  if (off.length) lines.push({ label: 'LESS', value: '', note: `${off.join(' and ')} in force, so the zero lands on what was found` });
   return lines;
 }
 
@@ -275,10 +275,10 @@ export async function findEdge(plan: Plan | null): Promise<void> {
   const f = await runRoutine('ef', plan, (io, sp) => edge(io, sp, c, probe.value),
     t.mode === 'G10' ? async found => { wrote = await writeZero(wcs, zeroOf(found)); } : undefined);
   if (!f) return;
-  const lines: ResultLine[] = [{ k: 'FOUND', v: axesText({ x: f.x, y: f.y, z: f.z }), old: 'machine' }];
+  const lines: ResultLine[] = [{ label: 'FOUND', value: axesText({ x: f.x, y: f.y, z: f.z }), note: 'machine' }];
   if (wrote) lines.push(...zeroLines(wcs, wrote));
-  else lines.push({ k: 'NOT SET', v: '', old: 'measure only' });
-  if (f.zMissed) lines.push({ k: 'Z', v: '', old: `${f.zMissed.message}: X and Y ${t.mode === 'G10' ? 'written' : 'measured'} only` });
+  else lines.push({ label: 'NOT SET', value: '', note: 'measure only' });
+  if (f.zMissed) lines.push({ label: 'Z', value: '', note: `${f.zMissed.message}: X and Y ${t.mode === 'G10' ? 'written' : 'measured'} only` });
   setRun('ef', { phase: 'ok', text: wrote ? `Done. Written to ${wcs}.` : 'Measured. Nothing was written.', lines });
 }
 
@@ -291,11 +291,11 @@ export async function findCentre(plan: Plan | null): Promise<void> {
   if (!f) return;
   const size = [f.sizeX, f.sizeY].filter((v): v is number => v !== null).map(v => v.toFixed(3)).join(' × ');
   const lines: ResultLine[] = [
-    { k: 'CENTRE', v: axesText(zeroOf(f)), old: 'machine' },
-    { k: 'SIZE', v: `${c.centerMode === 'inside' ? 'bore' : 'boss'} ${size} mm${c.axes === 'XY' ? '' : ' in ' + c.axes}` },
+    { label: 'CENTRE', value: axesText(zeroOf(f)), note: 'machine' },
+    { label: 'SIZE', value: `${c.centerMode === 'inside' ? 'bore' : 'boss'} ${size} mm${c.axes === 'XY' ? '' : ' in ' + c.axes}` },
   ];
   if (wrote) lines.push(...zeroLines(wcs, wrote));
-  else lines.push({ k: 'NOT SET', v: '', old: 'measure only' });
+  else lines.push({ label: 'NOT SET', value: '', note: 'measure only' });
   setRun('cf', { phase: 'ok', text: wrote ? `Done. Written to ${wcs}.` : 'Measured. Nothing was written.', lines });
 }
 
@@ -308,7 +308,7 @@ export async function measureRotation(plan: Plan | null): Promise<void> {
   setRun('rot', {
     phase: 'ok',
     text: loaded ? 'Measured. APPLY ROTATION turns the program by this angle.' : 'Measured. Load a program, then APPLY ROTATION turns it by this angle.',
-    lines: [{ k: 'ANGLE', v: `${f.angleDeg.toFixed(3)}°` }, { k: 'POINTS', v: '', old: `${Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y).toFixed(3)} mm apart on the ${ROTATION_SIDES[c.edge].name} side` }],
+    lines: [{ label: 'ANGLE', value: `${f.angleDeg.toFixed(3)}°` }, { label: 'POINTS', value: '', note: `${Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y).toFixed(3)} mm apart on the ${ROTATION_SIDES[c.edge].name} side` }],
   });
 }
 
@@ -350,7 +350,7 @@ export async function measureTool(asReference: boolean, plan: Plan | null = null
     update('tl', toolLengthConfig, { refs: { ...c.refs, [c.mode]: { z: f.z, tool, at: Date.now() } }, tloReference: null, refTool: null, refAt: null });
     setRun('tl', {
       phase: 'ok', text: `Reference set on the ${surface}: ${T(tool)} touched at machine Z ${signedMm(f.z)}. Measure each later tool on the ${surface} with PROBE.`,
-      lines: [{ k: 'TOUCHED', v: `Z ${signedMm(f.z)}`, old: 'machine' }, { k: 'TLO', v: '', old: 'cancelled (G49): the reference has none' }],
+      lines: [{ label: 'TOUCHED', value: `Z ${signedMm(f.z)}`, note: 'machine' }, { label: 'TLO', value: '', note: 'cancelled (G49): the reference has none' }],
     });
     return;
   }
@@ -359,7 +359,7 @@ export async function measureTool(asReference: boolean, plan: Plan | null = null
     : c.mode === 'touchplate' ? `· no reference on the ${surface}: the touch less the ${c.touchPlateHeight.toFixed(3)} mm plate` : `· no reference on the ${surface}: the touch itself`;
   setRun('tl', {
     phase: 'ok', text: 'Done. Tool length offset set (G43.1).',
-    lines: [{ k: 'TOUCHED', v: `Z ${signedMm(f.z)}`, old: 'machine' }, { k: 'TLO', v: `${signedMm(tlo)} mm`, old: against }],
+    lines: [{ label: 'TOUCHED', value: `Z ${signedMm(f.z)}`, note: 'machine' }, { label: 'TLO', value: `${signedMm(tlo)} mm`, note: against }],
   });
 }
 

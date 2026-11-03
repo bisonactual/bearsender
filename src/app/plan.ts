@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// The job's times — estimated, measured, and where the run is
-// ═══════════════════════════════════════════════
+// The job's times: estimated, measured, and where the run is.
 //
 // Each tool row's time is the measured one from the last whole run of this file, or else the
 // interpreter's estimate: a lower bound, with no acceleration, overrides or waits. Progress is by

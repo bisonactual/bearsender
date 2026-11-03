@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Shell UI state — which screen and panel are showing
-// ═══════════════════════════════════════════════
+// The shell's own state: which screen, tab and panel are showing.
 
 import { signal, effect } from '@preact/signals';
 import { lsGet, lsSet } from '../ui';
@@ -16,23 +14,23 @@ export type SettingsTab = 'grbl' | 'zones' | 'options' | 'probe' | 'flight';
 export type ProbingTab = 'tl' | 'ef' | 'cf' | 'rot';
 
 /** A saved choice, if it is still one of the choices (tabs move between versions). */
-function saved<T extends string>(key: string, choices: readonly T[], fallback: T): T {
+function savedChoice<T extends string>(key: string, choices: readonly T[], fallback: T): T {
   const v = lsGet<string>(key, fallback);
   return (choices as readonly string[]).includes(v) ? v as T : fallback;
 }
 
-export const screen = signal<Screen>(saved<Screen>('fs-screen', ['job', 'setup', 'probing', 'tools', 'settings'], 'job'));
-export const setupTab = signal<SetupTab>(saved<SetupTab>('fs-setup-tab', ['machine', 'offsets', 'warmup'], 'machine'));
-export const settingsTab = signal<SettingsTab>(saved<SettingsTab>('fs-settings-tab', ['grbl', 'zones', 'options', 'probe', 'flight'], 'options'));
-export const probingTab = signal<ProbingTab>(saved<ProbingTab>('fs-probing-sub', ['tl', 'ef', 'cf', 'rot'], 'tl'));
+export const screen = signal<Screen>(savedChoice<Screen>('fs-screen', ['job', 'setup', 'probing', 'tools', 'settings'], 'job'));
+export const setupTab = signal<SetupTab>(savedChoice<SetupTab>('fs-setup-tab', ['machine', 'offsets', 'warmup'], 'machine'));
+export const settingsTab = signal<SettingsTab>(savedChoice<SettingsTab>('fs-settings-tab', ['grbl', 'zones', 'options', 'probe', 'flight'], 'options'));
+export const probingTab = signal<ProbingTab>(savedChoice<ProbingTab>('fs-probing-sub', ['tl', 'ef', 'cf', 'rot'], 'tl'));
 
 /** The right panel follows the job while auto is on; picking a tab turns it off. */
 export const auto = signal(lsGet('fs-panel-auto', true));
 /** The tab picked by hand, used while auto is off. */
-export const pickedPanel = signal<Panel>(saved<Panel>('fs-panel', ['setup', 'run', 'recorder', 'preview', 'camera', 'console', 'macros'], 'setup'));
+export const pickedPanel = signal<Panel>(savedChoice<Panel>('fs-panel', ['setup', 'run', 'recorder', 'preview', 'camera', 'console', 'macros'], 'setup'));
 /** The left panel, the same way. */
 export const leftAuto = signal(lsGet('fs-left-auto', true));
-export const pickedLeft = signal<LeftPanel>(saved<LeftPanel>('fs-left', ['jobs', 'program'], 'jobs'));
+export const pickedLeft = signal<LeftPanel>(savedChoice<LeftPanel>('fs-left', ['jobs', 'program'], 'jobs'));
 /** Position line: work or machine coordinates. */
 export const posRef = signal<'work' | 'machine'>(lsGet<'work' | 'machine'>('fs-pos-ref', 'work'));
 /** The loaded program's tools are shown in the Jobs list. */

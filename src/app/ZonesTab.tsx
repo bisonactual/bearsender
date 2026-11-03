@@ -8,7 +8,7 @@ import { zoneColor } from '../options';
 
 /** The zones' state, as the status report's EZ field gives it. */
 function badge(): [string, string] {
-  if (!ez.plugin.value) return ['—', ''];
+  if (!ez.plugin.value) return ['-', ''];
   if (!ez.enabled.value) return ['OFF', ''];
   if (ez.inside.value) return ez.isInsideBlockingZone() ? ['IN A ZONE', 'is-stop'] : ['APPROACHING', 'is-warn'];
   return ['ACTIVE', 'is-go'];
@@ -68,7 +68,7 @@ export function ZonesTab() {
   const atci = ez.atciLimits();
   const [form, setForm] = useState<Form | null>(null);
   const [text, tone] = badge();
-  // Read when it shows, as the old tab drew what was read.
+  // Read each time it shows.
   useEffect(() => { if (linked && (ez.plugin.peek() || ez.atci.peek())) ez.refreshZones(); }, []);
   const plugins = [ez.plugin.value ? 'EZ' : '', ez.atci.value ? 'ATCi' : ''].filter(Boolean).join(' + ');
   return (
@@ -87,7 +87,7 @@ export function ZonesTab() {
             {ez.isReading.value ? 'READING…' : 'REFRESH'}</button>
         </div>
       </div>
-      {!ez.plugin.value && !ez.atci.value && <div class="fs-pstatus">Requires the EZ — Exclusion Zones Plugin to function. Also compatible with the Sienci ATCI Plugin.</div>}
+      {!ez.plugin.value && !ez.atci.value && <div class="fs-pstatus">Requires the EZ (Exclusion Zones) Plugin to function. Also compatible with the Sienci ATCI Plugin.</div>}
       <div class="fs-offsets-scroll">
         {zones.length || atci ? (
           <table class="fs-table fs-zonetable">

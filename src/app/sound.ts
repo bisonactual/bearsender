@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Sound at a tool change — WebAudio, no sound files
-// ═══════════════════════════════════════════════
+// The chime at a tool change, made with WebAudio (no sound files).
 //
 // When a job reaches the hold at an M6, a chime plays if that tool's toggle is on. Toggles are
 // kept per file contents and tool change line, in this browser; every one starts on.

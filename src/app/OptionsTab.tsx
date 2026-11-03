@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // Settings, Options: BearSender's own choices, kept in this browser and used at once
-// ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
@@ -39,7 +37,7 @@ function Pick({ value, set, opts, label }: { value: string; set: (v: string) => 
   );
 }
 
-function Seg2<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
+function Segmented<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
   return (
     <div role="radiogroup" aria-label={label} class="fs-seg fs-seg-sm fs-self-start">
       {opts.map(([v, t]) => <button type="button" role="radio" aria-checked={v === value ? 'true' : 'false'} class={v === value ? 'is-on' : ''} onClick={() => set(v)}>{t}</button>)}
@@ -62,7 +60,7 @@ function ColorRow({ label, value, set, reset }: { label: string; value: string; 
   );
 }
 
-// ── The cards ─────────────────────────────────────────────────────────────────
+// The cards
 
 function Connection() {
   const s = connection.settings.value;
@@ -75,7 +73,7 @@ function Connection() {
   useEffect(() => setUrl(s.wsUrl), [s.wsUrl]);
   return (
     <>
-      <Seg2 label="Connection type" value={s.mode} set={mode => set({ mode })} opts={[['websocket', 'WEBSOCKET'], ['serial', 'USB / SERIAL']]} />
+      <Segmented label="Connection type" value={s.mode} set={mode => set({ mode })} opts={[['websocket', 'WEBSOCKET'], ['serial', 'USB / SERIAL']]} />
       {linked && <div class="fs-note">Connected: disconnect before changing the connection type.</div>}
       {s.mode === 'websocket' ? (
         <>
@@ -124,7 +122,7 @@ function ViewExtents() {
     <>
       <div class="fs-fields">{field('xMin', 'X Minimum (mm)')}{field('xMax', 'X Maximum (mm)')}{field('yMin', 'Y Minimum (mm)')}{field('yMax', 'Y Maximum (mm)')}</div>
       <div class="fs-opt-line"><span class="fs-dim">Projection</span>
-        <Seg2 label="Projection" value={ortho ? 'o' : 'p'} set={p => { setProjection(p === 'o'); setOrtho(p === 'o'); }} opts={[['p', 'PERSPECTIVE'], ['o', 'ORTHOGRAPHIC']]} />
+        <Segmented label="Projection" value={ortho ? 'o' : 'p'} set={p => { setProjection(p === 'o'); setOrtho(p === 'o'); }} opts={[['p', 'PERSPECTIVE'], ['o', 'ORTHOGRAPHIC']]} />
       </div>
     </>
   );
@@ -213,7 +211,7 @@ function Park() {
       </div>
       <div class="fs-inline">
         <span class="fs-cap">Z</span>
-        <Seg2<'top' | 'at'> label="Park Z" value={p.z === null ? 'top' : 'at'} opts={[['top', 'TOP OF TRAVEL'], ['at', 'HEIGHT']]}
+        <Segmented<'top' | 'at'> label="Park Z" value={p.z === null ? 'top' : 'at'} opts={[['top', 'TOP OF TRAVEL'], ['at', 'HEIGHT']]}
           set={v => jobOptions.setParkPoint({ ...p, z: v === 'top' ? null : (p.z ?? travel?.max ?? -5) })} />
         {p.z === null
           ? <span class="fs-dim fs-mono">{travel ? 'machine Z ' + travel.max.toFixed(3) : 'read from the homing settings on connecting'}</span>
@@ -254,7 +252,7 @@ const CARDS: OptCard[] = [
     ) },
   { title: 'COOLANT', text: 'coolant mist flood m7 m8 run tab',
     desc: 'What the Run tab\'s COOLANT button switches on and off: mist (M7) or flood (M8). It uses the controller\'s real-time toggle, so it works while a job runs and sends nothing between its lines.',
-    body: () => <Seg2<jobOptions.Coolant> label="Coolant" value={jobOptions.coolant.value} opts={[['mist', 'MIST (M7)'], ['flood', 'FLOOD (M8)']]}
+    body: () => <Segmented<jobOptions.Coolant> label="Coolant" value={jobOptions.coolant.value} opts={[['mist', 'MIST (M7)'], ['flood', 'FLOOD (M8)']]}
       set={v => { jobOptions.coolant.value = v; log('info', 'Coolant button: ' + v); }} /> },
   { title: 'PARK', text: 'park point position bottom bar',
     desc: 'Where the bottom bar\'s PARK goes, in machine coordinates. Z goes up first, to the park height unless the tool is already higher, and never down while crossing; then over to X and Y; then to the park height. Top of travel is as high as the controller allows Z, from its homing settings.',

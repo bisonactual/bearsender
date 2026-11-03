@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Popups — closable panels over the screen, holding the carried-over setup tools
-// ═══════════════════════════════════════════════
+// The popups: panels over the screen that close, holding the setup tools.
 
 import { Component, createRef } from 'preact';
 import type { ComponentChildren } from 'preact';
@@ -13,7 +11,7 @@ import { ToolTable } from './ToolsScreen';
 import { RecorderTab } from './RecorderTab';
 import { WcsPicker } from './WcsPicker';
 
-/** Lends carried-over panels to a popup, and puts each back where it came from on close. */
+/** Moves panels from elsewhere in the page into a popup, and puts each back where it came from on close. */
 class Borrow extends Component<{ ids: string[]; class?: string }> {
   private box = createRef<HTMLDivElement>();
   private homes: [HTMLElement, Node, Node | null][] = [];
@@ -41,7 +39,7 @@ class Borrow extends Component<{ ids: string[]; class?: string }> {
   }
 }
 
-/** A popup lends carried-over panels (ids), or shows a body of its own. */
+/** A popup borrows panels from the page (by id), or shows a body of its own. */
 interface PopupDef { title: string; ids?: string[]; body?: () => ComponentChildren; tall: boolean; open?: () => void; }
 
 const clock = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });

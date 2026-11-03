@@ -1,7 +1,5 @@
-// ═══════════════════════════════════════════════
 // The Setup screen: the machine's cards (position, jogging, spindle, overrides, program limits, surfacing),
 // the work offsets table and the spindle warmup. The jog, offsets and frame popups show the same cards.
-// ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
@@ -21,7 +19,7 @@ import { log } from '../console';
 import { loadOffsets, offsetsWaitForHoming, writeOffset, zeroOffset, setToCurrentPos, cancelTlo, WCS_ENTRIES } from '../offsets';
 import { WarmupCards } from './Warmup';
 
-const fix3 = (v: number) => v.toFixed(3);
+const fixed3 = (v: number) => v.toFixed(3);
 const num = (v: number) => v.toLocaleString('en-GB');
 const WCS6 = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59'];
 
@@ -42,7 +40,7 @@ export function NumIn({ value, set, step, min, max, label, wide }: { value: numb
   );
 }
 
-// ── Position ──────────────────────────────────────────────────────────────────
+// Position
 
 function stateTone(sl: string): string {
   if (sl === 'run' || sl === 'jog' || sl === 'home') return ' is-go';
@@ -74,8 +72,8 @@ export function PositionCard() {
         {[...(['x', 'y', 'z'] as const).map(a => ({ letter: a.toUpperCase(), rotary: false, w: w[a], m: m[a] })), ...machine.extraAxes.value].map(a => (
           <div class="fs-dro-row">
             <span class="fs-axis-name">{a.letter}</span>
-            <span class="fs-dro-w fs-mono">{fix3(a.w)}</span>
-            <span class="fs-dro-m fs-mono" title="Machine position">M {fix3(a.m)}</span>
+            <span class="fs-dro-w fs-mono">{fixed3(a.w)}</span>
+            <span class="fs-dro-m fs-mono" title="Machine position">M {fixed3(a.m)}</span>
             <span class="fs-unit">{a.rotary ? 'DEG' : 'MM'}</span>
             <button type="button" class="fs-btn fs-btn-xs" disabled={!linked} title={`Zero ${a.letter} in ${wcs} here (G10 L20)`}
               onClick={() => sendCmd('G10 L20 P' + machine.activeP.value + ' ' + a.letter + '0')}>ZERO</button>
@@ -85,8 +83,8 @@ export function PositionCard() {
       <div class="fs-minis">
         <div><div class="fs-cap">FEED</div><div class="fs-mono">{num(machine.feed.value)} <span class="fs-unit">mm/min</span></div></div>
         <div><div class="fs-cap">SPINDLE</div><div class="fs-mono">{num(machine.spindle.value)} <span class="fs-unit">rpm</span></div></div>
-        <div title="Planner blocks and input bytes free"><div class="fs-cap">BUFFER</div><div class="fs-mono">{buf ? `${buf.blocks} blk / ${buf.bytes} B` : '—'}</div></div>
-        <div title="Line number from the status report"><div class="fs-cap">LINE</div><div class="fs-mono">{ln ? num(ln) : '—'}</div></div>
+        <div title="Planner blocks and input bytes free"><div class="fs-cap">BUFFER</div><div class="fs-mono">{buf ? `${buf.blocks} blk / ${buf.bytes} B` : '-'}</div></div>
+        <div title="Line number from the status report"><div class="fs-cap">LINE</div><div class="fs-mono">{ln ? num(ln) : '-'}</div></div>
       </div>
     </Card>
   );
@@ -168,7 +166,7 @@ export function JogCard() {
   );
 }
 
-// ── Spindle and coolant ───────────────────────────────────────────────────────
+// Spindle and coolant
 
 const rpm = signal(10000);
 /** What was last pressed, shown until the controller reports its own state (A:). */
@@ -215,34 +213,34 @@ function SpindleCard() {
   );
 }
 
-// ── Overrides ─────────────────────────────────────────────────────────────────
+// Overrides
 
-type OvrKind = 'feed' | 'rapid' | 'spindle';
+type OverrideKind = 'feed' | 'rapid' | 'spindle';
 /** Where each override stands as far as the bytes sent go; the status report corrects it. */
-const ovrSent: Record<OvrKind, number> = { feed: 100, rapid: 100, spindle: 100 };
-let ovrSeen = machine.overrides.peek();
+const overrideSent: Record<OverrideKind, number> = { feed: 100, rapid: 100, spindle: 100 };
+let overrideSeen = machine.overrides.peek();
 
-function syncOvr(): machine.Overrides {
+function syncOverrides(): machine.Overrides {
   const now = machine.overrides.value;
-  if (now !== ovrSeen) { ovrSeen = now; Object.assign(ovrSent, now); }
+  if (now !== overrideSeen) { overrideSeen = now; Object.assign(overrideSent, now); }
   return now;
 }
 
-function resetOverride(kind: OvrKind): void {
+function resetOverride(kind: OverrideKind): void {
   rtSend(({ feed: '\x90', rapid: '\x95', spindle: '\x99' } as const)[kind]);
-  ovrSent[kind] = 100;
+  overrideSent[kind] = 100;
 }
 
 // Real-time bytes: ±10% and ±1% for feed (0x91-0x94) and spindle (0x9A-0x9D); rapid 100/50/25% (0x95-0x97).
-function applyOverride(kind: OvrKind, target: number): void {
+function applyOverride(kind: OverrideKind, target: number): void {
   if (kind === 'rapid') {
     const closest = [100, 50, 25].reduce((a, b) => Math.abs(b - target) < Math.abs(a - target) ? b : a);
     rtSend(({ 100: '\x95', 50: '\x96', 25: '\x97' } as Record<number, string>)[closest]);
-    ovrSent.rapid = closest;
+    overrideSent.rapid = closest;
     return;
   }
   const [up10, down10, up1, down1] = kind === 'feed' ? ['\x91', '\x92', '\x93', '\x94'] : ['\x9A', '\x9B', '\x9C', '\x9D'];
-  let current = ovrSent[kind];
+  let current = overrideSent[kind];
   let delta = target - current;
   let cmds = 0;
   const MAX = 20;
@@ -250,13 +248,13 @@ function applyOverride(kind: OvrKind, target: number): void {
   while (delta <= -10 && cmds < MAX) { rtSend(down10); delta += 10; current -= 10; cmds++; }
   while (delta >= 1 && cmds < MAX) { rtSend(up1); delta -= 1; current += 1; cmds++; }
   while (delta <= -1 && cmds < MAX) { rtSend(down1); delta += 1; current -= 1; cmds++; }
-  ovrSent[kind] = current;
+  overrideSent[kind] = current;
 }
 
 function OverridesCard() {
-  const ov = syncOvr();
+  const ov = syncOverrides();
   const linked = connection.connected.value;
-  const rows: [OvrKind, string, number, number][] = [['feed', 'FEED', 10, 200], ['rapid', 'RAPID', 25, 100], ['spindle', 'SPINDLE', 10, 200]];
+  const rows: [OverrideKind, string, number, number][] = [['feed', 'FEED', 10, 200], ['rapid', 'RAPID', 25, 100], ['spindle', 'SPINDLE', 10, 200]];
   return (
     <Card title="OVERRIDES" end={<span class="fs-dim fs-small">tap a name for 100%</span>}>
       {rows.map(([kind, label, min, max]) => (
@@ -271,14 +269,14 @@ function OverridesCard() {
   );
 }
 
-// ── Program limits and framing ────────────────────────────────────────────────
+// Program limits and framing
 
 export function LimitsCard() {
   const tabs = frame.tabs.value;
   const sel = frame.selected.value;
   const linked = connection.connected.value;
   const refs = ['absolute', ...WCS_ENTRIES.filter(e => e.id).map(e => e.code)];
-  const cell = (has: boolean, v: string) => <td class="fs-mono">{has ? v : '—'}</td>;
+  const cell = (has: boolean, v: string) => <td class="fs-mono">{has ? v : '-'}</td>;
   return (
     <Card title="PROGRAM LIMITS">
       {!sel ? <div class="fs-empty-sm">No program loaded.</div> : <>
@@ -294,7 +292,7 @@ export function LimitsCard() {
             {(['X', 'Y', 'Z'] as const).map(a => {
               const s = sel.stats, has = s['has' + a as 'hasX'];
               const lo = s[(a.toLowerCase() + 'Min') as 'xMin'], hi = s[(a.toLowerCase() + 'Max') as 'xMax'];
-              return <tr><th class="fs-axis-name">{a}</th>{cell(has, fix3(lo))}{cell(has, fix3(hi))}{cell(has, fix3(hi - lo))}</tr>;
+              return <tr><th class="fs-axis-name">{a}</th>{cell(has, fixed3(lo))}{cell(has, fixed3(hi))}{cell(has, fixed3(hi - lo))}</tr>;
             })}
           </tbody>
         </table>
@@ -318,13 +316,13 @@ export function LimitsCard() {
 
 // Surfacing
 
-const sfCfg = signal<surfacing.SurfacingConfig>(surfacing.loadSurfacingConfig());
+const surfacingConfig = signal<surfacing.SurfacingConfig>(surfacing.loadSurfacingConfig());
 
 function SurfacingCard() {
-  const c = sfCfg.value;
+  const c = surfacingConfig.value;
   const set = <K extends keyof surfacing.SurfacingConfig>(k: K, v: surfacing.SurfacingConfig[K]) => {
-    sfCfg.value = { ...sfCfg.value, [k]: v };
-    surfacing.saveSurfacingConfig(sfCfg.value);
+    surfacingConfig.value = { ...surfacingConfig.value, [k]: v };
+    surfacing.saveSurfacingConfig(surfacingConfig.value);
   };
   const field = (k: keyof surfacing.SurfacingConfig, label: string, step: number, min?: number, max?: number) => (
     <label class="fs-field"><span>{label}</span><NumIn value={c[k] as number} step={step} min={min} max={max} label={label} set={v => set(k, v as any)} /></label>
@@ -359,18 +357,18 @@ function SurfacingCard() {
         </div>
       </div>
       <div class="fs-grid2b">
-        <button type="button" class="fs-btn" title="Show the passes in the 3D view" onClick={() => loadPreview3D(surfacing.generateWaypoints(sfCfg.value))}>PREVIEW</button>
+        <button type="button" class="fs-btn" title="Show the passes in the 3D view" onClick={() => loadPreview3D(surfacing.generateWaypoints(surfacingConfig.value))}>PREVIEW</button>
         <button type="button" class="fs-btn fs-btn-go" title="Load the surfacing program as the job" onClick={() => {
-          const gcode = surfacing.generateGcode(sfCfg.value);
+          const gcode = surfacing.generateGcode(surfacingConfig.value);
           processGcode(gcode, 'Surfacing.nc');
-          log('info', `Surfacing G-code generated — ${gcode.split('\n').length} lines`);
+          log('info', `Surfacing G-code generated: ${gcode.split('\n').length} lines`);
         }}>GENERATE</button>
       </div>
     </Card>
   );
 }
 
-// ── Work offsets ──────────────────────────────────────────────────────────────
+// Work offsets
 
 type Edit = { x: string; y: string; z: string };
 
@@ -380,11 +378,11 @@ export function OffsetsTable() {
   const tlo = machine.tlo.value ?? 0;
   const active = machine.wcs.value;
   const [edits, setEdits] = useState<Record<string, Edit>>({});
-  // Read when it shows, as the old tab did.
+  // Read each time it shows.
   useEffect(() => { if (linked) loadOffsets(); }, [linked]);
   const rows = WCS_ENTRIES.filter(e => e.code === 'TLO' || offsets[e.code]);
   const edit = (code: string, axis: keyof Edit, v: string, base: machine.Vec3) => {
-    const cur = edits[code] ?? { x: fix3(base.x), y: fix3(base.y), z: fix3(base.z) };
+    const cur = edits[code] ?? { x: fixed3(base.x), y: fixed3(base.y), z: fixed3(base.z) };
     setEdits({ ...edits, [code]: { ...cur, [axis]: v } });
   };
   const drop = (code: string) => { const { [code]: _, ...rest } = edits; setEdits(rest); };
@@ -413,12 +411,12 @@ export function OffsetsTable() {
                 const dirty = !!e;
                 const input = (axis: keyof Edit) => {
                   // G28/G30 are shown, not edited: grblHAL stores them only from where the machine is (G28.1/G30.1),
-                  // they are usually left at home, and the console can still store them (owner, A6).
-                  if (isHome || (isTlo && axis !== 'z')) return <td class="fs-mono fs-dim">{fix3(base[axis])}</td>;
-                  if (isTlo) return <td class="fs-mono">{fix3(base.z)}</td>;
+                  // they are usually left at home, and the console can still store them.
+                  if (isHome || (isTlo && axis !== 'z')) return <td class="fs-mono fs-dim">{fixed3(base[axis])}</td>;
+                  if (isTlo) return <td class="fs-mono">{fixed3(base.z)}</td>;
                   return (
                     <td><input type="number" step="0.001" class="fs-in fs-mono" aria-label={code + ' ' + axis.toUpperCase()}
-                      value={e ? e[axis] : fix3(base[axis])}
+                      value={e ? e[axis] : fixed3(base[axis])}
                       onInput={ev => edit(code, axis, (ev.target as HTMLInputElement).value, base)}
                       onKeyDown={ev => { if (ev.key === 'Enter') write(code, base); }} /></td>
                   );
@@ -450,7 +448,7 @@ export function OffsetsTable() {
   );
 }
 
-// ── The screen ────────────────────────────────────────────────────────────────
+// The screen
 
 /** The window's width, for the number of columns. */
 export const width = signal(window.innerWidth);
@@ -478,7 +476,7 @@ function MachineCards() {
 
 export function SetupScreen() {
   const tab = ui.setupTab.value;
-  // Built only while it shows: the offsets are read when it opens, as the old tab did.
+  // Mounted only while it shows, so the offsets are read each time it opens.
   if (ui.screen.value !== 'setup') return null;
   return (
     <section class="fs-screen">

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // The app shell: top bar, position line, message line, screens, bottom bar
-// ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
@@ -32,7 +30,7 @@ import { IconHome, IconReady, IconPlay, IconPause, IconStop, IconWrench, IconWar
 
 const num = (v: number, digits = 0) => v.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-// ── Top bar ───────────────────────────────────────────────────────────────────
+// Top bar
 
 const SCREENS: [ui.Screen, string][] = [['job', 'JOB'], ['setup', 'SETUP'], ['probing', 'PROBING'], ['tools', 'TOOLS'], ['settings', 'SETTINGS']];
 
@@ -74,7 +72,7 @@ function TopBar() {
   );
 }
 
-// ── Position line ─────────────────────────────────────────────────────────────
+// Position line
 
 interface StateView { label: string; sub: string; tone: '' | 'go' | 'stop'; icon: ComponentChildren; }
 
@@ -103,7 +101,7 @@ function stateView(): StateView {
 }
 
 // Input pins (Pn:) shown on the position line: pin letters, label, name. E-stop lights on E (grblHAL) or R,
-// and the toolsetter on T, as the old Signals panel had it.
+// and the toolsetter on T.
 const SIGNALS: [string, string, string][] = [
   ['X', 'X', 'X limit'], ['Y', 'Y', 'Y limit'], ['Z', 'Z', 'Z limit'], ['P', 'PROBE', 'Probe'],
   ['T', 'TLS', 'Toolsetter'], ['D', 'DOOR', 'Door'], ['ER', 'E-STOP', 'E-stop'],
@@ -185,8 +183,6 @@ function PositionLine() {
         <button type="button" class={'fs-btn fs-btn-sm' + (ui.signalsShown.value ? ' is-on' : '')} aria-pressed={ui.signalsShown.value ? 'true' : 'false'}
           onClick={() => { ui.signalsShown.value = !ui.signalsShown.value; }}>SIGNALS</button>
         <button type="button" class="fs-wcs" title="The work offset in force: tap to pick another" onClick={() => { ui.popup.value = 'wcs'; }}>{wcs}</button>
-        {/* TO GO needs the end point of the executing line. The old parser can't give it reliably
-            (no G91, G20 or G53), so it waits for step 2's interpreter. */}
         <div role="group" aria-label="Position reference" class="fs-seg">
           {([['work', 'WORK'], ['machine', 'MACHINE']] as const).map(([id, label]) => (
             <button type="button" aria-pressed={ref === id ? 'true' : 'false'} class={ref === id ? 'is-on' : ''}
@@ -198,7 +194,7 @@ function PositionLine() {
   );
 }
 
-// ── Message line ──────────────────────────────────────────────────────────────
+// Message line
 
 function MessagesButton() {
   return (
@@ -235,7 +231,7 @@ function MessageLine() {
   const halt = job.halt.value;
   // The one next thing to do: connect, clear the alarm, home, load a program, then the job's own next step.
   if (m === 'alarm') {
-    // After a lost link the ALARM: line came while FlexiSender was away; the flight record keeps the code.
+    // After a lost link the ALARM: line came while BearSender was away; the flight record keeps the code.
     const record = flight.record.value;
     const code = machine.alarm.value ?? (job.result.value === 'link lost' && record?.alarm ? record.alarm : null);
     const text = code !== null ? alarmText(String(code)) : 'ALARM';
@@ -319,7 +315,7 @@ function MessageLine() {
   );
 }
 
-// ── Bottom bar ────────────────────────────────────────────────────────────────
+// Bottom bar
 
 // The overrides are on the job screen's Run tab (RunPanel.tsx).
 

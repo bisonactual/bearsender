@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // The job screen's Run tab: coolant and the overrides, which AUTO shows while a job runs
-// ═══════════════════════════════════════════════
 //
 // Everything here is a real-time byte (command.realtime): it goes to the controller at once and never
 // between a job's lines. What is lit is what the status report says (A: and Ov:), not what was pressed.
@@ -53,7 +51,7 @@ function Coolant() {
 
 interface Btn { label: string; bytes: string; aria: string; lit?: boolean; }
 
-function OvrRow({ label, pct, reading, buttons, note }: { label: string; pct: number; reading?: ComponentChildren; buttons: Btn[]; note?: string | null }) {
+function OverrideRow({ label, pct, reading, buttons, note }: { label: string; pct: number; reading?: ComponentChildren; buttons: Btn[]; note?: string | null }) {
   const off = !connection.connected.value;
   return (
     <div class="fs-runrow">
@@ -80,7 +78,7 @@ export function RunPanel() {
   return (
     <div class="fs-run-panel">
       <Coolant />
-      <OvrRow label="FEED" pct={ov.feed} reading={reading(machine.feed.value, 'mm/min')} buttons={[
+      <OverrideRow label="FEED" pct={ov.feed} reading={reading(machine.feed.value, 'mm/min')} buttons={[
         { label: '10%', bytes: '\x90' + '\x92'.repeat(9), aria: 'Feed override to 10%', lit: ov.feed === 10 },
         { label: '−10', bytes: '\x92', aria: 'Feed override down 10%' },
         { label: '−1', bytes: '\x94', aria: 'Feed override down 1%' },
@@ -88,12 +86,12 @@ export function RunPanel() {
         { label: '+1', bytes: '\x93', aria: 'Feed override up 1%' },
         { label: '+10', bytes: '\x91', aria: 'Feed override up 10%' },
       ]} />
-      <OvrRow label="RAPID" pct={ov.rapid} buttons={[
+      <OverrideRow label="RAPID" pct={ov.rapid} buttons={[
         { label: '10%', bytes: '\x97', aria: 'Rapid override to its lowest, 10% once the firmware is rebuilt', lit: low },
         { label: '50%', bytes: '\x96', aria: 'Rapid override to 50%', lit: ov.rapid === 50 },
         { label: '100%', bytes: '\x95', aria: 'Rapid override to 100%', lit: ov.rapid === 100 },
       ]} note={rapidNote} />
-      <OvrRow label="SPINDLE" pct={ov.spindle} reading={reading(machine.spindle.value, 'rpm')} buttons={[
+      <OverrideRow label="SPINDLE" pct={ov.spindle} reading={reading(machine.spindle.value, 'rpm')} buttons={[
         { label: '−10', bytes: '\x9B', aria: 'Spindle override down 10%' },
         { label: '−1', bytes: '\x9D', aria: 'Spindle override down 1%' },
         { label: '100%', bytes: '\x99', aria: 'Spindle override to 100%', lit: ov.spindle === 100 },

@@ -1,7 +1,5 @@
-// ═══════════════════════════════════════════════
 // The machine warmup: the Setup screen's Spindle warmup tab, the job screen's progress strip while it
 // runs, and the bottom bar's MACHINE WARMUP button, held for 5 s to start it (src/warmup.ts runs it).
-// ═══════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Signal } from '@preact/signals';
@@ -10,20 +8,20 @@ import * as machine from '../stores/machine';
 import * as job from '../stores/job';
 import * as wu from '../warmup';
 import { Card, NumIn, Columns, width } from './SetupScreen';
-import { Seg } from './ProbingScreen';
+import { Segmented } from './ProbingScreen';
 
 const num = (v: number) => v.toLocaleString('en-GB', { maximumFractionDigits: 3 });
 /** About how long: "about 6 min", "about 40 s". */
-const about = (secs: number) => 'about ' + (secs >= 90 ? Math.round(secs / 60) + ' min' : Math.round(secs) + ' s');
+const aboutText = (secs: number) => 'about ' + (secs >= 90 ? Math.round(secs / 60) + ' min' : Math.round(secs) + ' s');
 const patternName = (p: wu.Pattern) => wu.PATTERNS.find(([v]) => v === p)?.[1] ?? p;
 
 /** A machine setting as a number, or null before it has been read. */
-function setting(k: number): number | null {
+function settingValue(k: number): number | null {
   const v = parseFloat(machine.settings.value[k] ?? '');
   return Number.isFinite(v) ? v : null;
 }
 
-// ── The Setup tab ─────────────────────────────────────────────────────────────
+// The Setup tab
 
 function SummaryCard() {
   const isCold = wu.fromCold.value;
@@ -33,13 +31,13 @@ function SummaryCard() {
     <Card title="MACHINE WARMUP">
       <div class="fs-inline">
         <span class="fs-cap">RUNS</span>
-        <Seg label="Which routine MACHINE WARMUP runs" value={isCold ? 'cold' : 'normal'} set={v => { wu.fromCold.value = v === 'cold'; }}
+        <Segmented label="Which routine MACHINE WARMUP runs" value={isCold ? 'cold' : 'normal'} set={v => { wu.fromCold.value = v === 'cold'; }}
           opts={[['normal', 'NORMAL'], ['cold', 'FROM COLD']]} />
       </div>
       <div class="fs-note-sm">Turn on From cold when the machine hasn't run for a while, more than 3 days say.</div>
       <div class="fs-warm-est">
-        <div><span class="fs-cap">NORMAL</span> <span class="fs-mono">{about(wu.estimate(wu.normal.value, m))}</span></div>
-        <div><span class="fs-cap">FROM COLD</span> <span class="fs-mono">{about(wu.estimate(wu.cold.value, m))}</span></div>
+        <div><span class="fs-cap">NORMAL</span> <span class="fs-mono">{aboutText(wu.estimate(wu.normal.value, m))}</span></div>
+        <div><span class="fs-cap">FROM COLD</span> <span class="fs-mono">{aboutText(wu.estimate(wu.cold.value, m))}</span></div>
       </div>
       {p
         ? <div class="fs-pstatus is-run">{progressText(p)}</div>
@@ -53,7 +51,7 @@ function RoutineCard({ which }: { which: 'normal' | 'cold' }) {
   const r = sig.value;
   const set = (patch: Partial<wu.Routine>) => { sig.value = { ...sig.value, ...patch }; };
   const sp = wu.speeds(r);
-  const max = setting(30);
+  const max = settingValue(30);
   const over = max !== null && max > 0 && sp.some(s => s > max);
   const on = wu.fromCold.value === (which === 'cold');
   const each = r.minutes === 1 ? '1 min' : num(r.minutes) + ' min';
@@ -70,7 +68,7 @@ function RoutineCard({ which }: { which: 'normal' | 'cold' }) {
         <label class="fs-field"><span>Duration per step, min</span>
           <NumIn value={r.minutes} min={0.05} step={0.5} label="Duration per step, min" set={v => set({ minutes: Math.max(0.05, v) })} /></label>
       </div>
-      <div class="fs-note">{sp.map(num).join(' · ')} rpm, {each} each: {about(wu.estimate(r, wu.motion.value))} in all.</div>
+      <div class="fs-note">{sp.map(num).join(' · ')} rpm, {each} each: {aboutText(wu.estimate(r, wu.motion.value))} in all.</div>
       {over && <div class="fs-note is-warn">Over the controller's maximum spindle speed ($30 = {num(max!)} rpm): it runs those steps at {num(max!)}.</div>}
     </Card>
   );
@@ -87,7 +85,7 @@ function MotionCard() {
   // The routine the button runs, as it fits in the controller's input (warmup.ts): known once connected.
   const fit = connection.connected.value ? wu.fitted(wu.fromCold.value ? wu.cold.value : wu.normal.value, m) : null;
   // Machine travel as the frame check takes it: from 0 down to −$130 (X) and −$131 (Y).
-  const tx = setting(130), ty = setting(131);
+  const tx = settingValue(130), ty = settingValue(131);
   const past: string[] = [];
   if (usesX && tx !== null && p.x - m.xRange < -tx) past.push(`X to machine ${num(p.x - m.xRange)}, past the X travel ($130 = ${num(tx)} mm)`);
   if (usesY && ty !== null && p.y - m.yRange < -ty) past.push(`Y to machine ${num(p.y - m.yRange)}, past the Y travel ($131 = ${num(ty)} mm)`);
@@ -107,7 +105,7 @@ function MotionCard() {
           <NumIn value={m.feed} min={1} step={100} label="Feed, mm/min" set={v => set({ feed: Math.max(1, Math.round(v)) })} /></label>
       </div>
       <div class="fs-note">{moves
-        ? <>From the start point toward −X and −Y, and back to it. One pass is {about(each)}; each step runs whole passes for its time, then dwells what is left. Acceleration isn't counted.</>
+        ? <>From the start point toward −X and −Y, and back to it. One pass is {aboutText(each)}; each step runs whole passes for its time, then dwells what is left. Acceleration isn't counted.</>
         : <>The spindle runs at the start point; nothing moves.</>}</div>
       {past.length > 0 && <div class="fs-note is-warn">The pattern takes {past.join(', and ')}.</div>}
       {fit?.fit && fit.fit.sent < fit.fit.wanted && <div class="fs-note is-warn">

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
 // What the job screen shows, worked out from the stores
-// ═══════════════════════════════════════════════
 
 import { computed, effect, untracked } from '@preact/signals';
 import * as connection from '../stores/connection';
@@ -12,7 +10,7 @@ import * as program from '../stores/program';
 import type { ToolRow } from '../stores/program';
 import * as ui from './ui';
 
-/** The four states of the mockup (ready, running, change, alarm), plus hold and offline. */
+/** What the job screen shows: ready, running, a tool change or an alarm, plus hold and offline. */
 export type Mode = 'offline' | 'ready' | 'running' | 'hold' | 'change' | 'alarm';
 
 export const mode = computed<Mode>(() => {
@@ -50,10 +48,9 @@ export const recordToResume = computed(() => {
   return !!r && flight.enabled.value && (r.state === 'Stopped' || r.state === 'Retracted') && r.ln > 0 && UNEXPECTED.has(r.why);
 });
 
-/** AUTO, right panel: Setup before a start and at a tool change; Run while running (the owner, 3 Nov: it
- *  replaced the Camera if one is set up, otherwise the Recorder); the Recorder after a stop. An alarm opens
- *  the Recorder only after a stop or a lost link this session, or with a job to resume; a power-up alarm
- *  such as 11 (homing required) opens Setup. */
+/** AUTO, right panel: Setup before a start and at a tool change, Run while running, and the Recorder
+ *  after a stop. An alarm opens the Recorder only after a stop or a lost link since connecting, or with
+ *  a job to resume; a power-up alarm such as 11 (homing required) opens Setup. */
 export const autoPanel = computed<ui.Panel>(() => {
   const m = mode.value;
   if (m === 'running' || m === 'hold') return 'run';

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════
-// Icons, as drawn in the job screen mockup
-// ═══════════════════════════════════════════════
+// The shell's icons, as inline SVG.
 
 const line = { fill: 'none', stroke: 'currentColor', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } as const;
 
