@@ -36,77 +36,50 @@ async function centerFinder(cfg: any): Promise<boolean> {
   return true;
 }
 
+/** One pass: the two walls of a bore, or the two sides of a boss, in X and then in Y, each from close by.
+ *  A bore is probed at depth from inside: the probe goes near each wall (clear of it by the side
+ *  clearance, if the bore is that wide) and probes out to it. A boss is probed from outside: the probe
+ *  goes out past each side above it, down beside it, probes in, and comes up again. After each axis it
+ *  goes to the middle found, so the other axis is measured across the middle. */
 async function probeCenter(cfg: any, sp: { x: number; y: number; z: number }): Promise<{ x: number; y: number } | null> {
-  const clr = cfg.xyClr + cfg.probeDiameter / 2;
   const radius = cfg.probeDiameter / 2;
-  let x1: number | null = null, x2: number | null = null;
-  let y1: number | null = null, y2: number | null = null;
+  const clr = cfg.xyClr + radius;
+  const inside = cfg.centerMode === 'inside';
+  const at = { x: sp.x, y: sp.y };
+  const size: { X: number | null; Y: number | null } = { X: null, Y: null };
+  const rapidAlong = (k: 'x' | 'y', v: number) => rapidToMPos(k === 'x' ? v : null, k === 'y' ? v : null, null);
 
-  if (cfg.centerMode === 'inside') {
-    await rapidToMPos(null, null, sp.z - cfg.depth);
-  }
-
-  if (cfg.axes !== 'Y') {
-    const halfX = cfg.workpieceSizeX / 2;
-    if (cfg.centerMode === 'inside') {
-      const rapid = halfX - clr;
-      if (rapid > 1) await rapidToMPos(sp.x - rapid, null, null);
-      const r1 = await probeAxis('X', 1, cfg.probeFeedRate, cfg.latchFeedRate, halfX + clr, cfg.latchDistance);
-      if (!r1) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center X- probe failed'); return null; }
-      x1 = r1.x + radius;
-      await rapidToMPos(sp.x + rapid, null, null);
-      const r2 = await probeAxis('X', -1, cfg.probeFeedRate, cfg.latchFeedRate, halfX + clr, cfg.latchDistance);
-      if (!r2) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center X+ probe failed'); return null; }
-      x2 = r2.x - radius;
-    } else {
-      await rapidToMPos(sp.x - halfX - clr, null, null);
-      const r1 = await probeAxis('X', 1, cfg.probeFeedRate, cfg.latchFeedRate, halfX + clr + 5, cfg.latchDistance);
-      if (!r1) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center X- probe failed'); return null; }
-      x1 = r1.x - radius;
-      await rapidToMPos(null, null, sp.z);
-      await rapidToMPos(sp.x + halfX + clr, null, null);
-      await rapidToMPos(null, null, sp.z - cfg.depth);
-      const r2 = await probeAxis('X', -1, cfg.probeFeedRate, cfg.latchFeedRate, halfX + clr + 5, cfg.latchDistance);
-      if (!r2) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center X+ probe failed'); return null; }
-      x2 = r2.x + radius;
+  if (inside) await rapidToMPos(null, null, sp.z - cfg.depth);
+  for (const axis of ['X', 'Y'] as const) {
+    if (cfg.axes !== 'XY' && cfg.axes !== axis) continue;
+    const k = axis === 'X' ? 'x' : 'y';
+    const half = (axis === 'X' ? cfg.workpieceSizeX : cfg.workpieceSizeY) / 2;
+    const found: number[] = [];
+    for (const side of [-1, 1]) {
+      const name = axis + (side < 0 ? '-' : '+');
+      // The probe's direction of travel: out to a bore's wall, in to a boss's side.
+      const dir = inside ? side : -side;
+      if (inside) {
+        await rapidAlong(k, at[k] + side * Math.max(half - clr, 0));
+      } else {
+        await rapidToMPos(null, null, sp.z);
+        await rapidAlong(k, at[k] + side * (half + clr));
+        await rapidToMPos(null, null, sp.z - cfg.depth);
+      }
+      const r = await probeAxis(axis, dir, cfg.probeFeedRate, cfg.latchFeedRate, cfg.probeDistance, cfg.latchDistance);
+      if (!r) { await rapidToMPos(null, null, sp.z); log('err', `✗ Center ${name} probe failed`); return null; }
+      // The tip's centre stops a radius short of the wall or side.
+      found.push(r[k] + dir * radius);
+      if (!inside) await rapidToMPos(null, null, sp.z);
     }
-    await rapidToMPos(sp.x, null, null);
-  }
-
-  if (cfg.axes !== 'X') {
-    const halfY = cfg.workpieceSizeY / 2;
-    if (cfg.centerMode === 'inside') {
-      const rapid = halfY - clr;
-      if (rapid > 1) await rapidToMPos(null, sp.y - rapid, null);
-      const r1 = await probeAxis('Y', 1, cfg.probeFeedRate, cfg.latchFeedRate, halfY + clr, cfg.latchDistance);
-      if (!r1) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center Y- probe failed'); return null; }
-      y1 = r1.y + radius;
-      await rapidToMPos(null, sp.y + rapid, null);
-      const r2 = await probeAxis('Y', -1, cfg.probeFeedRate, cfg.latchFeedRate, halfY + clr, cfg.latchDistance);
-      if (!r2) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center Y+ probe failed'); return null; }
-      y2 = r2.y - radius;
-    } else {
-      await rapidToMPos(null, sp.y - halfY - clr, null);
-      const r1 = await probeAxis('Y', 1, cfg.probeFeedRate, cfg.latchFeedRate, halfY + clr + 5, cfg.latchDistance);
-      if (!r1) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center Y- probe failed'); return null; }
-      y1 = r1.y - radius;
-      await rapidToMPos(null, null, sp.z);
-      await rapidToMPos(null, sp.y + halfY + clr, null);
-      await rapidToMPos(null, null, sp.z - cfg.depth);
-      const r2 = await probeAxis('Y', -1, cfg.probeFeedRate, cfg.latchFeedRate, halfY + clr + 5, cfg.latchDistance);
-      if (!r2) { await rapidToMPos(null, null, sp.z); log('err', '✗ Center Y+ probe failed'); return null; }
-      y2 = r2.y + radius;
-    }
-    await rapidToMPos(null, sp.y, null);
+    at[k] = (found[0] + found[1]) / 2;
+    size[axis] = found[1] - found[0];
+    await rapidAlong(k, at[k]);
   }
 
   await rapidToMPos(null, null, sp.z);
-  const cx = (x1 !== null && x2 !== null) ? (x1 + x2) / 2 : sp.x;
-  const cy = (y1 !== null && y2 !== null) ? (y1 + y2) / 2 : sp.y;
-  const xDist = (x1 !== null && x2 !== null) ? Math.abs(x2 - x1) : null;
-  const yDist = (y1 !== null && y2 !== null) ? Math.abs(y2 - y1) : null;
-  if (xDist !== null || yDist !== null) {
-    log('info', `Center size:${xDist !== null ? ' X=' + xDist.toFixed(3) : ''}${yDist !== null ? ' Y=' + yDist.toFixed(3) : ''} mm`);
+  if (size.X !== null || size.Y !== null) {
+    log('info', `Center size:${size.X !== null ? ' X=' + size.X.toFixed(3) : ''}${size.Y !== null ? ' Y=' + size.Y.toFixed(3) : ''} mm`);
   }
-  return { x: cx, y: cy };
+  return at;
 }
