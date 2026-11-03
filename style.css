@@ -1521,47 +1521,151 @@
   .fs-wcs-sm { height: 26px; padding: 0 8px; font-size: 14px; }
   .fs-popup-cards .fs-mcard { width: 420px; max-width: 100%; }
   .fs-popup-body { width: min(1100px, 92vw); flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px; box-sizing: border-box; }
-  /* ── The Probing screen (src/app/ProbingScreen.tsx): the routine, the preview, position and jogging ── */
-  /* The routine's settings scroll; its status and buttons stay in view below them. */
-  .fs-mcard.fs-probe-card { flex: 1 1 auto; min-height: 0; }
-  .fs-probe-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
-  .fs-probe-body > * { flex-shrink: 0; }
-  .fs-probe-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
-  .fs-probe-btns { display: flex; flex-wrap: wrap; gap: 8px; }
-  .fs-probe-btns .fs-btn { flex: 1 1 auto; }
+  /* ── The Probing screen (src/app/ProbingScreen.tsx): three numbered columns, as the agreed mockup (3 Nov) ── */
+  /* 1 what to measure, 2 where it starts and what it does, 3 position and probe. Each scrolls inside itself;
+     column 3's status and buttons never scroll away. Below 1000 px: 1 over 2 on the left, 3 on the right. */
   .fs-pstatus { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 14px; color: var(--text2); }
   .fs-pstatus.is-run { border-color: var(--accent2); color: var(--accent); }
   .fs-pstatus.is-ok { border-color: var(--green2); color: var(--go-text); }
   .fs-pstatus.is-err { border-color: var(--red2); color: var(--stop-text); }
-  .fs-presult { font-size: 15px; color: var(--text); }
   .fs-btn.is-stop { border-color: var(--red); background: rgba(239, 68, 68, 0.12); color: var(--stop-text); }
   .fs-go-text { color: var(--go-text); }
   .fs-check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-mid); }
   .fs-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
 
-  /* Edges and corners laid out on the stock as seen from above; the dashed line is the stock's outline */
-  .fs-edgegrid { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: 400px; }
-  .fs-edgegrid::before { content: ''; position: absolute; inset: calc(100% / 6); border: 2px dashed var(--text3); border-radius: 4px; background: var(--surface); pointer-events: none; }
-  .fs-edge { position: relative; z-index: 1; height: 50px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid var(--border2); border-radius: 8px; background: var(--surface2); color: var(--text); font-family: var(--cond) !important; font-weight: 700; }
-  .fs-edge:hover:not(.is-on) { background: var(--surface3); }
-  .fs-edge.is-on { border-color: var(--text); background: var(--text); color: var(--bg); }
-  .fs-edge-id { font-size: 16px; letter-spacing: 0.06em; }
-  .fs-edge-side { font-family: var(--sans); font-size: 12px; font-weight: 400; color: var(--text2); }
-  .fs-edge.is-on .fs-edge-side { color: var(--bg); }
+  .fs-pb { flex: 1 1 auto; min-height: 0; display: grid; gap: 12px; padding: 12px 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1.38fr) minmax(0, .92fr); }
+  .fs-pbcol { min-height: 0; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .fs-pbhead { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px 0; }
+  .fs-pbhead .n { font-family: var(--mono); font-size: 13px; color: var(--bg); background: var(--text-mid); border-radius: 4px; padding: 0 5px; }
+  .fs-pbhead .t { font-family: var(--cond); font-size: 14px; font-weight: 700; letter-spacing: .13em; color: var(--text-mid); }
+  .fs-pbbody { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 9px; }
+  .fs-pbbody > * { flex: none; }
+  .fs-pbbody > .fs-views { flex: 1 1 auto; }
+  .fs-pbfoot { flex: none; padding: 10px 14px 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+  .fs-pdot { color: var(--go-text); }
 
-  /* The probe preview: from above and from the front, stepped or played */
-  .fs-mcard.fs-pv-card { flex: 1 0 auto; min-height: 380px; }
-  .fs-pv-title { font-family: var(--cond); font-size: 13px; letter-spacing: 0.06em; }
-  .fs-pv-views { flex: 1 1 auto; min-height: 220px; display: grid; grid-template-rows: 1fr 1fr; gap: 8px; }
-  .fs-pv-view { position: relative; min-height: 100px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); overflow: hidden; }
-  .fs-pv-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--text2); }
-  .fs-pv-ctl { display: flex; align-items: center; gap: 8px; }
-  .fs-pv-ctl .fs-btn { min-width: 44px; padding: 0 10px; }
-  .fs-pv-step { flex: 1 1 auto; min-width: 0; white-space: nowrap; font-size: 14px; color: var(--text-mid); }
-  .fs-pv-dro { display: flex; gap: 18px; font-size: 15px; }
-  .fs-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text2); }
-  .fs-legend i { display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+  /* Controls */
+  .fs-pseg { align-self: flex-start; max-width: 100%; }
+  .fs-pseg button { height: auto; min-height: 36px; padding: 2px 12px; border-left: 1px solid var(--border2); background: var(--surface2); font-size: 14px; letter-spacing: .06em; line-height: 1.1; }
+  .fs-pseg button:first-child { border-left: 0; }
+  .fs-pseg.is-full { align-self: stretch; }
+  .fs-pseg.is-full button { flex: 1 1 0; }
+  .fs-prow { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+  .fs-prow.fs-pmid { align-items: center; }
+  .fs-pfld { display: flex; flex-direction: column; gap: 3px; flex: 1 1 130px; min-width: 0; }
+  .fs-pfld > span:first-child { font-size: 13px; color: var(--text-mid); }
+  .fs-pin { display: flex; align-items: center; height: 36px; border: 1px solid var(--border2); border-radius: 8px; background: var(--bg); overflow: hidden; }
+  .fs-pin:focus-within { border-color: var(--accent); }
+  .fs-pin .fs-in { flex: 1 1 auto; width: auto; min-width: 0; height: 100%; border: 0; background: none; font-size: 16px; }
+  .fs-pin i { font-style: normal; font-size: 12px; color: var(--text2); padding-right: 8px; }
+  .fs-prow2 { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-mid); }
+  .fs-prow2 > span { flex: none; }
+  .fs-prow2 .fs-in { flex: 1 1 auto; }
+  .fs-psect { display: flex; flex-direction: column; gap: 7px; padding-top: 9px; border-top: 1px solid var(--surface3); }
+  .fs-psect .fs-note, .fs-pbbody > .fs-note { margin-top: 0; font-size: 13px; line-height: 1.35; }
+  .fs-note b { color: var(--text-mid); font-weight: 600; }
+  .fs-pchk { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 14px; color: var(--text-mid); }
+  .fs-pchk input { width: 20px; height: 20px; margin: 0; accent-color: var(--text); }
+  .fs-pset { flex-direction: row; align-items: center; gap: 10px; font-size: 12px; color: var(--text2); line-height: 1.35; }
+  .fs-pset > span { flex: 1 1 auto; min-width: 0; }
+  .fs-pset b { color: var(--text-mid); font-weight: 400; }
+  .fs-ptlo { font-size: 18px; }
+  .fs-ptlo .fs-dim { font-family: var(--sans); font-size: 13px; }
+
+  /* The picker: the part from above, a round target on each corner, side and the top */
+  .fs-picker { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 184px; min-height: 150px; border-radius: 10px; background: var(--bg); border: 1px solid var(--surface3); }
+  .fs-pk-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .fs-pk-lab { position: absolute; font-family: var(--cond); font-size: 11px; font-weight: 600; letter-spacing: .12em; color: var(--text2); text-align: center; line-height: 1.1; pointer-events: none; }
+  .fs-pk-lab.is-back { top: 4px; left: 0; right: 0; }
+  .fs-pk-lab.is-front { bottom: 4px; left: 0; right: 0; }
+  .fs-pk-lab.is-left { left: 5px; top: 50%; transform: translateY(-50%); }
+  .fs-pk-lab.is-right { right: 5px; top: 50%; transform: translateY(-50%); }
+  .fs-pk-t { position: absolute; width: 44px; height: 44px; transform: translate(-50%, -50%); border-radius: 50%; border: 0; background: none; padding: 0; display: flex; align-items: center; justify-content: center; }
+  .fs-pk-t::before { content: ""; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--text-mid); background: var(--surface2); box-sizing: border-box; }
+  .fs-pk-t:hover::before { border-color: var(--text); }
+  .fs-pk-t.is-on::before { width: 24px; height: 24px; background: var(--text); border: 5px solid var(--bg); box-shadow: 0 0 0 2px var(--text); }
+  .fs-pk-cap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  .fs-pk-cap .nm { font-family: var(--cond); font-size: 19px; font-weight: 600; letter-spacing: .03em; }
+  .fs-pk-cap .ds { font-size: 13px; color: var(--text2); }
+  .fs-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .fs-tile { border: 1px solid var(--border2); border-radius: 10px; background: var(--surface2); padding: 6px 6px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-mid); font-family: var(--cond) !important; font-size: 14px; font-weight: 700; letter-spacing: .06em; }
+  .fs-tile.is-on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .fs-tile-pic { display: block; width: 100%; }
+  .fs-tile-pic svg { display: block; width: 100%; height: auto; max-height: 96px; }
+
+  /* Where it starts, and the drawing from above and from the front */
+  .fs-where { font-size: 16px; line-height: 1.35; color: var(--text); }
+  .fs-where small { display: block; margin-top: 3px; font-size: 13px; color: var(--text2); }
+  .fs-where small.is-warn { color: var(--warn-text); }
+  .fs-views { min-height: 0; display: grid; gap: 8px; grid-template-rows: minmax(0, 1.45fr) minmax(0, 1fr); }
+  .fs-views.is-one { grid-template-rows: minmax(0, 1fr); }
+  .fs-vbox { position: relative; min-height: 0; border-radius: 10px; background: var(--bg); border: 1px solid var(--surface3); overflow: hidden; }
+  .fs-vbox svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .fs-vlab { position: absolute; left: 10px; top: 6px; font-family: var(--cond); font-size: 12px; font-weight: 700; letter-spacing: .14em; color: var(--text2); pointer-events: none; }
+  .fs-play { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .fs-play .fs-btn { min-width: 40px; }
+  .fs-pstep { flex: 1 1 160px; min-width: 0; font-size: 14px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fs-pxyz { font-size: 13px; white-space: nowrap; }
+  .fs-plegend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text2); }
+  .fs-plegend i { display: inline-block; vertical-align: middle; margin-right: 5px; }
+  .fs-plegend .is-rapid { width: 18px; border-top: 2px dashed var(--text2); }
+  .fs-plegend .is-probe { width: 18px; border-top: 2px solid var(--text); }
+  .fs-plegend .is-touch { width: 9px; height: 9px; border-radius: 50%; background: var(--go-text); }
+  .fs-plegend .is-start { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--warn-text); box-sizing: border-box; }
+  .fs-plegend .is-zero { width: 12px; height: 12px; background: linear-gradient(var(--accent), var(--accent)) center / 12px 2px no-repeat, linear-gradient(var(--accent), var(--accent)) center / 2px 12px no-repeat; }
+
+  /* Position and probe: the probe light, the jog pad, the status, the result, PROBE and CANCEL */
+  .fs-plamp { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 4px 10px; border: 1px solid var(--surface3); border-radius: 8px; background: var(--bg); font-size: 13px; color: var(--text2); }
+  .fs-lamp { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--text2); flex: none; box-sizing: border-box; }
+  .fs-plamp .w { flex: none; font-family: var(--cond); font-weight: 700; letter-spacing: .1em; color: var(--text-mid); font-size: 14px; }
+  .fs-plamp.is-hit .fs-lamp { background: var(--go-text); border-color: var(--go-text); box-shadow: 0 0 8px var(--green); }
+  .fs-plamp.is-hit .w { color: var(--go-text); }
+  .fs-pjog { display: flex; flex-direction: column; gap: 8px; }
+  .fs-pjog.is-off .fs-jog:not(.is-stop), .fs-pjog.is-off .fs-steps, .fs-pjog.is-off .fs-pjog-feed, .fs-pjog.is-off .fs-pjog-head .fs-seg { opacity: .45; pointer-events: none; }
+  .fs-pjog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .fs-pjgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .fs-pjgrid .fs-jog { height: 46px; font-size: 16px; }
+  .fs-pjgrid .fs-jog.is-diag { font-size: 20px; }
+  .fs-pjgrid .fs-jog.is-stop { font-size: 14px; }
+  .fs-pjog .fs-steps .fs-seg button { height: 30px; font-size: 13px; }
+  .fs-pjog-feed { display: flex; align-items: center; gap: 8px; }
+  .fs-pjog-feed .fs-pin { flex: 1 1 auto; }
+  .fs-pstatus2 { min-height: 38px; display: flex; align-items: center; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--surface3); font-size: 14px; color: var(--text-mid); background: var(--bg); }
+  .fs-pstatus2.is-run { border-color: var(--orange); color: #fdba74; }
+  .fs-pstatus2.is-ok { border-color: var(--green); color: var(--go-text); }
+  .fs-pstatus2.is-err { border-color: var(--red); color: var(--stop-text); }
+  .fs-pres { font-size: 13px; line-height: 1.5; color: var(--text-mid); padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--surface3); }
+  .fs-pres .k { display: inline-block; min-width: 7ch; color: var(--text2); }
+  .fs-pres .old { color: var(--text2); }
+  .fs-prunb { display: flex; gap: 8px; }
+  .fs-pgo, .fs-pcx, .fs-pap { height: 56px; border-radius: 10px; font-family: var(--cond) !important; font-weight: 700; }
+  .fs-pgo { flex: 1 1 auto; border: 0; background: var(--green); color: #052e12; font-size: 20px; letter-spacing: .1em; }
+  .fs-pcx { flex: 0 0 34%; border: 1px solid var(--border2); background: var(--surface2); color: var(--text-mid); font-size: 16px; letter-spacing: .08em; }
+  .fs-pcx.is-live { background: var(--red); border-color: var(--red); color: #1a0505; }
+  .fs-pap { flex: 1 1 auto; border: 2px solid var(--text); background: none; color: var(--text); font-size: 15px; letter-spacing: .06em; }
+
+  /* The job screen's PROBE and MEASURE popups, and Settings, Probe over the screen */
   .fs-probe-popup { flex: 1 1 auto; min-height: 0; width: min(1200px, 94vw); display: flex; flex-direction: column; }
+  .fs-pset-back { z-index: 850; }
+  .fs-probeset { width: min(560px, 90vw); }
+  .fs-probeset .fs-note { margin-top: 0; font-size: 13px; }
+
+  @media (max-width: 999px) {
+    .fs-pb { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1.1fr); grid-template-areas: "what run" "where run"; }
+    .fs-pb1 { grid-area: what; } .fs-pb2 { grid-area: where; } .fs-pb3 { grid-area: run; }
+    .fs-views { min-height: 220px; grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr); }
+  }
+  @media (max-height: 860px) and (min-width: 1000px) {
+    .fs-pjgrid .fs-jog { height: 42px; }
+    .fs-pgo, .fs-pcx, .fs-pap { height: 50px; }
+    .fs-picker { max-height: 180px; }
+    .fs-pbbody { gap: 8px; }
+  }
+  @media (max-height: 800px) {
+    .fs-plegend { display: none; }
+    .fs-where { font-size: 14px; }
+    .fs-where small { font-size: 12px; }
+  }
   /* ── Machine warmup (src/app/Warmup.tsx): the Setup tab, and the bottom bar's hold button ── */
   .fs-warm-est { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; }
   .fs-warm-tag { font-family: var(--cond); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--teal); }

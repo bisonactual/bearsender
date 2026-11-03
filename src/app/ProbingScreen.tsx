@@ -1,25 +1,35 @@
 // ═══════════════════════════════════════════════
-// The Probing screen: tool length, edge finder, centre finder and rotation, the probe preview, and
-// the position and jog cards to put the probe where a routine starts. The job screen's probe and
-// measure popups show the same routine and preview cards.
+// The Probing screen, as the agreed mockup (3 Nov): four routines, each in three numbered columns in the
+// order of the work. 1: what to measure, picked on a picture of the part. 2: where to start the probe
+// and what it does, drawn from the routine itself (plan.ts). 3: the probe light, the jog pad, then the
+// status, the result and PROBE and CANCEL, always in view. The job screen's PROBE and MEASURE popups
+// show the same columns.
 // ═══════════════════════════════════════════════
 
 import type { ComponentChildren } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { signal, effect } from '@preact/signals';
 import type { Signal } from '@preact/signals';
 import * as connection from '../stores/connection';
 import * as machine from '../stores/machine';
 import * as job from '../stores/job';
+import * as jog from '../jog';
 import * as ui from './ui';
 import * as pr from '../probing/routines';
-import * as pv from '../probing/preview';
+import * as ps from '../probing/settings';
+import { makePlan, CORNER_NAMES } from '../probing/plan';
+import type { Plan, PlanInputs, Routine } from '../probing/plan';
+import { viewSvg, pickerSvg, pickAt, tileSvg } from '../probing/drawing';
+import type { ViewState } from '../probing/drawing';
+import { SIDES } from '../probing/edge-finder';
 import { getActiveWcs } from '../probing/probe-program';
-import { Card, NumIn, PositionCard, JogCard, width } from './SetupScreen';
+import { JogButton, Steps, NumIn } from './SetupScreen';
+import { ProbeSettingsCard, UnitField } from './ProbeSettings';
 
-const fix3 = (v: number) => v.toFixed(3);
-const WCS9 = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'G59.1', 'G59.2', 'G59.3'];
-
-const PROBING_TABS: [ui.ProbingTab, string][] = [['tl', 'TOOL LENGTH'], ['ef', 'EDGE FINDER'], ['cf', 'CENTRE FINDER'], ['rot', 'ROTATION']];
+const f3 = (v: number) => (v < 0 ? '−' : '') + Math.abs(v).toFixed(3);
+const ROUTINES: Routine[] = ['tl', 'ef', 'cf', 'rot'];
+const PROBING_TABS: [ui.ProbingTab, string][] = [['tl', 'TOOL LENGTH'], ['ef', 'EDGE & CORNER'], ['cf', 'CENTRE'], ['rot', 'ROTATION']];
+const TAB_NAME = Object.fromEntries(PROBING_TABS) as Record<Routine, string>;
 
 export function Seg<T extends string>({ value, set, opts, label }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string }) {
   return (
@@ -29,238 +39,389 @@ export function Seg<T extends string>({ value, set, opts, label }: { value: T; s
   );
 }
 
-type NumKey<T> = { [K in keyof T]: T[K] extends number ? K : never }[keyof T];
-type FieldDef<T> = [NumKey<T>, string, number, number?, number?];
-
-/** Number fields for a routine's settings, kept as they change. */
-function Fields<T extends object>({ sub, sig, list }: { sub: pr.Routine; sig: Signal<T>; list: FieldDef<T>[] }) {
-  const c = sig.value;
+/** The mockup's segmented choice: taller text, and the full width with `full`. */
+function Choice<T extends string>({ value, set, opts, label, full }: { value: T; set: (v: T) => void; opts: [T, string][]; label: string; full?: boolean }) {
   return (
-    <div class="fs-fields">
-      {list.map(([k, label, step, min, max]) => (
-        <label class="fs-field"><span>{label}</span>
-          <NumIn value={c[k] as unknown as number} step={step} min={min} max={max} label={label} set={v => pr.update(sub, sig, { [k]: v } as Partial<T>)} />
-        </label>
+    <div role="radiogroup" aria-label={label} class={'fs-seg fs-pseg' + (full ? ' is-full' : '')}>
+      {opts.map(([v, t]) => <button type="button" role="radio" aria-checked={v === value ? 'true' : 'false'} class={v === value ? 'is-on' : ''} onClick={() => set(v)}>{t}</button>)}
+    </div>
+  );
+}
+
+// ── Each routine's plan, for its drawing: a dry run whenever what it depends on changes ──
+
+function inputs(): PlanInputs {
+  const linked = connection.connected.value;
+  return {
+    P: ps.probe.value, tl: pr.tl.value, ef: pr.ef.value, efEdge: pr.efEdge.value, cf: pr.cf.value, rot: pr.rot.value,
+    ts: machine.offsets.value['G59.3'] ?? null,
+    // Where the machine is matters to the toolsetter's drawing only; it is read when the rest changes, not followed.
+    at: linked ? machine.mpos.peek() : null,
+  };
+}
+
+const plans = signal<Partial<Record<Routine, Plan>>>({});
+let planSeq = 0;
+effect(() => {
+  const inp = inputs(), n = ++planSeq;
+  Promise.all(ROUTINES.map(r => makePlan(r, inp))).then(list => {
+    if (n === planSeq) plans.value = Object.fromEntries(list.map(p => [p.r, p]));
+  });
+});
+
+/** The preview's step, per routine, and whether the drawing follows a run that ended badly (until the
+ *  preview is stepped). */
+const pvStep = signal<Record<Routine, number>>({ tl: 0, ef: 0, cf: 0, rot: 0 });
+const pvFree = signal<Record<Routine, boolean>>({ tl: true, ef: true, cf: true, rot: true });
+let pvTimer: ReturnType<typeof setInterval> | null = null;
+const pvPlaying = signal<Routine | null>(null);
+
+function setStep(r: Routine, i: number): void {
+  pvStep.value = { ...pvStep.value, [r]: i };
+  pvFree.value = { ...pvFree.value, [r]: true };
+}
+function stopPlay(): void { if (pvTimer) clearInterval(pvTimer); pvTimer = null; pvPlaying.value = null; }
+function play(r: Routine, n: number): void {
+  if (pvPlaying.value === r) { stopPlay(); return; }
+  stopPlay();
+  setStep(r, 0);
+  pvPlaying.value = r;
+  pvTimer = setInterval(() => {
+    const i = pvStep.value[r];
+    if (i >= n - 1) { stopPlay(); return; }
+    setStep(r, i + 1);
+  }, 420);
+}
+
+const settingsOpen = signal(false);
+
+async function probeNow(r: Routine, asReference = false): Promise<void> {
+  stopPlay();
+  // Planned again now, from where the machine is: the drawing then follows the run step for step.
+  const plan = await makePlan(r, { ...inputs(), at: machine.mpos.peek() });
+  pvFree.value = { ...pvFree.value, [r]: false };
+  if (r === 'tl') await pr.measureTool(asReference, plan);
+  else if (r === 'ef') await pr.findEdge(plan);
+  else if (r === 'cf') await pr.findCentre(plan);
+  else await pr.measureRotation(plan);
+  const run = pr.runs.value[r];
+  if (run?.phase === 'ok' && run.plan) pvStep.value = { ...pvStep.value, [r]: run.plan.wps.length - 1 };
+}
+
+// ── Column 1: what to measure ─────────────────────────────────────────────────
+
+const WCS8 = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'G59.1', 'G59.2'];
+
+/** Where a result goes, in plain words. */
+function TargetBlock({ sig, what }: { sig: Signal<pr.Target>; what: string }) {
+  const t = sig.value;
+  const tell = t.mode === 'G10' ? `Writes ${what} into the offset (G10 L2). Kept until changed.` : 'Shows what it found and changes nothing.';
+  return (
+    <div class="fs-psect">
+      <div class="fs-cap">RESULT</div>
+      <label class="fs-prow2"><span>Set the zero in</span>
+        <select class="fs-in" aria-label="Work offset to set the zero in" value={t.wcs} onChange={e => { sig.value = { ...t, wcs: (e.target as HTMLSelectElement).value }; }}>
+          <option value="">{getActiveWcs()} · the active one</option>
+          {WCS8.map(o => <option value={o}>{o}</option>)}
+          <option value="G59.3">G59.3 · the toolsetter's place</option>
+        </select>
+      </label>
+      <Choice label="How the result is used" full value={t.mode} set={v => { sig.value = { ...t, mode: v }; }} opts={[['G10', 'SAVE IT'], ['measure', 'JUST MEASURE']]} />
+      <div class="fs-note">{tell}</div>
+    </div>
+  );
+}
+
+/** The probe settings in one line, and the way to them. */
+function ProbeLine() {
+  const P = ps.probe.value;
+  return (
+    <div class="fs-psect fs-pset">
+      <span>Probe: tip Ø <b class="fs-mono">{P.tip.toFixed(3)}</b> · fast <b class="fs-mono">{P.fast}</b>, slow <b class="fs-mono">{P.slow}</b> mm/min · back off <b class="fs-mono">{P.back}</b> · clearance <b class="fs-mono">{P.clear}</b> · search <b class="fs-mono">{P.search}</b> mm</span>
+      <button type="button" class="fs-btn fs-btn-sm" onClick={() => { settingsOpen.value = true; }}>PROBE SETTINGS</button>
+    </div>
+  );
+}
+
+/** Measures an element as it is laid out, for the drawings. */
+function useSize<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setSize(s => s.w === el.clientWidth && s.h === el.clientHeight ? s : { w: el.clientWidth, h: el.clientHeight });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size] as const;
+}
+
+const SIDE_IDS = ['CD', 'AD', 'CB', 'AB'];
+
+function pickName(id: string, ins: boolean): string {
+  if (id === 'Z') return ins ? 'Pocket floor' : 'Top surface';
+  const n = id.length === 1 ? CORNER_NAMES[id] : `${SIDES[id].name} ${ins ? 'wall' : 'side'}`;
+  return n[0].toUpperCase() + n.slice(1);
+}
+
+/** The part from above with a round target on each corner, side and the top; rotation shows the sides only. */
+function Picker({ kind }: { kind: 'ef' | 'rot' }) {
+  const [ref, size] = useSize<HTMLDivElement>();
+  const ins = kind === 'ef' && pr.ef.value.mode === 'internal';
+  const pick = kind === 'ef' ? pr.efEdge.value : pr.rot.value.edge;
+  const ids = kind === 'ef' ? Object.keys(CORNER_NAMES).concat(Object.keys(SIDES), ['Z']) : SIDE_IDS;
+  return (
+    <div class="fs-picker" ref={ref} role="radiogroup" aria-label={kind === 'ef' ? 'Corner, side or surface' : 'Side to measure along'}>
+      <svg class="fs-pk-svg" aria-hidden="true" viewBox={`0 0 ${size.w || 1} ${size.h || 1}`} dangerouslySetInnerHTML={{ __html: pickerSvg(size.w, size.h, pick, ins, kind === 'rot') }} />
+      <span class="fs-pk-lab is-back">BACK · Y+</span><span class="fs-pk-lab is-front">FRONT · Y−</span>
+      <span class="fs-pk-lab is-left">LEFT<br />X−</span><span class="fs-pk-lab is-right">RIGHT<br />X+</span>
+      {ids.map(id => {
+        const [x, y] = pickAt(id), name = kind === 'rot' ? pickName(id, false) : pickName(id, ins);
+        return <button type="button" class={'fs-pk-t' + (pick === id ? ' is-on' : '')} role="radio" aria-checked={pick === id ? 'true' : 'false'}
+          aria-label={name} title={`${name} (${id})`} style={{ left: x + '%', top: y + '%' }}
+          onClick={() => kind === 'ef' ? pr.pickEdge(id) : pr.update('rot', pr.rot, { edge: id as pr.RotEdge })} />;
+      })}
+    </div>
+  );
+}
+
+function Tiles<T extends 'bore' | 'boss' | 'plate' | 'setter', V extends string>({ label, value, opts, set }: { label: string; value: V; opts: [V, T, string][]; set: (v: V) => void }) {
+  return (
+    <div class="fs-tiles" role="radiogroup" aria-label={label}>
+      {opts.map(([v, pic, t]) => (
+        <button type="button" role="radio" aria-checked={v === value ? 'true' : 'false'} class={'fs-tile' + (v === value ? ' is-on' : '')} onClick={() => set(v)}>
+          <span class="fs-tile-pic" dangerouslySetInnerHTML={{ __html: tileSvg(pic) }} />{t}
+        </button>
       ))}
     </div>
   );
 }
 
-const FEEDS: FieldDef<{ probeFeedRate: number; latchFeedRate: number; probeDistance: number; latchDistance: number }>[] = [
-  ['probeFeedRate', 'Probe feed, mm/min', 10, 1], ['latchFeedRate', 'Latch feed, mm/min', 5, 1],
-  ['probeDistance', 'Probe distance, mm', 1, 1], ['latchDistance', 'Latch distance, mm', 0.1, 0.1],
-];
+function EdgeWhat() {
+  const c = pr.ef.value, ins = c.mode === 'internal', pick = pr.efEdge.value;
+  const set = (p: Partial<pr.EfCfg>) => pr.update('ef', pr.ef, p);
+  const kind = !pick ? '' : pick === 'Z' ? 'z' : pick.length === 2 ? 's' : 'c';
+  const sets = kind === 'c' ? 'sets X and Y' + (c.probeZ ? ' and Z' : '') : kind === 's' ? 'sets ' + SIDES[pick!].axis : 'sets Z';
+  return <>
+    <Choice label="Probe from" full value={c.mode} set={v => set({ mode: v })} opts={[['external', 'OUTSIDE THE PART'], ['internal', 'INSIDE A POCKET']]} />
+    <Picker kind="ef" />
+    {pick ? <div class="fs-pk-cap"><span class="nm">{pickName(pick, ins)}</span><span class="ds">{sets} · was “{pick}”</span></div>
+      : <div class="fs-pk-cap"><span class="ds">Pick a corner, a side or the top: tap its target.</span></div>}
+    {kind === 'c' && <label class="fs-pchk"><input type="checkbox" checked={c.probeZ} onChange={e => set({ probeZ: (e.target as HTMLInputElement).checked })} /> Also probe Z {ins ? 'on the pocket floor' : 'on the top'} at the corner</label>}
+    {kind && <div class="fs-prow">
+      {kind === 'c' && <UnitField label="Touch the sides this far from the corner" value={c.offset} unit="mm" step={1} min={0} set={v => set({ offset: v })} />}
+      {kind !== 'z' && <UnitField label="Probe this far below the start" value={c.depth} unit="mm" step={0.5} min={0} set={v => set({ depth: v })} />}
+      {(kind === 'z' || c.probeZ) && <>
+        <UnitField label="Plate under the probe (0 = none)" value={c.touchPlateHeight} unit="mm" step={0.1} min={0} set={v => set({ touchPlateHeight: v })} />
+        <UnitField label={`Put Z0 this far below the ${ins ? 'floor' : 'top'}`} value={c.workpieceHeight} unit="mm" step={0.1} set={v => set({ workpieceHeight: v })} />
+      </>}
+    </div>}
+    <TargetBlock sig={pr.efTarget} what={kind === 'c' ? (c.probeZ ? 'X, Y and Z' : 'X and Y') : kind === 's' ? SIDES[pick!].axis : kind === 'z' ? 'Z' : 'the zero'} />
+    <ProbeLine />
+  </>;
+}
 
-/** Where an edge or centre result is written. */
-function TargetFields({ sig }: { sig: Signal<pr.Target> }) {
-  const t = sig.value;
+function CentreWhat() {
+  const c = pr.cf.value;
+  const set = (p: Partial<typeof c>) => pr.update('cf', pr.cf, p);
+  return <>
+    <Tiles label="Centre of" value={c.centerMode} set={v => set({ centerMode: v })} opts={[['inside', 'bore', 'BORE · INSIDE'], ['outside', 'boss', 'BOSS · OUTSIDE']]} />
+    <div class="fs-prow fs-pmid"><span class="fs-cap">FIND</span><Choice label="Axes" value={c.axes} set={v => set({ axes: v })} opts={[['XY', 'X AND Y'], ['X', 'X ONLY'], ['Y', 'Y ONLY']]} /></div>
+    <div class="fs-prow">
+      <UnitField label="Size in X, about" value={c.workpieceSizeX} unit="mm" step={1} min={0} set={v => set({ workpieceSizeX: v })} />
+      <UnitField label="Size in Y, about" value={c.workpieceSizeY} unit="mm" step={1} min={0} set={v => set({ workpieceSizeY: v })} />
+    </div>
+    <div class="fs-prow">
+      <UnitField label="Probe this far below the start" value={c.depth} unit="mm" step={0.5} min={0} set={v => set({ depth: v })} />
+      <UnitField label="Times round" value={c.passes} unit="×" step={1} min={1} set={v => set({ passes: Math.max(1, Math.round(v)) })} />
+    </div>
+    <TargetBlock sig={pr.cfTarget} what={c.axes === 'XY' ? 'X and Y' : c.axes} />
+    <ProbeLine />
+  </>;
+}
+
+function RotationWhat() {
+  const c = pr.rot.value;
+  const file = job.file.value;
+  return <>
+    <Picker kind="rot" />
+    <div class="fs-pk-cap"><span class="nm">{pickName(c.edge, false)}</span><span class="ds">two points along it give the angle · was “{c.edge}”</span></div>
+    <div class="fs-prow">
+      <UnitField label="Second point this far along" value={c.offset} unit="mm" step={5} min={1} set={v => pr.update('rot', pr.rot, { offset: v })} />
+      <UnitField label="Probe this far below the start" value={c.depth} unit="mm" step={0.5} min={0} set={v => pr.update('rot', pr.rot, { depth: v })} />
+    </div>
+    <div class="fs-psect"><div class="fs-cap">RESULT</div>
+      <div class="fs-note">The angle shows in column 3. <b>APPLY ROTATION</b> then turns {file ? <b>{file}</b> : 'the loaded program'} about X0 Y0 by that angle, once. No work offset is written.{job.lines.value.length ? '' : ' No program is loaded.'}</div>
+    </div>
+    <ProbeLine />
+  </>;
+}
+
+function ToolWhat() {
+  const c = pr.tl.value;
+  const set = (p: Partial<pr.TlCfg>) => pr.update('tl', pr.tl, p);
+  const tlo = machine.tlo.value, tool = machine.tool.value;
+  const linked = connection.connected.value, busy = !!pr.running.value;
+  const when = c.refAt ? new Date(c.refAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  return <>
+    <Tiles label="Measure on" value={c.mode} set={v => set({ mode: v })} opts={[['touchplate', 'plate', 'ON A TOUCH PLATE'], ['toolsetter', 'setter', 'ON THE TOOLSETTER']]} />
+    <div class="fs-prow">
+      {c.mode === 'touchplate' ? <>
+        <UnitField label="Plate thickness" value={c.touchPlateHeight} unit="mm" step={0.1} min={0} set={v => set({ touchPlateHeight: v })} />
+        <UnitField label="Search down up to" value={c.probeDistance} unit="mm" step={1} min={1} set={v => set({ probeDistance: v })} />
+      </> : <UnitField label="Stop this far above the toolsetter" value={c.toolsetterDepth} unit="mm" step={1} min={1} set={v => set({ toolsetterDepth: v })} />}
+    </div>
+    <div class="fs-psect"><div class="fs-cap">REFERENCE TOOL</div>
+      <div class="fs-note">{c.tloReference === null
+        ? <><b>Not set.</b> Measure the reference tool first. Every later tool is measured against it, and the difference becomes its tool length offset.</>
+        : <><b>{c.refTool !== null && c.refTool !== undefined ? 'T' + c.refTool : 'The reference tool'}, touched at machine Z <span class="fs-mono">{f3(c.tloReference)}</span></b>{when ? ', ' + when : ''}. Later tools are measured against it.</>}</div>
+      <div class="fs-row-gap">
+        <button type="button" class="fs-btn" disabled={!linked || busy} title="Probe this tool as the reference the others are measured from" onClick={() => probeNow('tl', true)}>MEASURE AS REFERENCE</button>
+        {c.tloReference !== null && <button type="button" class="fs-btn" title="Forget the reference and cancel the tool length offset (G49)" onClick={() => pr.clearReference()}>CLEAR</button>}
+      </div>
+    </div>
+    <div class="fs-psect"><div class="fs-cap">TOOL LENGTH OFFSET NOW</div>
+      <div class="fs-mono fs-ptlo">{tlo === null ? 'not read' : f3(tlo)} <span class="fs-dim">mm{tool !== null ? ` · T${tool} in the spindle` : ''}</span></div>
+      <div class="fs-note">At a tool change in a job, the job screen's MEASURE has the controller measure the tool itself ($TPW).</div>
+    </div>
+    <ProbeLine />
+  </>;
+}
+
+function What({ tab }: { tab: Routine }) {
+  return tab === 'tl' ? <ToolWhat /> : tab === 'ef' ? <EdgeWhat /> : tab === 'cf' ? <CentreWhat /> : <RotationWhat />;
+}
+
+// ── Column 2: where it starts, and what it does ───────────────────────────────
+
+let viewIds = 0;
+
+function View({ v, m, s }: { v: 'xy' | 'xz'; m: Plan; s: ViewState }) {
+  const [ref, size] = useSize<HTMLDivElement>();
+  const id = useRef('pv' + ++viewIds).current;
   return (
-    <div class="fs-fields">
-      <label class="fs-field"><span>Write to</span>
-        <select class="fs-in" aria-label="Work offset to write" value={t.wcs} onChange={e => { sig.value = { ...t, wcs: (e.target as HTMLSelectElement).value }; }}>
-          <option value="">Active ({getActiveWcs()})</option>
-          {WCS9.map(o => <option value={o}>{o === 'G59.3' ? 'G59.3 (toolsetter)' : o}</option>)}
-        </select>
-      </label>
-      <label class="fs-field"><span>As</span>
-        <select class="fs-in" aria-label="How the result is written" value={t.mode} onChange={e => { sig.value = { ...t, mode: (e.target as HTMLSelectElement).value as pr.Target['mode'] }; }}>
-          <option value="G10">G10: kept</option>
-          <option value="G92">G92: this session</option>
-          <option value="measure">Measure only</option>
-        </select>
-      </label>
+    <div class="fs-vbox" ref={ref}>
+      <svg role="img" aria-label={v === 'xy' ? 'From above' : 'From the front'} viewBox={`0 0 ${size.w || 1} ${size.h || 1}`}
+        dangerouslySetInnerHTML={{ __html: viewSvg(size.w, size.h, v, m, s, id) }} />
+      <span class="fs-vlab">{v === 'xy' ? 'FROM ABOVE' : 'FROM THE FRONT'}</span>
     </div>
   );
 }
 
-/** The routine's status, its result, and its buttons: always in view, below the settings. */
-function Foot({ r, run, result, extra }: { r: pr.Routine; run: () => void; result?: string; extra?: ComponentChildren }) {
+function Where({ tab, plan }: { tab: Routine; plan: Plan | null }) {
+  const run = pr.runs.value[tab];
+  const runningHere = pr.running.value === tab;
+  // A run on show follows its own plan: under way, or ended in a miss or a cancel, until the preview is stepped.
+  const follow = !!run?.plan && run.start && (runningHere || ((run.phase === 'fail' || run.phase === 'cancelled') && !pvFree.value[tab]));
+  const m = follow ? run!.plan! : plan;
+  if (!m) return <div class="fs-where">…</div>;
+  const n = m.wps.length;
+  const cur = follow ? Math.min(run!.step, n - 1) : Math.min(pvStep.value[tab], Math.max(n - 1, 0));
+  let at = null;
+  if (follow && n) {
+    const p = machine.mpos.value, s0 = run!.start!, w0 = m.wps[0];
+    at = { x: w0.x + p.x - s0.x, y: w0.y + p.y - s0.y, z: w0.z + p.z - s0.z };
+  }
+  const ok = run?.phase === 'ok';
+  const s: ViewState = { cur, live: !!follow || ok, showRes: !follow, at, tip: ps.probe.value.tip, angle: tab === 'rot' && ok ? pr.rotAngle.value ?? lastAngle(run) : null };
+  const w = m.wps[cur], w0 = m.wps[0];
+  const busy = !!pr.running.value;
+  return <>
+    <div class="fs-where">{m.where}<small>{m.sub}</small>{m.warn && <small class="is-warn">{m.warn}</small>}</div>
+    {n > 0 && <div class={'fs-views' + (m.views.length === 1 ? ' is-one' : '')}>
+      {m.views.map(v => <View v={v} m={m} s={s} />)}
+    </div>}
+    {n > 0 && <div class="fs-play">
+      <button type="button" class="fs-btn fs-btn-sm" aria-label="Previous move" disabled={busy || cur <= 0} onClick={() => { stopPlay(); setStep(tab, cur - 1); }}>◀</button>
+      <button type="button" class="fs-btn fs-btn-sm" aria-label={pvPlaying.value === tab ? 'Pause' : 'Play the moves'} disabled={busy} onClick={() => play(tab, n)}>{pvPlaying.value === tab ? '❚❚' : '▶'}</button>
+      <button type="button" class="fs-btn fs-btn-sm" aria-label="Next move" disabled={busy || cur >= n - 1} onClick={() => { stopPlay(); setStep(tab, cur + 1); }}>▶|</button>
+      <span class="fs-pstep">{cur + 1} / {n} · {follow && run ? run.label : w.label}</span>
+      <span class="fs-mono fs-dim fs-pxyz" title="This step's position, mm from where the probe starts">X {f3(w.x - w0.x)} Y {f3(w.y - w0.y)} Z {f3(w.z - w0.z)}</span>
+      <button type="button" class="fs-btn fs-btn-sm" title="Draw these moves in the job screen's 3D view" onClick={() => pr.show3d(m)}>3D VIEW</button>
+    </div>}
+    {n > 0 && <div class="fs-plegend" aria-label="Key">
+      <span><i class="is-rapid" />Rapid</span><span><i class="is-probe" />Probe move</span><span><i class="is-touch" />Touch</span>
+      <span><i class="is-start" />Start</span><span><i class="is-zero" />New zero</span>
+    </div>}
+  </>;
+}
+
+/** Rotation's angle from its result line, once APPLY has cleared the one to apply. */
+function lastAngle(run: pr.Run | undefined): number | null {
+  const v = run?.lines.find(l => l.k === 'ANGLE')?.v;
+  return v ? parseFloat(v) : null;
+}
+
+// ── Column 3: the probe light, the jog pad, then the status, the result and the buttons ──
+
+function ProbeLight({ tab }: { tab: Routine }) {
+  const linked = connection.connected.value;
+  const hit = linked && machine.pins.value.includes('P');
+  const what = tab === 'tl' && pr.tl.value.mode === 'touchplate' ? 'plate on the tool' : 'stylus';
+  return (
+    <div class={'fs-plamp' + (hit ? ' is-hit' : '')} role="status">
+      <span class="fs-lamp" /><span class="w">PROBE {!linked ? '—' : hit ? 'TOUCHING' : 'OPEN'}</span>
+      <span>{!linked ? 'Not connected: this follows the controller\'s probe input.' : hit ? 'Contact.' : `Tap the ${what}: this lights when the probe triggers.`}</span>
+    </div>
+  );
+}
+
+const PAD: [string, string][] = [['X-Y+', '↖'], ['Y+', 'Y+'], ['X+Y+', '↗'], ['Z+', 'Z+'], ['X-', 'X−'], ['STOP', 'STOP'], ['X+', 'X+'], ['Z-', 'Z−'], ['X-Y-', '↙'], ['Y-', 'Y−'], ['X+Y-', '↘'], ['XY0', 'XY0']];
+
+/** The jog pad, compact: no feed slider here (the owner, 3 Nov), the feed as a number. */
+function ProbeJog() {
+  const hold = jog.holdMode.value, linked = connection.connected.value;
+  const busy = !!pr.running.value;
+  const maxF = Math.max(jog.maxXY.value, jog.maxZ.value);
+  return (
+    <div class={'fs-pjog' + (busy ? ' is-off' : '')} aria-label="Jog">
+      <div class="fs-pjog-head"><span class="fs-cap">JOG</span>
+        <div role="group" aria-label="Jog mode" class="fs-seg fs-seg-sm" title="Click: one step per tap. Hold: jogs while held, stops on release">
+          <button type="button" class={!hold ? 'is-on' : ''} aria-pressed={!hold ? 'true' : 'false'} onClick={() => jog.setHoldMode(false)}>CLICK</button>
+          <button type="button" class={hold ? 'is-on' : ''} aria-pressed={hold ? 'true' : 'false'} onClick={() => jog.setHoldMode(true)}>HOLD</button>
+        </div>
+      </div>
+      <div class="fs-pjgrid">
+        {PAD.map(([d, t]) => d === 'STOP' ? <button type="button" class="fs-jog is-stop" disabled={!linked} onClick={() => jog.stopJog()}>STOP</button>
+          : d === 'XY0' ? <button type="button" class="fs-jog" disabled={!linked} title="Rapid to X0 Y0 in the active work offset" onClick={() => jog.goToXY0()}>XY0</button>
+          : <JogButton dir={d} label={t} />)}
+      </div>
+      <Steps label="XY" steps={jog.stepsXY.value} value={jog.stepXY.value} set={v => { jog.stepXY.value = v; }} />
+      <Steps label="Z" steps={jog.stepsZ.value} value={jog.stepZ.value} set={v => { jog.stepZ.value = v; }} />
+      <div class="fs-pjog-feed"><span class="fs-cap">FEED</span>
+        <span class="fs-pin"><NumIn value={jog.feed.value} min={1} max={maxF} label="Jog feed, mm/min" set={v => { jog.feed.value = Math.max(1, Math.round(v)); }} /><i>mm/min</i></span>
+      </div>
+      {busy && <div class="fs-note">The routine is moving the machine. Jog again once it ends or after CANCEL.</div>}
+    </div>
+  );
+}
+
+function RunFoot({ tab }: { tab: Routine }) {
   const linked = connection.connected.value;
   const busy = pr.running.value;
-  const s = pr.status.value[r];
-  return (
-    <div class="fs-probe-foot">
-      <div class={'fs-pstatus is-' + s.tone} role="status">{s.text}</div>
-      {result && <div class="fs-presult fs-mono">{result}</div>}
-      <div class="fs-probe-btns">
-        <button type="button" class="fs-btn" title="Show the moves in the preview, and in the job screen's 3D view" onClick={() => pr.preview(r)}>PREVIEW</button>
-        <button type="button" class="fs-btn fs-btn-go" disabled={!linked || !!busy} onClick={run}>PROBE</button>
-        {extra}
-        <button type="button" class={'fs-btn' + (busy ? ' is-stop' : '')} disabled={!busy} title="Stop the routine and the move in progress" onClick={() => pr.cancel()}>CANCEL</button>
-      </div>
+  const run = pr.runs.value[tab];
+  let tone = '', text: string;
+  if (busy && busy !== tab) { tone = 'run'; text = `${TAB_NAME[busy]} is probing. CANCEL stops it from here.`; }
+  else if (run?.phase === 'running') { tone = 'run'; text = run.text || `Probing the ${pr.measuring(tab)}: ${run.label.toLowerCase()}.`; }
+  else if (run) { tone = run.phase === 'ok' ? 'ok' : run.phase === 'fail' ? 'err' : ''; text = run.text; }
+  else text = pr.readyText(tab);
+  const lines = run?.phase === 'ok' && (!busy || busy === tab) ? run.lines : [];
+  const canApply = tab === 'rot' && pr.rotAngle.value !== null && job.lines.value.length > 0;
+  return <>
+    <div class={'fs-pstatus2' + (tone ? ' is-' + tone : '')} role="status">{text}</div>
+    {lines.length > 0 && <div class="fs-pres fs-mono">
+      {lines.map(l => <div><span class="k">{l.k}</span>{l.v}{l.old && <span class="old">{l.v ? ' ' : ''}{l.old}</span>}</div>)}
+    </div>}
+    <div class="fs-prunb">
+      <button type="button" class="fs-pgo" disabled={!linked || !!busy} onClick={() => probeNow(tab)}>PROBE</button>
+      {tab === 'rot' && <button type="button" class="fs-pap" disabled={!canApply}
+        title={pr.rotAngle.value === null ? 'Measure first' : `Turn the program by ${pr.rotAngle.value.toFixed(3)}°`} onClick={() => pr.applyRotation()}>APPLY ROTATION</button>}
+      <button type="button" class={'fs-pcx' + (busy ? ' is-live' : '')} disabled={!busy} title="Stop the routine and the move in progress" onClick={() => pr.cancel()}>CANCEL</button>
     </div>
-  );
-}
-
-// ── The routines ──────────────────────────────────────────────────────────────
-
-function ToolLengthCard() {
-  const c = pr.tl.value;
-  const ts = machine.offsets.value['G59.3'];
-  const tlo = machine.tlo.value;
-  const linked = connection.connected.value;
-  const busy = !!pr.running.value;
-  return (
-    <Card title="TOOL LENGTH" class="fs-probe-card">
-      <div class="fs-probe-body">
-        <Seg label="Measure on" value={c.mode} set={v => pr.update('tl', pr.tl, { mode: v })}
-          opts={[['touchplate', 'TOUCH PLATE'], ['toolsetter', 'TOOLSETTER (G59.3)']]} />
-        <div class="fs-cap">PROBE</div>
-        <Fields sub="tl" sig={pr.tl} list={FEEDS} />
-        {c.mode === 'touchplate'
-          ? <Fields sub="tl" sig={pr.tl} list={[['touchPlateHeight', 'Plate height, mm', 0.1, 0]]} />
-          : <>
-            <Fields sub="tl" sig={pr.tl} list={[['toolsetterDepth', 'Approach depth, mm', 1, 1]]} />
-            <div class="fs-note">{ts
-              ? <>The toolsetter is G59.3: <span class="fs-mono">X {fix3(ts.x)} Y {fix3(ts.y)} Z {fix3(ts.z)}</span>, machine coordinates. Set it in Setup, Offsets.</>
-              : 'The toolsetter is G59.3, not read yet. Set it in Setup, Offsets.'}</div>
-          </>}
-        <div class="fs-cap">REFERENCE TOOL</div>
-        <div class={'fs-mono ' + (c.tloReference !== null ? 'fs-go-text' : 'fs-dim')}>{c.tloReference !== null ? `Ref: ${c.tloReference.toFixed(4)} mm` : 'No reference set'}</div>
-        <div class="fs-grid2b">
-          <button type="button" class="fs-btn" disabled={!linked || busy} title="Probe this tool as the reference the others are measured from" onClick={() => pr.measureTool(true)}>SET REF TOOL</button>
-          {c.tloReference !== null && <button type="button" class="fs-btn" title="Forget the reference and cancel the tool length offset (G49)" onClick={() => pr.clearReference()}>CLEAR</button>}
-        </div>
-        <div class="fs-note">Tool length offset now: <span class="fs-mono">{tlo === null ? 'not read' : fix3(tlo) + ' mm'}</span></div>
-      </div>
-      <Foot r="tl" run={() => pr.measureTool(false)} result={pr.tlResult.value} />
-    </Card>
-  );
-}
-
-// The probe's direction of travel for each edge and corner, from outside the stock; inside, it is the reverse.
-const OUTSIDE: Record<string, string> = { A: '↗', B: '↖', C: '↙', D: '↘', AD: '→', CB: '←', AB: '↑', CD: '↓', Z: '↓' };
-const REVERSE: Record<string, string> = { '↗': '↙', '↙': '↗', '↖': '↘', '↘': '↖', '→': '←', '←': '→', '↑': '↓', '↓': '↑' };
-// As the stock is seen from above: corners at its corners, edges at its sides, Z in the middle.
-const EDGES: [string, string][] = [['D', 'X− Y+'], ['CD', 'Y+'], ['C', 'X+ Y+'], ['AD', 'X−'], ['Z', 'top'], ['CB', 'X+'], ['A', 'X− Y−'], ['AB', 'Y−'], ['B', 'X+ Y−']];
-
-function EdgeFinderCard() {
-  const c = pr.ef.value;
-  const edge = pr.efEdge.value;
-  const arrow = (id: string) => c.mode === 'internal' && id !== 'Z' ? REVERSE[OUTSIDE[id]] : OUTSIDE[id];
-  return (
-    <Card title="EDGE FINDER" class="fs-probe-card">
-      <div class="fs-probe-body">
-        <Seg label="Probe from" value={c.mode} set={v => pr.update('ef', pr.ef, { mode: v })} opts={[['external', 'EXTERNAL'], ['internal', 'INTERNAL']]} />
-        <div class="fs-cap">EDGE OR CORNER</div>
-        <div class="fs-edgegrid" role="radiogroup" aria-label="Edge or corner">
-          {EDGES.map(([id, side]) => (
-            <button type="button" role="radio" aria-checked={edge === id ? 'true' : 'false'} class={'fs-edge' + (edge === id ? ' is-on' : '') + (id.length === 2 ? ' is-side' : '')}
-              title={id === 'Z' ? 'The top surface' : (id.length === 1 ? 'Corner ' : 'Edge ') + id + ', the ' + side + ' ' + (id.length === 1 ? 'corner' : 'side')}
-              onClick={() => { pr.efEdge.value = id; pr.status.value = { ...pr.status.value, ef: { text: `${id.length === 1 ? 'Corner' : id === 'Z' ? 'Surface' : 'Edge'} ${id} picked`, tone: 'idle' } }; }}>
-              <span class="fs-edge-id">{id} {arrow(id)}</span><span class="fs-edge-side">{side}</span>
-            </button>
-          ))}
-        </div>
-        <div class="fs-cap">RESULT</div>
-        <TargetFields sig={pr.efTarget} />
-        <div class="fs-cap">PROBE</div>
-        <Fields sub="ef" sig={pr.ef} list={[...FEEDS as FieldDef<pr.EfCfg>[],
-          ['xyClr', 'XY clearance, mm', 0.5, 0.5], ['depth', 'Probe depth, mm', 0.5, 0.5],
-          ['offset', 'Corner offset, mm', 1, 1], ['probeDiameter', 'Probe dia., mm', 0.1, 0]]} />
-        <label class="fs-check">
-          <input type="checkbox" checked={c.probeZ} onChange={e => pr.update('ef', pr.ef, { probeZ: (e.target as HTMLInputElement).checked })} />
-          Also probe Z at a corner
-        </label>
-        {(c.probeZ || edge === 'Z') && <Fields sub="ef" sig={pr.ef} list={[['touchPlateHeight', 'Touch plate height, mm', 0.1, 0], ['workpieceHeight', 'Workpiece height, mm', 0.1, 0]]} />}
-      </div>
-      <Foot r="ef" run={() => pr.findEdge()} />
-    </Card>
-  );
-}
-
-function CentreFinderCard() {
-  const c = pr.cf.value;
-  return (
-    <Card title="CENTRE FINDER" class="fs-probe-card">
-      <div class="fs-probe-body">
-        <Seg label="Centre of" value={c.centerMode} set={v => pr.update('cf', pr.cf, { centerMode: v })} opts={[['inside', 'INSIDE (BORE)'], ['outside', 'OUTSIDE (BOSS)']]} />
-        <Seg label="Axes" value={c.axes} set={v => pr.update('cf', pr.cf, { axes: v })} opts={[['XY', 'XY'], ['X', 'X ONLY'], ['Y', 'Y ONLY']]} />
-        <div class="fs-cap">WORKPIECE SIZE</div>
-        <Fields sub="cf" sig={pr.cf} list={[['workpieceSizeX', 'X size, mm', 1, 1], ['workpieceSizeY', 'Y size, mm', 1, 1]]} />
-        <div class="fs-cap">RESULT</div>
-        <TargetFields sig={pr.cfTarget} />
-        <div class="fs-cap">PROBE</div>
-        <Fields sub="cf" sig={pr.cf} list={[...FEEDS as FieldDef<pr.CfCfg>[],
-          ['xyClr', 'XY clearance, mm', 0.5, 0.5], ['depth', 'Probe depth, mm', 0.5, 0.5],
-          ['probeDiameter', 'Probe dia., mm', 0.1, 0], ['passes', 'Passes', 1, 1, 5]]} />
-      </div>
-      <Foot r="cf" run={() => pr.findCentre()} />
-    </Card>
-  );
-}
-
-function RotationCard() {
-  const c = pr.rot.value;
-  const loaded = job.lines.value.length > 0;
-  const angle = pr.rotAngle.value;
-  return (
-    <Card title="ROTATION" class="fs-probe-card">
-      <div class="fs-probe-body">
-        <div class="fs-cap">EDGE TO PROBE ALONG</div>
-        <Seg label="Edge" value={c.edge} set={v => pr.update('rot', pr.rot, { edge: v })} opts={[['AB', 'AB'], ['AD', 'AD'], ['CB', 'CB'], ['CD', 'CD']]} />
-        <div class="fs-note">AB bottom (Y−) · AD left (X−) · CB right (X+) · CD top (Y+)</div>
-        <div class="fs-cap">PROBE</div>
-        <Fields sub="rot" sig={pr.rot} list={[...FEEDS as FieldDef<pr.RotCfg>[],
-          ['xyClr', 'XY clearance, mm', 0.5, 0.5], ['depth', 'Probe depth, mm', 0.5, 0.5],
-          ['offset', 'Point spacing, mm', 5, 5], ['probeDiameter', 'Probe dia., mm', 0.1, 0]]} />
-        <div class="fs-note">APPLY ROTATION turns the loaded program about X0 Y0 by the angle measured, once.{loaded ? '' : ' No program is loaded.'}</div>
-      </div>
-      <Foot r="rot" run={() => pr.measureRotation()} result={pr.rotResult.value} extra={
-        <button type="button" class="fs-btn is-accent" disabled={angle === null || !loaded}
-          title={angle === null ? 'Measure first' : `Turn the program by ${angle.toFixed(3)}°`} onClick={() => pr.applyRotation()}>APPLY ROTATION</button>
-      } />
-    </Card>
-  );
-}
-
-function RoutineCard({ tab }: { tab: ui.ProbingTab }) {
-  return tab === 'tl' ? <ToolLengthCard /> : tab === 'ef' ? <EdgeFinderCard /> : tab === 'cf' ? <CentreFinderCard /> : <RotationCard />;
-}
-
-// ── The preview ───────────────────────────────────────────────────────────────
-
-const LEGEND: [string, string][] = [['rapid', 'Rapid'], ['probe', 'Probe'], ['retract', 'Retract'], ['contact', 'Contact'], ['result', 'Result']];
-
-function PreviewCard() {
-  const wps = pv.waypoints.value;
-  const cur = pv.step.value;
-  const xy = useRef<HTMLCanvasElement>(null);
-  const xz = useRef<HTMLCanvasElement>(null);
-  const draw = () => {
-    if (xy.current) pv.drawView(xy.current, 'XY', pv.waypoints.peek(), pv.step.peek());
-    if (xz.current) pv.drawView(xz.current, 'XZ', pv.waypoints.peek(), pv.step.peek());
-  };
-  useEffect(draw, [wps, cur]);
-  useEffect(() => {
-    const ro = new ResizeObserver(draw);
-    if (xy.current) ro.observe(xy.current);
-    if (xz.current) ro.observe(xz.current);
-    return () => ro.disconnect();
-  }, []);
-  const wp = wps[cur];
-  return (
-    <Card title="PROBE PREVIEW" class="fs-pv-card" end={<span class="fs-dim fs-pv-title">{pr.previewOf.value || 'Press PREVIEW on a routine'}</span>}>
-      <div class="fs-pv-views">
-        <div class="fs-pv-view"><canvas ref={xy} aria-label="The moves from above, X and Y" /></div>
-        <div class="fs-pv-view"><canvas ref={xz} aria-label="The moves from the front, X and Z" /></div>
-      </div>
-      <div class="fs-pv-ctl">
-        <button type="button" class="fs-btn fs-btn-sm" aria-label="Previous move" disabled={cur <= 0} onClick={() => pv.stepPreview(-1)}>◀</button>
-        <button type="button" class="fs-btn fs-btn-sm" aria-label={pv.playing.value ? 'Pause' : 'Play'} disabled={!wps.length} onClick={() => pv.playPreview()}>{pv.playing.value ? '❚❚' : '▶'}</button>
-        <button type="button" class="fs-btn fs-btn-sm" aria-label="Next move" disabled={cur >= wps.length - 1} onClick={() => pv.stepPreview(1)}>▶|</button>
-        <span class="fs-mono fs-dim">{wps.length ? `${cur + 1} / ${wps.length}` : '—'}</span>
-        <span class="fs-pv-step fs-ellipsis">{wp?.label ?? ''}</span>
-      </div>
-      <div class="fs-pv-dro fs-mono">
-        {(['x', 'y', 'z'] as const).map(a => <span><span class="fs-dim">{a.toUpperCase()}</span> {wp ? fix3(wp[a]) : '—'}</span>)}
-      </div>
-      <div class="fs-legend">
-        {LEGEND.map(([t, label]) => <span><i style={{ background: pv.TYPE_COLOR[t] }} />{label}</span>)}
-      </div>
-      <div class="fs-note">Moves in mm from where the probe starts. PREVIEW also draws them in the job screen's 3D view.</div>
-    </Card>
-  );
+  </>;
 }
 
 // ── The screen and the popups ─────────────────────────────────────────────────
@@ -268,41 +429,74 @@ function PreviewCard() {
 function ProbingTabs() {
   const tab = ui.probingTab.value;
   return (
-    <div role="tablist" class="fs-subtabs">
+    <div role="tablist" aria-label="What to measure" class="fs-subtabs">
       {PROBING_TABS.map(([id, label]) => (
         <button type="button" role="tab" aria-selected={tab === id ? 'true' : 'false'} class={tab === id ? 'is-on' : ''}
-          onClick={() => { ui.probingTab.value = id; }}>{label}{pr.running.value === id ? ' ●' : ''}</button>
+          onClick={() => { stopPlay(); ui.probingTab.value = id; }}>{label}{pr.running.value === id && <span class="fs-pdot" aria-label="running"> ●</span>}</button>
       ))}
+    </div>
+  );
+}
+
+function Col({ n, title, class: cls, foot, children }: { n: number; title: string; class: string; foot?: ComponentChildren; children: ComponentChildren }) {
+  return (
+    <section class={'fs-pbcol ' + cls} aria-label={title}>
+      <div class="fs-pbhead"><span class="n">{n}</span><span class="t">{title}</span></div>
+      <div class="fs-pbbody">{children}</div>
+      {foot && <div class="fs-pbfoot">{foot}</div>}
+    </section>
+  );
+}
+
+function SettingsPopup() {
+  useEffect(() => {
+    // Escape closes this one only, not the job screen's popup under it.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); settingsOpen.value = false; } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+  return (
+    <div class="fs-popup-back fs-pset-back" onClick={e => { if (e.target === e.currentTarget) settingsOpen.value = false; }}>
+      <section role="dialog" aria-label="Settings, Probe" class="fs-popup">
+        <div class="fs-popup-head">
+          <h2 class="fs-h">SETTINGS · PROBE</h2>
+          <button type="button" class="fs-btn fs-btn-sm" onClick={() => { settingsOpen.value = false; }}>CLOSE</button>
+        </div>
+        <div class="fs-popup-cards"><ProbeSettingsCard /></div>
+      </section>
+    </div>
+  );
+}
+
+function Columns() {
+  const tab = ui.probingTab.value;
+  const plan = plans.value[tab] ?? null;
+  return (
+    <div class="fs-pb">
+      <Col n={1} title="WHAT TO MEASURE" class="fs-pb1"><What tab={tab} /></Col>
+      <Col n={2} title="WHERE IT STARTS · WHAT IT DOES" class="fs-pb2"><Where tab={tab} plan={plan} /></Col>
+      <Col n={3} title="POSITION AND PROBE" class="fs-pb3" foot={<RunFoot tab={tab} />}><ProbeLight tab={tab} /><ProbeJog /></Col>
+      {settingsOpen.value && <SettingsPopup />}
     </div>
   );
 }
 
 export function ProbingScreen() {
   if (ui.screen.value !== 'probing') return null;
-  const tab = ui.probingTab.value;
-  // Three columns from 1000 px, two below; each scrolls on its own, so the page never does.
   return (
     <section class="fs-screen">
       <ProbingTabs />
-      <div class="fs-setup">
-        <div class="fs-col"><RoutineCard tab={tab} /></div>
-        {width.value >= 1000
-          ? <><div class="fs-col"><PreviewCard /></div><div class="fs-col"><PositionCard /><JogCard /></div></>
-          : <div class="fs-col"><PreviewCard /><PositionCard /><JogCard /></div>}
-      </div>
+      <Columns />
     </section>
   );
 }
 
-/** The job screen's probe and measure popups: the routines and the preview. */
+/** The job screen's probe and measure popups: the same columns, the jog pad with them (the owner, 3 Nov). */
 export function ProbingPopupBody() {
   return (
     <div class="fs-probe-popup">
       <ProbingTabs />
-      <div class="fs-setup">
-        <div class="fs-col"><RoutineCard tab={ui.probingTab.value} /></div>
-        <div class="fs-col"><PreviewCard /></div>
-      </div>
+      <Columns />
     </div>
   );
 }

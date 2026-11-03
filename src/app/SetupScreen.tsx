@@ -92,7 +92,7 @@ export function PositionCard() {
 
 // ── Jogging ───────────────────────────────────────────────────────────────────
 
-function JogButton({ dir, label, class: cls }: { dir: string; label: string; class?: string }) {
+export function JogButton({ dir, label, class: cls }: { dir: string; label: string; class?: string }) {
   const v = jog.dirVec(dir);
   const axis = v.z ? 'is-z' : v.x && v.y ? 'is-diag' : v.x ? 'is-x' : 'is-y';
   const lit = jog.keyDir.value === dir;
@@ -108,7 +108,7 @@ function JogButton({ dir, label, class: cls }: { dir: string; label: string; cla
   );
 }
 
-function Steps({ label, steps, value, set }: { label: string; steps: number[]; value: number; set: (v: number) => void }) {
+export function Steps({ label, steps, value, set }: { label: string; steps: number[]; value: number; set: (v: number) => void }) {
   return (
     <div class="fs-steps">
       <span class="fs-cap">{label}</span>
