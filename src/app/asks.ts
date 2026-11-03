@@ -19,6 +19,9 @@ import * as ui from './ui';
 
 export async function readSetupState(): Promise<void> {
   await Promise.all([22, 130, 131, 132, 21, 23, 27, 341, 28, 30].map(id => command.send('$' + id, { quiet: true })));
+  // For $H in a file: the homing cycles ($44-$49; a build without some answers an error) and the startup lines.
+  await Promise.all([44, 45, 46, 47, 48, 49].map(id => command.send('$' + id, { quiet: true })));
+  await command.send('$N', { quiet: true });
   await command.send('$G', { quiet: true });
   await loadToolTable();
 }
