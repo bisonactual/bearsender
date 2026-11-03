@@ -28,7 +28,14 @@ export interface Runtime {
 
 export const measured = signal<Record<string, Runtime>>({});
 
-idb.all<Runtime>('runtimes').then(list => {
+function isRuntime(v: unknown): v is Runtime {
+  const r = v as Runtime, num = (n: unknown) => typeof n === 'number' && Number.isFinite(n);
+  return !!r && typeof r === 'object' && typeof r.id === 'string' && typeof r.name === 'string' && num(r.at) && num(r.totalMs) && num(r.runs) &&
+    Array.isArray(r.rowMs) && r.rowMs.every(ms => ms === null || num(ms));
+}
+
+// What was kept is checked as it is read back: a runtime that can't be read is dropped and reported.
+idb.validEntries('runtimes', isRuntime, 'runtimes').then(list => {
   const map: Record<string, Runtime> = {};
   for (const r of list) map[r.id] = r;
   measured.value = { ...map, ...measured.value };

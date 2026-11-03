@@ -4,7 +4,10 @@
 //
 // Kept in this browser's IndexedDB with the loaded program, so both survive a reload. When a job
 // completes and another is queued, the next one is loaded and waits for Start: nothing moves until
-// the operator presses it (the owner: "Load next, wait for Start").
+// the operator presses it (the owner: "Load next, wait for Start"). That promotion is one transaction:
+// a reload finds either the job before, with the next still queued, or the next loaded and out of the
+// queue. Adds go one after another, in the order they were asked for. What was kept is checked when
+// it is read back: an entry that can't be read is dropped and reported, and the rest kept.
 
 import { signal, effect, untracked } from '@preact/signals';
 import { jobId } from '../flight-recorder-resume';
@@ -50,25 +53,38 @@ function save(list: Entry[]): void {
   entries.value = list;
 }
 
-function loadFile(text: string, name: string): void {
-  import('../gcode').then(g => g.processGcode(text, name));
+function loadFile(text: string, name: string): Promise<void> {
+  return import('../gcode').then(g => g.processGcode(text, name));
 }
 
-/** ADD TO QUEUE: each file joins the end. With nothing loaded, the first becomes the loaded job. */
-export async function add(files: File[]): Promise<void> {
-  let list = [...entries.value];
-  let loading = !!job.file.value || job.running.value || list.length > 0;
+let adding: Promise<void> = Promise.resolve();
+
+/** ADD TO QUEUE: each file joins the end. With nothing loaded, the first becomes the loaded job. A second
+ *  Add while one is still reading its files waits for it. */
+export function add(files: File[]): Promise<void> {
+  const next = adding.then(() => addNow(files));
+  adding = next.catch(() => {});
+  return next;
+}
+
+async function addNow(files: File[]): Promise<void> {
+  let loadedOne = false;
   for (const file of files) {
     const text = fileLines(await file.text()).join('\n');
-    if (!loading) { loading = true; loadFile(text, file.name); continue; }
+    if (!loadedOne && !job.file.value && !job.running.value && !entries.value.length) {
+      loadedOne = true;
+      await loadFile(text, file.name);
+      continue;
+    }
+    // The list as it is now: a Remove or a Move may have come while the file was read.
+    const list = entries.value;
     const e: Entry = {
       key: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: file.name, text,
       addedAt: Date.now(), order: list.length, summary: summarize(fileLines(text)),
     };
-    list = [...list, e];
-    entries.value = list;
+    entries.value = [...list, e];
     idb.put('queue', e.key, e);
-    log('info', `Queued ${file.name} (${e.summary.lines.toLocaleString('en-GB')} lines), ${list.length} in the queue`);
+    log('info', `Queued ${file.name} (${e.summary.lines.toLocaleString('en-GB')} lines), ${list.length + 1} in the queue`);
   }
 }
 
@@ -87,12 +103,20 @@ export function move(key: string, by: number): void {
   save(list);
 }
 
-/** The next job becomes the loaded one; it waits for Start. */
+/** The next job becomes the loaded one; it waits for Start. In this browser it becomes the kept program
+ *  and leaves the queue in one transaction. */
 function loadNext(after: string): void {
   const [next, ...rest] = entries.value;
   if (!next) return;
-  save(rest);
-  idb.remove('queue', next.key);
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }   // a late save of the job before mustn't follow
+  const reordered = rest.filter((e, k) => e.order !== k);
+  rest.forEach((e, k) => { e.order = k; });
+  entries.value = rest;
+  idb.write([
+    { store: 'current', key: 'job', value: { name: next.name, text: next.text } satisfies Current },
+    { store: 'queue', key: next.key, delete: true },
+    ...reordered.map(e => ({ store: 'queue' as const, key: e.key, value: e })),
+  ]).then(ok => { if (!ok) log('err', `The queue in this browser may not have moved on to ${next.name}: after a reload check the loaded job and the queue.`); });
   import('../gcode').then(g => {
     g.processGcode(next.text, next.name);
     job.fromQueueAfter.value = after;
@@ -116,10 +140,27 @@ effect(() => {
   saveTimer = setTimeout(() => { idb.put('current', 'job', { name, text: lines.join('\n') } satisfies Current); }, 500);
 });
 
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+function isEntry(v: unknown): v is Entry {
+  if (!isObject(v) || typeof v.key !== 'string' || typeof v.name !== 'string' || typeof v.text !== 'string' || !isNum(v.addedAt) || !isNum(v.order)) return false;
+  const s = v.summary;
+  return isObject(s) && typeof s.id === 'string' && isNum(s.lines) && isNum(s.estSeconds) && (s.stopped === null || typeof s.stopped === 'string') &&
+    Array.isArray(s.rows) && s.rows.every(r => isObject(r) && (r.tool === null || isNum(r.tool)) && isNum(r.changeLine) && isNum(r.estSeconds) && typeof r.desc === 'string');
+}
+
+function isCurrent(v: unknown): v is Current {
+  return isObject(v) && typeof v.name === 'string' && typeof v.text === 'string';
+}
+
 // What this browser kept: the queue, and the program that was loaded.
-Promise.all([idb.all<Entry>('queue'), idb.get<Current>('current', 'job')]).then(([list, current]) => {
+Promise.all([idb.validEntries('queue', isEntry, 'queued jobs'), idb.get<unknown>('current', 'job')]).then(([list, current]) => {
   entries.value = [...list.sort((a, b) => a.order - b.order), ...entries.value];
-  if (current && !job.file.value) {
+  if (current !== undefined && !isCurrent(current)) {
+    messages.push('error', 'The program kept in this browser couldn\'t be read and was dropped. The queue is kept.');
+    idb.remove('current', 'job');
+  } else if (current && !job.file.value) {
     loadFile(current.text, current.name);
     log('info', `Reloaded ${current.name} and ${list.length} queued job${list.length === 1 ? '' : 's'} from this browser`);
   }
