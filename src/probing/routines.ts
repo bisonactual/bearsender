@@ -147,9 +147,10 @@ export async function measureTool(asReference: boolean): Promise<void> {
     update('tl', tl, { tloReference: result.z });
     sendCmd('G49');
   } else {
-    let tlo = result.z;
-    if (c.tloReference !== null) tlo -= c.tloReference + c.touchPlateHeight;
-    else if (c.mode === 'touchplate') tlo -= c.touchPlateHeight;
+    // Against a reference, the plate (or the toolsetter) is under both tools, so it drops out. Without one,
+    // the touch plate's thickness comes off once; a toolsetter has none.
+    const tlo = c.tloReference !== null ? result.z - c.tloReference
+      : c.mode === 'touchplate' ? result.z - c.touchPlateHeight : result.z;
     sendCmd(`G21G43.1Z${tlo.toFixed(4)}`);
     tlResult.value = `Z=${result.z.toFixed(4)}  TLO=${tlo.toFixed(4)} mm`;
   }

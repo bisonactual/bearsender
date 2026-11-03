@@ -222,6 +222,7 @@ export async function rapidToMPos(x: number | null, y: number | null, z: number 
 
 async function runTouchplateSequence(seq: any): Promise<ProbeResult | null> {
   log('info', '⊕ Touch plate probe starting…');
+  const startZ = (state as any).machineZ;
   const fastResult = await probeMove(`G38.3G91F${seq.probeFeedRate}Z-${seq.probeDistance.toFixed(4)}`);
   if (!fastResult || !fastResult.success) {
     log('err', '✗ Probe: no contact on fast probe — check probe wiring and position');
@@ -238,7 +239,8 @@ async function runTouchplateSequence(seq: any): Promise<ProbeResult | null> {
     await sendAndWait(`G91G0Z${seq.latchDistance.toFixed(4)}`);
     return null;
   }
-  await sendAndWait(`G90G53G0Z${(state as any).machineZ.toFixed(4)}`);
+  // Back up to where it started. (It read the Z it was at, so it stayed on the plate.)
+  await sendAndWait(`G90G53G0Z${startZ.toFixed(4)}`);
   log('info', `✓ Touch plate probe: Z=${slowResult.z.toFixed(4)}`);
   return slowResult;
 }
