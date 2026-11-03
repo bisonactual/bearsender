@@ -8,9 +8,11 @@
 //     file's lines (state.gcodeLines, so blank lines don't count)
 //   - the job is stamped first with $FLIGHT=<CRC-32 of the file>
 //   - to resume, work out the modal state up to the recorded line and where each
-//     axis was, go up to the retract height, over the start of the line, straight
-//     down, and stream on from that line
-// The modal state and the position come from the G-code interpreter (src/gcode).
+//     axis was, put the file's tool length offset back, go up to the lift height
+//     unless the tool is higher, over the start of the line, straight down, and
+//     stream on from that line
+// The modal state and the position come from the G-code interpreter (src/gcode), read from the modes
+// the job started from (stores/starts.ts) and the offsets and tool length as they are when Resume is pressed.
 
 import { interpretGcode, lexLine } from './gcode/index';
 import type { InterpreterContext, ModalState } from './gcode/index';
@@ -70,6 +72,7 @@ export function resumeState(text: string, upto: number, context: InterpreterCont
   const here = program.issues.find(i => i.severity === 'error' && i.line === upto);
   if (here) throw new ResumeRefused(`line ${upto}: ${here.message.replace(/ Interpretation stops here.*$/, '')}`);
   const s = program.stateAfterLine(upto - 1);
+  if (s.programEnd && context.afterProgramEnd !== 'continue') throw new ResumeRefused(`line ${upto} comes after the program end, and isn't sent (Options: Run lines after M30 is off)`);
   if (s.cycle || gWords(program.lines[upto - 1].raw).some(g => CYCLES.has(g)) || CYCLES.has(parseFloat(s.motion.slice(1))))
     throw new ResumeRefused(`line ${upto}: canned cycles can't be resumed`);
   const g92 = context.initialG92 ?? { x: 0, y: 0, z: 0 };
@@ -88,36 +91,48 @@ export function describeState(s: ModalState): string {
     s.spindle === 'M5' ? 'spindle off' : `${s.spindle} S${s.spindleSpeed ?? '?'}`,
     s.programmedFeed !== null ? 'F' + s.programmedFeed : 'no feed yet',
     coolant,
-    s.lengthOffset.mode === 'G43' && s.lengthOffset.h !== null ? 'G43 H' + s.lengthOffset.h : '',
+    s.lengthOffset.mode === 'G49' ? 'G49' : s.lengthOffset.h !== null ? 'G43 H' + s.lengthOffset.h
+      : `tool length offset as on the controller (Z ${s.lengthOffset.value.z?.toFixed(3) ?? '?'})`,
   ].filter(Boolean).join(' · ');
 }
 
+/** The tool length offset in force at the resume line, as one line to send: G49 where the file cancelled
+ *  it (or nothing was in force), G43 H<n> where the file set it, or, where the job ran on the offset the
+ *  controller had when it started (G43.1, $TPW), that offset as it is now, in mm. */
+export function lengthOffsetLine(s: ModalState): string {
+  const o = s.lengthOffset;
+  if (o.mode === 'G49') return 'G49';
+  if (o.h !== null) return `G43H${o.h}`;
+  if (o.value.x === null || o.value.y === null || o.value.z === null) throw new ResumeRefused('the tool length offset before the resume line isn\'t known');
+  return 'G21G43.1' + (['x', 'y'] as const).filter(k => o.value[k] !== 0).map(k => k.toUpperCase() + o.value[k]!.toFixed(4)).join('') + 'Z' + o.value.z.toFixed(4);
+}
+
+/** The first move: up to `liftZ` (machine Z) unless the tool is already higher, so it never goes down. */
+export interface Lift { liftZ: number; currentZ: number; }
+
 /**
- * The lines that take the machine back onto the start of the resume line. The moves back in are
- * in machine coordinates (G53), mm and feed per minute, to the interpreter's machine position.
- * Then the program's own modes are put back: units, distance, plane, feed mode, work offset, the
- * G43 it set, and its feed.
+ * The lines that take the machine back onto the start of the resume line. The tool length offset is
+ * put back first, as the file had it there, before any move. The moves back in are in machine
+ * coordinates (G53), mm and feed per minute, to the interpreter's machine position: up to the lift
+ * height (or not at all, if the tool is higher), across, then straight down. Then the program's own
+ * modes are put back: units, distance, plane, feed mode, work offset, and its feed.
  */
-export function resumePreamble(job: string, noRetract: boolean, s: ModalState, retractZ = -20, spinup = 2): string[] {
+export function resumePreamble(job: string, noRetract: boolean, s: ModalState, lift: Lift, spinup = 2): string[] {
   const p = s.position;
   if ((s.spindle === 'M3' || s.spindle === 'M4') && !s.spindleSpeed)
     throw new ResumeRefused('the spindle is on with no speed set before the resume line');
   const plungeFeed = s.feedMode === 'G94' && s.feed ? s.feed : 100;   // mm/min
   const f4 = (v: number | null) => v!.toFixed(4);
-  const preamble = [
-    `$FLIGHT=${job}${noRetract ? ',1' : ''}`,
-    `G21G90G94${s.plane}`,
-    `G53G0Z${retractZ.toFixed(4)}`,             // up to the retract height
-    `G53G0X${f4(p.x)}Y${f4(p.y)}`,              // over the start of the resume line
-  ];
+  const preamble = [`$FLIGHT=${job}${noRetract ? ',1' : ''}`, `G21G90G94${s.plane}`, lengthOffsetLine(s)];
+  if (lift.currentZ < lift.liftZ - 0.0005) preamble.push(`G53G0Z${lift.liftZ.toFixed(4)}`);   // up to the lift height
+  preamble.push(`G53G0X${f4(p.x)}Y${f4(p.y)}`);               // over the start of the resume line
   if (s.spindle === 'M3' || s.spindle === 'M4') preamble.push(`S${s.spindleSpeed!.toFixed(0)}${s.spindle}`, `G4P${spinup.toFixed(1)}`);
   if (s.coolant.mist) preamble.push('M7');
   if (s.coolant.flood) preamble.push('M8');
   preamble.push(`G53G1Z${f4(p.z)}F${plungeFeed.toFixed(1)}`);   // straight down, the tool has been there before
   // G91.1 and G98 are grblHAL's own defaults; the others only when the program used them.
-  const tlo = s.lengthOffset.mode === 'G43' && s.lengthOffset.h !== null ? `G43H${s.lengthOffset.h}` : '';
   const feed = s.feedMode === 'G94' && s.programmedFeed !== null ? `F${s.programmedFeed.toFixed(1)}` : '';
-  preamble.push(s.units + s.distance + s.feedMode + s.workOffset + (s.arcDistance === 'G90.1' ? 'G90.1' : '') + (s.retract === 'G99' ? 'G99' : '') + tlo + feed);
+  preamble.push(s.units + s.distance + s.feedMode + s.workOffset + (s.arcDistance === 'G90.1' ? 'G90.1' : '') + (s.retract === 'G99' ? 'G99' : '') + feed);
   return preamble;
 }
 
