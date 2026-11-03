@@ -24,6 +24,8 @@ export const offsetsAtConnect = signal<Record<string, Vec3> | null>(null);
 export const offsetWrites = signal<Record<string, 'probed' | 'zeroed'>>({});
 /** The tool length offset from $# ([TLO:]), null until read. */
 export const tlo = signal<number | null>(null);
+/** The whole tool length offset vector from [TLO:], null until read. `tlo` is its Z. */
+export const tloVector = signal<Vec3 | null>(null);
 export const overrides = signal<Overrides>({ feed: 100, rapid: 100, spindle: 100 });
 export const feed = signal(0);
 export const spindle = signal(0);

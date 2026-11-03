@@ -4,17 +4,20 @@
 //
 // Everything that reads the program goes through src/gcode: the Preview, the Jobs list's tools and
 // times, the Setup list's travel and tools, and the resume. It is read again whenever what it
-// depends on changes: the file, the work offsets, G92, the tool length, G28/G30, the rapid rates
-// and the tool table.
+// depends on changes: the file, the work offsets, G92, the tool length, G28/G30, the rapid rates,
+// the tool table, the controller's modes ($G), the settings it uses ($28, homing and travel), the
+// "Run lines after M30" option, and where the machine stands while idle (a moment after a jog).
+// While a job runs it isn't read again, so the rows stay the run's.
 
 import { signal, computed, effect } from '@preact/signals';
 import { interpretGcode, lexLine, moveExtrema } from '../gcode/index';
 import { emptyBounds, includePoint, subtract } from '../gcode/geometry';
-import type { Bounds, InterpreterContext, Issue, Point, Position, Program, WorkSystem } from '../gcode/index';
+import type { Bounds, InterpreterContext, Issue, Motion, Point, Position, Program, WorkSystem } from '../gcode/index';
 import { log } from '../console';
 import * as job from './job';
 import * as machine from './machine';
 import * as connection from './connection';
+import * as options from './options';
 
 /** A tool in the Jobs list: one use of a tool, from its M6 to the next (the interpreter's tool uses). */
 export interface ToolRow {
@@ -52,8 +55,50 @@ export interface ProgramView {
 const WCS: WorkSystem[] = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'G59.1', 'G59.2', 'G59.3'];
 const vec = (v: machine.Vec3): Point => ({ x: v.x, y: v.y, z: v.z });
 
-/** What the interpreter needs from the controller, as far as it is known. The machine position is
- *  where the program starts from; it is taken as it is now, and isn't a reason to read again. */
+/** The modes in the words of a [GC:] line ($G), as the interpreter takes them; undefined with none.
+ *  A motion mode it doesn't read (G38.x, a canned cycle) is taken as G80: axis words alone stop it. */
+export function modesFromWords(words: string[] | null | undefined): InterpreterContext['initialModes'] {
+  if (!words?.length) return undefined;
+  const has = (w: string) => words.includes(w);
+  const motion = words.find(w => /^G(0|1|2|3|38\.\d|8\d)$/.test(w));
+  return {
+    units: has('G20') ? 'G20' : 'G21', distance: has('G91') ? 'G91' : 'G90',
+    plane: has('G18') ? 'G18' : has('G19') ? 'G19' : 'G17', feedMode: has('G93') ? 'G93' : 'G94',
+    ...(motion ? { motion: (['G0', 'G1', 'G2', 'G3', 'G80'].includes(motion) ? motion : 'G80') as Motion } : {}),
+  };
+}
+
+/** The work offset in the words of a [GC:] line, if there is one. */
+export function wcsFromWords(words: string[] | null | undefined): WorkSystem | undefined {
+  return words?.find((w): w is WorkSystem => WCS.includes(w as WorkSystem));
+}
+
+/** Where homing leaves each axis, in machine coordinates (machine_limits.c limits_set_machine_positions):
+ *  0 with "set machine origin to 0" ($22 bit 3); otherwise −$27 for an axis homing up, or −$13x + $27 for one
+ *  homing down ($23). Undefined until those settings are read. */
+function homePosition(): Position | undefined {
+  const s = machine.settings.value;
+  const travel = [130, 131, 132].map(id => parseFloat(s[id] ?? ''));
+  const flags = parseInt(s[22] ?? ''), dir = parseInt(s[23] ?? ''), pulloff = parseFloat(s[27] ?? '');
+  if (travel.some(isNaN) || isNaN(flags) || isNaN(dir) || isNaN(pulloff)) return undefined;
+  const at = (i: number) => (flags & 8) ? 0 : (dir & (1 << i)) ? -travel[i] + pulloff : -pulloff;
+  return { x: at(0), y: at(1), z: at(2) };
+}
+
+/** Where the program starts from: the machine position while it stands idle and no job runs, to the
+ *  micron. A jog or a move while idle sets it once the machine is at rest; a run never does. */
+const startAt = signal<Point | null>(null);
+effect(() => {
+  const s = machine.stateName.value, m = machine.mpos.value;
+  if (!connection.connected.value) { startAt.value = null; return; }
+  if (job.running.value || !['idle', 'alarm', 'check', 'sleep'].includes(s)) return;
+  const r = (v: number) => Math.round(v * 1000) / 1000;
+  const p = { x: r(m.x), y: r(m.y), z: r(m.z) }, was = startAt.peek();
+  if (!was || was.x !== p.x || was.y !== p.y || was.z !== p.z) startAt.value = p;
+});
+
+/** What the interpreter needs from the controller, as far as it is known. With `withPosition`, the
+ *  program starts from where the machine stands (startAt). The modes are the controller's now ($G). */
 export function context(withPosition = true): InterpreterContext {
   const ctx: InterpreterContext = {};
   const offsets = machine.offsets.value;
@@ -67,28 +112,40 @@ export function context(withPosition = true): InterpreterContext {
   }
   const wcs = machine.wcs.value as WorkSystem;
   ctx.activeWorkOffset = WCS.includes(wcs) ? wcs : 'G54';
-  const tlo = machine.tlo.value;
-  if (tlo) ctx.initialLengthOffset = { x: 0, y: 0, z: tlo };
-  // $110-$112 are mm/min whatever $13 says.
+  const tlo = machine.tlo.value, tloVector = machine.tloVector.value;
+  if (tlo) ctx.initialLengthOffset = tloVector ? vec(tloVector) : { x: 0, y: 0, z: tlo };
+  // $110-$112 are mm/min whatever $13 says, as are $27, $28 and $130-$132.
   const rate = (id: number) => { const v = parseFloat(machine.settings.value[id] ?? ''); return v > 0 ? v : undefined; };
   const rates = { x: rate(110), y: rate(111), z: rate(112) };
   if (rates.x && rates.y && rates.z) ctx.rapidRates = rates as Point;
+  const g73 = rate(28);
+  if (g73) ctx.g73RetractMm = g73;
+  const home = homePosition();
+  if (home) ctx.homePosition = home;
+  // Each tool's whole offset: grblHAL's G43 H applies it on every axis by default (TOOL_LENGTH_OFFSET_AXIS
+  // -1). An axis the table doesn't list is taken as 0.
   const table = machine.toolTable.value;
   if (table) {
-    const lengths: Record<number, number> = {};
-    for (const e of table) if (e.z !== null) lengths[e.tool] = e.z;
+    const lengths: Record<number, Point> = {};
+    for (const e of table) if (e.z !== null) lengths[e.tool] = { x: e.x ?? 0, y: e.y ?? 0, z: e.z };
     ctx.toolLengthOffsets = lengths;
   }
   const tool = machine.tool.value;
   if (tool) ctx.initialTool = tool;
-  if (withPosition && connection.connected.value && machine.state.peek()) ctx.initialPosition = vec(machine.mpos.peek());
+  if (connection.connected.value) {
+    const modes = modesFromWords(machine.modal.value);
+    if (modes) ctx.initialModes = modes;
+  }
+  ctx.afterProgramEnd = options.runAfterM30.value ? 'continue' : 'stop';
+  const at = startAt.value;
+  if (withPosition && at) ctx.initialPosition = { ...at };
   return ctx;
 }
 
-/** grblHAL takes $ and [ lines, which aren't G-code: read them as comments. They move nothing,
- *  except $H (homing), which leaves the position where homing puts it (an inference, not modelled). */
+/** The lines as the interpreter reads them. $ and [ lines go as they are: it knows which change nothing,
+ *  follows $H, and leaves the reading incomplete after the others. */
 export function programText(lines: string[]): string {
-  return lines.map(l => /^[$[]/.test(l) ? ';' + l : l).join('\n');
+  return lines.join('\n');
 }
 
 const HEADER_TOOL = /^T(\d+)\s+(.*)$/i;
@@ -143,7 +200,7 @@ function toolRows(p: Program, cum: Float64Array): ToolRow[] {
 function programExtent(p: Program): ProgramView['extent'] {
   const machine = emptyBounds(), perWorkOffset: ProgramView['extent']['perWorkOffset'] = {};
   for (const m of p.moves) {
-    if (/^G(53|28|30)\b/.test(m.source)) continue;
+    if (/^(G(53|28|30)\b|\$H)/.test(m.source)) continue;
     const wb = perWorkOffset[m.workOffset] ??= emptyBounds();
     for (const pt of m.arc ? moveExtrema(m).slice(1) : [m.end]) {
       includePoint(machine, pt);
@@ -176,40 +233,54 @@ export const reading = signal(false);
 /** Read again at once, for those who changed something the program depends on (offsets.ts). */
 export function reread(): void { schedule(true); }
 
-// What a reading depends on, besides the lines: a new reading only when one of these changes.
+/** Read now if anything it depends on has changed: Start, so the run's rows are read from its modes. */
+export function readNow(): void {
+  if (timer) { clearTimeout(timer); timer = null; }
+  readIfStale(false);
+}
+
+// What a reading depends on, besides the lines and the start: a new reading only when one of these changes.
 const contextKey = computed(() => JSON.stringify(context(false)));
+const startKey = () => JSON.stringify(startAt.peek());
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let readFor: string[] | null = null;
 let readKey = '';
+let readStart = '';
 
-function schedule(force = false): void {
-  if (timer) clearTimeout(timer);
-  // A moment first, so the screen says "reading" before the page is busy, and a burst of offset reads makes one reading.
-  timer = setTimeout(() => {
-    timer = null;
-    const lines = job.lines.value;
-    if (!lines.length) { view.value = null; reading.value = false; readFor = null; return; }
-    const key = contextKey.value;
-    if (!force && lines === readFor && key === readKey) { reading.value = false; return; }
-    // Not while the file runs: the tool changes and offset reads would make it read again mid-job,
-    // and the rows must stay the run's. It reads once the run ends (the effect below watches it).
-    if (lines === readFor && job.running.value) { reading.value = false; return; }
-    const v = read(lines);
-    readFor = lines; readKey = key;
-    view.value = v;
-    reading.value = false;
-    log('info', `Program read: ${v.program.moves.length.toLocaleString('en-GB')} moves, ${v.rows.length} tool${v.rows.length === 1 ? '' : 's'}, ` +
-      `about ${Math.round(v.estSeconds)} s of motion, in ${Math.round(v.readMs)} ms` + (v.stopped ? `; stops at line ${v.stopped.line}: ${v.stopped.message}` : ''));
-  }, 30);
+function readIfStale(force: boolean): void {
+  const lines = job.lines.peek();
+  if (!lines.length) { view.value = null; reading.value = false; readFor = null; return; }
+  const key = contextKey.peek(), start = startKey();
+  if (!force && lines === readFor && key === readKey && start === readStart) { reading.value = false; return; }
+  // Not while the file runs: the tool changes and offset reads would make it read again mid-job,
+  // and the rows must stay the run's. It reads once the run ends (the effect below watches it).
+  if (lines === readFor && job.running.peek()) { reading.value = false; return; }
+  const v = read(lines);
+  readFor = lines; readKey = key; readStart = start;
+  view.value = v;
+  reading.value = false;
+  log('info', `Program read: ${v.program.moves.length.toLocaleString('en-GB')} moves, ${v.rows.length} tool${v.rows.length === 1 ? '' : 's'}, ` +
+    `about ${Math.round(v.estSeconds)} s of motion, in ${Math.round(v.readMs)} ms` + (v.stopped ? `; stops at line ${v.stopped.line}: ${v.stopped.message}` : ''));
 }
 
+function schedule(force = false, delay = 30): void {
+  if (timer) clearTimeout(timer);
+  // A moment first, so the screen says "reading" before the page is busy, and a burst of offset reads makes one reading.
+  timer = setTimeout(() => { timer = null; readIfStale(force); }, delay);
+}
+
+let lastStart = '';
 effect(() => {
   const lines = job.lines.value;
   contextKey.value;
   job.running.value;
+  const start = JSON.stringify(startAt.value);
   if (lines !== readFor) { view.value = null; reading.value = lines.length > 0; }
-  schedule();
+  // Only the start moved (a jog, a move while idle): read once it has stayed put a moment.
+  const moved = start !== lastStart && lines === readFor;
+  lastStart = start;
+  schedule(false, moved ? 400 : 30);
 });
 
 /** The row a line belongs to. */
