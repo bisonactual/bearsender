@@ -1,10 +1,16 @@
 // ═══════════════════════════════════════════════
 // THREE.JS 3D VIEWPORT
 // ═══════════════════════════════════════════════
+//
+// The scene is made at start-up, so the jog ghosts, exclusion zones and probe preview can add to it
+// at any time. It is drawn on the canvas of the job screen's Preview (src/app/Preview.tsx), from the
+// G-code interpreter's moves: machine coordinates, arcs sampled as curves.
 
 import { state, VP_STORAGE_KEY } from './state';
 import { lsGet, lsSet } from './ui';
 import { ezUpdateSpriteScales } from './exclusion-zones';
+import { sampleMove } from './gcode/index';
+import type { Program } from './gcode/index';
 
 import * as THREE from 'three';
 
@@ -48,11 +54,6 @@ function cssColorToHex(varName: string, fallback: number): number {
 }
 
 export function initViewport(): void {
-  _canvas = document.getElementById('threeCanvas') as HTMLCanvasElement;
-  renderer = new THREE.WebGLRenderer({ canvas: _canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setClearColor(0x0f0f17, 1);
-
   scene = new THREE.Scene();
 
   perspCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
@@ -97,12 +98,22 @@ export function initViewport(): void {
 
   updateCamera();
   rebuildViewportGrid();
+}
+
+/** Draw the scene on this canvas, which fills its parent. Once, from the Preview. */
+export function attachViewport(canvas: HTMLCanvasElement): void {
+  if (renderer) return;
+  _canvas = canvas;
+  renderer = new THREE.WebGLRenderer({ canvas: _canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setClearColor(0x0f0f17, 1);
   setupOrbitControls(_canvas);
   setupTouchControls(_canvas);
 
   function resizeRenderer() {
     const wrap = _canvas.parentElement!;
     const w = wrap.clientWidth, h = wrap.clientHeight;
+    if (!w || !h) return;
     renderer.setSize(w, h);
     perspCamera.aspect = w / h;
     perspCamera.updateProjectionMatrix();
@@ -116,6 +127,8 @@ export function initViewport(): void {
 
 function animate(): void {
   requestAnimationFrame(animate);
+  // Nothing to draw while the Preview is hidden.
+  if (!_canvas.offsetParent && !_canvas.closest('.is-full')) return;
   const t = Date.now() * 0.002;
   if (ringMat) ringMat.opacity = 0.2 + 0.2 * Math.sin(t);
   ezUpdateSpriteScales(spherical.radius);
@@ -140,7 +153,7 @@ export function updateCamera(): void {
 }
 
 function syncOrthoFrustum(): void {
-  const size = renderer.getSize(new THREE.Vector2());
+  const size = renderer ? renderer.getSize(new THREE.Vector2()) : new THREE.Vector2(1, 1);
   const aspect = (size.x || 1) / (size.y || 1);
   const halfH = spherical.radius * 0.5;
   const halfW = halfH * aspect;
@@ -488,12 +501,13 @@ export function setView(v: string): void {
   updateCamera();
 }
 
+// The drawn program's extent, in scene coordinates, for FIT.
+let _pathBox: any = null;
+
 export function fitView(): void {
-  if (state.toolpathSegments.length === 0) return;
-  const box = new THREE.Box3();
-  state.toolpathSegments.forEach((s: any) => { box.expandByPoint(s.from); box.expandByPoint(s.to); });
-  const center = new THREE.Vector3(); box.getCenter(center);
-  const size = new THREE.Vector3(); box.getSize(size);
+  if (!_pathBox || _pathBox.isEmpty()) return;
+  const center = new THREE.Vector3(); _pathBox.getCenter(center);
+  const size = new THREE.Vector3(); _pathBox.getSize(size);
   target.copy(center);
   spherical.radius = Math.max(size.length() * 1.5, 10);
   updateCamera();
@@ -502,57 +516,82 @@ export function fitView(): void {
 export function toggleToolhead(): void {
   state.showToolhead = !state.showToolhead;
   toolGroup.visible = state.showToolhead;
-  document.getElementById('btnToolhead')!.textContent = state.showToolhead ? 'TOOL ●' : 'TOOL ○';
+  const btn = document.getElementById('btnToolhead');
+  if (btn) btn.textContent = state.showToolhead ? 'TOOL ●' : 'TOOL ○';
 }
 
-// ── Toolpath mesh ─────────────────────────────────────────────────────────────
-export function buildToolpathMesh(segments: any[]): void {
-  if (rapidLines) { scene.remove(rapidLines); rapidLines.geometry.dispose(); }
-  if (cutLines) { scene.remove(cutLines); cutLines.geometry.dispose(); }
-  if (executedLine) { scene.remove(executedLine); executedLine.geometry.dispose(); }
+// ── Toolpath ──────────────────────────────────────────────────────────────────
+//
+// Every move in program order goes into one buffer of line segments: machine X, Z and −Y, as the
+// scene has them. The executed path is a draw range of it, so following the job costs nothing.
+// Cuts and rapids each get their own buffer for their colours. A move with an unknown end isn't drawn.
 
-  const rapidPts: any[] = [], cutPts: any[] = [];
-  segments.forEach(s => {
-    if (s.isRapid) { rapidPts.push(s.from, s.to); }
-    else { cutPts.push(s.from, s.to); }
+let _ordered: Float32Array = new Float32Array(0);
+/** Vertices of the ordered buffer up to the end of each move: index i is the count before move i. */
+let _vertexAt: Uint32Array = new Uint32Array(1);
+
+function disposeLine(obj: any): void {
+  if (!obj) return;
+  scene.remove(obj);
+  obj.geometry.dispose();
+  obj.material.dispose();
+}
+
+function lines(points: Float32Array, color: number, opacity: number): any {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(points, 3));
+  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity }));
+  scene.add(l);
+  return l;
+}
+
+/** Draw the program's moves, or clear the view with null. */
+export function showProgram(program: Program | null): void {
+  disposeLine(rapidLines); disposeLine(cutLines); disposeLine(executedLine);
+  rapidLines = cutLines = executedLine = null;
+  _pathBox = null;
+  const moves = program?.moves ?? [];
+  const ordered: number[] = [], cut: number[] = [], rapid: number[] = [];
+  _vertexAt = new Uint32Array(moves.length + 1);
+  moves.forEach((m, i) => {
+    _vertexAt[i] = ordered.length / 3;
+    const pts = sampleMove(m);
+    if (pts.some(p => p.x === null || p.y === null || p.z === null)) return;
+    const out = m.kind === 'rapid' ? rapid : cut;
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1], b = pts[k];
+      // Scene coordinates: x = machine X, y = machine Z, z = −machine Y.
+      ordered.push(a.x!, a.z!, -a.y!, b.x!, b.z!, -b.y!);
+      out.push(a.x!, a.z!, -a.y!, b.x!, b.z!, -b.y!);
+    }
   });
-
-  if (rapidPts.length > 0) {
-    const g = new THREE.BufferGeometry().setFromPoints(rapidPts);
-    rapidLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: cssColorToHex('--vp-rapid', 0xff4444), transparent: true, opacity: 0.5 }));
-    scene.add(rapidLines);
-  }
-  if (cutPts.length > 0) {
-    const g = new THREE.BufferGeometry().setFromPoints(cutPts);
-    cutLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: cssColorToHex('--vp-cut', 0x00d4ff), transparent: true, opacity: 0.85 }));
-    scene.add(cutLines);
+  _vertexAt[moves.length] = ordered.length / 3;
+  _ordered = new Float32Array(ordered);
+  if (rapid.length) rapidLines = lines(new Float32Array(rapid), cssColorToHex('--vp-rapid', 0xff4444), 0.5);
+  if (cut.length) cutLines = lines(new Float32Array(cut), cssColorToHex('--vp-cut', 0x00d4ff), 0.85);
+  if (_ordered.length) {
+    executedLine = lines(_ordered, cssColorToHex('--vp-executed', 0x00ff88), 1);
+    executedLine.geometry.setDrawRange(0, 0);
+    executedLine.renderOrder = 1;
+    _pathBox = new THREE.Box3().setFromBufferAttribute(executedLine.geometry.getAttribute('position'));
   }
 }
 
-export function updateExecutedPath(segIdx: number): void {
-  if (executedLine) { scene.remove(executedLine); executedLine.geometry.dispose(); executedLine = null; }
-  if (segIdx <= 0 || state.toolpathSegments.length === 0) return;
-
-  const pts: any[] = [];
-  const count = Math.min(segIdx, state.toolpathSegments.length);
-  for (let i = 0; i < count; i++) {
-    pts.push(state.toolpathSegments[i].from, state.toolpathSegments[i].to);
-  }
-  if (pts.length < 2) return;
-  const g = new THREE.BufferGeometry().setFromPoints(pts);
-  executedLine = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: cssColorToHex('--vp-executed', 0x00ff88), linewidth: 2 }));
-  scene.add(executedLine);
+/** The moves done so far: the first `count` of the program's. */
+export function showExecuted(count: number): void {
+  if (!executedLine) return;
+  const n = Math.max(0, Math.min(count, _vertexAt.length - 1));
+  executedLine.geometry.setDrawRange(0, _vertexAt[n]);
 }
 
-// Rebuild toolpath meshes from current segments so colour changes take effect immediately
+// Colour changes from the theme editor take effect at once.
 export function vpRefreshColors(): void {
   const toolColor = cssColorToHex('--vp-tool', 0xffd740);
   if (toolMesh?.material) { toolMesh.material.color.setHex(toolColor); }
   if (ringMat) { ringMat.color.setHex(toolColor); }
-  if (state.toolpathSegments.length > 0) {
-    buildToolpathMesh(state.toolpathSegments);
-    if (state.segmentIndex > 0) updateExecutedPath(state.segmentIndex);
-  }
+  rapidLines?.material.color.setHex(cssColorToHex('--vp-rapid', 0xff4444));
+  cutLines?.material.color.setHex(cssColorToHex('--vp-cut', 0x00d4ff));
+  executedLine?.material.color.setHex(cssColorToHex('--vp-executed', 0x00ff88));
 }
 
 export function vpApply(): void {

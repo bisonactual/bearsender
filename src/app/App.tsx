@@ -252,7 +252,9 @@ function MessageLine() {
     const z = machine.mpos.value.z;
     // How the controller measures at a tool change, by $341 (JobScreen.tsx, measureCheck).
     const tc = toolChangeMode();
-    const how = tc === 1 || tc === 2 ? <>, press <strong>MEASURE</strong> in Setup, then press Resume.</>
+    // Held by BearSender at an M6 the controller passed (Options: Hold at every M6): it is idle.
+    const how = job.heldAtM6.value ? <>, measure it if it changed, then press Resume. BearSender holds here (Hold at every M6).</>
+      : tc === 1 || tc === 2 ? <>, press <strong>MEASURE</strong> in Setup, then press Resume.</>
       : tc === 3 ? <>, then press Resume; the controller measures it.</>
       : <>, then press Resume.</>;
     return (
@@ -286,6 +288,10 @@ function MessageLine() {
     const how: Record<string, string> = { stopped: 'was stopped', error: 'halted on an error', alarm: 'was stopped by an alarm', 'link lost': 'stopped when the connection was lost' };
     const at = job.executingLine.value;
     text = <><strong>{file}</strong> {how[job.result.value]}{at ? ' at line ' + num(at) : ''}, after {job.fmtDuration(job.elapsedMs.value)}. The record is in the Recorder panel; press Start to run it again from the top.</>;
+  }
+  else if (job.fromQueueAfter.value) {
+    // The queue loaded the next job when the last completed; nothing moves until Start.
+    text = <>{job.fromQueueAfter.value} completed. Next from the queue: <strong>{file}</strong> is loaded. Work through the setup list, then press <strong>Start</strong>.</>;
   }
   else text = <>Ready to start <strong>{file}</strong>. Work through the setup list, then press Start.</>;
   return (

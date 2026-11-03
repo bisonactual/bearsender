@@ -20,10 +20,20 @@ import { lsGet, lsSet, esc } from './ui';
 import { streamLines, type SendLine } from './streaming';
 import { errorText } from './errors';
 import { on as onBus } from './bus';
-import { jobId, numberedLine, programLines, modalScan, resumePreamble, resumeStart, ResumeRefused } from './flight-recorder-resume';
-import { batch } from '@preact/signals';
+import { jobId, numberedLine, resumeState, describeState, resumePreamble, resumeStart, ResumeRefused, type Lift } from './flight-recorder-resume';
+import type { ModalState } from './gcode/index';
+import { batch, effect, untracked } from '@preact/signals';
 import * as flight from './stores/flight';
 import * as messages from './stores/messages';
+import * as job from './stores/job';
+import * as machine from './stores/machine';
+import * as connection from './stores/connection';
+import * as options from './stores/options';
+import * as starts from './stores/starts';
+import { context, programText, modesFromWords, wcsFromWords } from './stores/program';
+import { loadOffsets } from './offsets';
+import { loadToolTable } from './tooltable';
+import { untilProgramEnd } from './streaming';
 
 export interface FlightRecord {
   state: string;      // Idle, Running, Stopped, Retracted, Completed
@@ -238,23 +248,140 @@ function maybeOfferResume(): void {
 
 // ── Resume ────────────────────────────────────────────────────────────────────
 
-interface ResumePlan { preamble: string[]; index: number; first: string; }
+interface ResumePlan { preamble: string[]; index: number; first: string; modes: string; lift: string; }
+/** A plan, or why there's none yet (waiting) or none at all (refused). */
+type PlanResult = ResumePlan | { waiting: string } | { refused: string };
 
+/** The recorder's own retract height, $792 mm below machine zero. */
 function retractZ(): number {
   const depth = parseFloat(state.settingsValues[792] ?? '');
   return isNaN(depth) ? -20 : -depth;
 }
 
-function buildPlan(record: FlightRecord): ResumePlan | string {
+/** Machine Z at the top of the travel, as grblHAL's soft limits have it (machine_limits.c): minus the
+ *  pull-off ($27) with hard limits on ($21), 0 otherwise or with "set machine origin to 0" ($22 bit 3). */
+function zTop(): number {
+  const s = machine.settings.value;
+  const flags = parseInt(s[22] ?? ''), hard = parseInt(s[21] ?? ''), pulloff = parseFloat(s[27] ?? '');
+  return !(flags & 8) && (hard & 1) && pulloff > 0 ? -pulloff : 0;
+}
+
+/** The resume's lift height in machine Z: the option, mm below machine zero, no higher than the top of the travel. */
+function liftZ(): number { return Math.min(-options.resumeLiftMm.value, zTop()); }
+
+/** The modes the job started from, kept at its Start in this browser, and what the dialog says of them. */
+function jobStart(record: FlightRecord): { words: string[] | null; note: string; known: boolean } {
+  const kept = starts.forJob(record.job);
+  if (kept?.modes?.length) {
+    const g = kept.modes.filter(w => /^G(17|18|19|20|21|90|91|93|94|5[4-9](\.\d)?)$/.test(w)).join(' ');
+    return { words: kept.modes, known: true,
+      note: `Read from the modes the job started in, ${g}, kept when it was started at ${new Date(kept.at).toLocaleTimeString('en-GB')} on ${new Date(kept.at).toLocaleDateString('en-GB')}.` };
+  }
+  return { words: null, known: false, note: kept
+    ? 'When this job was started the controller didn\'t answer $G, so the modes it started in aren\'t known: the plan assumes G21 G90 G17 G94. Check them against the file\'s first lines.'
+    : 'This browser has no record of the modes this job started in (it was started from another PC or browser, or before BearSender kept them): the plan assumes G21 G90 G17 G94. Check them against the file\'s first lines.' };
+}
+
+// The interpreter's state at the resume line, for the context it was read with: the plan is shown and
+// rebuilt as the offsets, the tool length and the machine's Z change, and reading 28,000 moves again for
+// each would be slow.
+let _stateCache: { key: string; s: ModalState | string } | null = null;
+
+function resumeModal(record: FlightRecord): ModalState | string {
+  // The lines as they were sent, read with the controller's offsets and tool length as they are now,
+  // from the modes the job started in, and not from where the machine is now: the job started from
+  // somewhere else, so the start stays unknown.
+  const ctx = context(false);
+  delete ctx.initialModes;
+  const start = jobStart(record);
+  const modes = modesFromWords(start.words), wcs = wcsFromWords(start.words);
+  if (modes) ctx.initialModes = modes;
+  if (wcs) ctx.activeWorkOffset = wcs;
+  const key = record.job + ':' + record.ln + ':' + JSON.stringify(ctx);
+  if (_stateCache?.key === key) return _stateCache.s;
+  let s: ModalState | string;
+  try { s = resumeState(programText(state.gcodeLines), record.ln, ctx); }
+  catch (e) { if (!(e instanceof ResumeRefused)) throw e; s = e.message; }
+  _stateCache = { key, s };
+  return s;
+}
+
+let _offsetsAsked = false;
+let _pressing = false;   // RESUME is reading $# and $TTLIST again
+
+function buildPlan(record: FlightRecord): PlanResult {
+  if (!state.connected) return { waiting: 'Connect to the controller: the moves back in show here once its offsets and tool length are read.' };
+  // The moves back in go to machine positions, which take the work offsets and the tool length: the plan
+  // waits for this connection's $# (the record can come first).
+  if (!machine.offsetsRead.value || !machine.offsets.value[record.wcs]) {
+    if (!_offsetsAsked) { _offsetsAsked = true; loadOffsets(); }
+    return { waiting: 'Reading the work offsets and the tool length from the controller ($#); the moves back in show here once they are in.' };
+  }
+  const s = resumeModal(record);
+  if (typeof s === 'string') return { refused: s };
   try {
-    const modes = modalScan(programLines(state.gcodeLines), record.ln);
-    const start = resumeStart(state.gcodeLines, record.ln, modes);
-    const preamble = resumePreamble(record.job, !!(record.flags & FLAG_NO_RETRACT), modes, retractZ());
-    return { preamble, index: start.index, first: start.first };
-  } catch (e: any) {
-    if (e instanceof ResumeRefused) return e.message;
+    const start = resumeStart(state.gcodeLines, record.ln, s.motion);
+    const lift: Lift = { liftZ: liftZ(), currentZ: machine.mpos.value.z };
+    const preamble = resumePreamble(record.job, !!(record.flags & FLAG_NO_RETRACT), s, lift);
+    const across = Math.max(lift.liftZ, lift.currentZ).toFixed(3);
+    const liftText = lift.currentZ < lift.liftZ - 0.0005
+      ? `up from machine Z ${lift.currentZ.toFixed(3)} to ${lift.liftZ.toFixed(3)}, then across there`
+      : `Z stays at machine Z ${lift.currentZ.toFixed(3)}, above the lift height ${lift.liftZ.toFixed(3)}, and crosses at ${across}`;
+    return { preamble, index: start.index, first: start.first, modes: describeState(s), lift: liftText };
+  } catch (e) {
+    if (e instanceof ResumeRefused) return { refused: e.message };
     throw e;
   }
+}
+
+function isPlan(p: PlanResult): p is ResumePlan { return 'preamble' in p; }
+
+function planHtml(record: FlightRecord, plan: PlanResult): string {
+  const start = jobStart(record);
+  const modesNote = `<div class="fr-step-text"${start.known ? '' : ' style="color:var(--yellow)"'}>${esc(start.note)}</div>`;
+  if ('waiting' in plan) return `<div class="fr-step-text">${esc(plan.waiting)}</div>`;
+  if ('refused' in plan) return `<div class="fr-refused">This job can't be resumed automatically: ${esc(plan.refused)}.</div>` + modesNote;
+  return modesNote +
+    `<div class="fr-step-text">The program's state before line ${record.ln}, read by the interpreter: ${esc(plan.modes)}. The first move: ${esc(plan.lift)}.</div>` +
+    `<pre class="fr-plan">${plan.preamble.map(esc).join('\n')}\n<span class="fr-plan-first">${esc(plan.first)}</span>   ← then on from here</pre>`;
+}
+
+/** Puts the plan as it would be sent now into the open dialog. */
+function renderPlan(plan?: PlanResult): void {
+  const modal = document.getElementById('frModal'), el = document.getElementById('frPlan');
+  const record = _record;
+  if (!modal || modal.style.display === 'none' || !el || !record || !loadedFileMatches(record)) return;
+  if (_pressing) return;
+  el.innerHTML = planHtml(record, plan ?? buildPlan(record));
+}
+
+// While the dialog is open the plan follows what it is built from, so what it shows is what Resume sends.
+effect(() => {
+  void machine.offsets.value; void machine.offsetsRead.value; void machine.tlo.value; void machine.tloVector.value;
+  void machine.toolTable.value; void machine.settings.value; void machine.mpos.value.z; void machine.modal.value;
+  void connection.connected.value; void options.resumeLiftMm.value; void options.runAfterM30.value; void starts.kept.value;
+  untracked(() => renderPlan());
+});
+
+/** RESUME: the offsets, the tool length and the tool table are read again ($#, $TTLIST), the plan is
+ *  built from them and shown, and that is what goes. */
+async function pressResume(record: FlightRecord): Promise<void> {
+  if (_pressing || !readyToResume()) return;
+  _pressing = true;
+  updateResumeDialog();
+  const el = document.getElementById('frPlan');
+  if (el) el.insertAdjacentHTML('afterbegin', '<div class="fr-step-text">Reading the offsets, the tool length and the tool table again ($#, $TTLIST)…</div>');
+  const read = await loadOffsets();
+  try { await loadToolTable(); } catch (e) { if (!(e instanceof command.CommandFailed)) throw e; }
+  _pressing = false;
+  _stateCache = null;
+  const plan: PlanResult = read ? buildPlan(record) : { refused: 'the controller didn\'t answer $#, so the offsets and the tool length aren\'t known now; press RESUME again' };
+  renderPlan(plan);
+  updateResumeDialog();
+  if (!isPlan(plan) || !readyToResume()) return;
+  log('info', `✈ Resume plan from line ${record.ln}, built now: ${plan.modes}; the first move: ${plan.lift}; ` +
+    `sending ${plan.preamble.join(' | ')} | ${plan.first}`);
+  startResume(record, plan);
 }
 
 function startResume(record: FlightRecord, plan: ResumePlan): void {
@@ -269,7 +396,7 @@ function startResume(record: FlightRecord, plan: ResumePlan): void {
   }
   log('info', `✈ Resuming job ${record.job} from line ${line}`);
   closeModal();
-  streamLines(lines, true, { stamp, resumedAt: line });
+  streamLines(untilProgramEnd(lines), true, { stamp, resumedAt: line });
 }
 
 /** DISCARD RECORD: says so only once the controller has accepted $FLIGHTCLEAR. */
@@ -301,8 +428,9 @@ export function frOpenResume(): void {
   const record = _record;
   _toolChecked = false;
 
+  // The plugin lifts only from below its retract height (flight_recorder.c), so the tool may be higher.
   const how = record.state === 'Retracted'
-    ? `The tool was lifted to machine Z ${retractZ().toFixed(1)} and the spindle stopped.`
+    ? `The tool was lifted to machine Z ${retractZ().toFixed(1)}, or left where it was if it was higher, and the spindle stopped.`
     : 'The tool was <b>not</b> lifted clear. Make sure it is clear of the work before going on.';
   const summary =
     `<div class="fr-summary">Job <b>${esc(record.job)}</b> stopped at line <b>${record.ln}</b> because ` +
@@ -316,19 +444,17 @@ export function frOpenResume(): void {
       `<div class="fr-step-actions"><button class="tb-btn primary" data-fr="open">📂 OPEN FILE</button></div></div>` +
       `<div class="fr-modal-actions"><button class="tb-btn danger" data-fr="discard">DISCARD RECORD</button>` +
       `<div style="flex:1"></div><button class="tb-btn" data-fr="close">NOT NOW</button></div>`;
-    wireModal(record, null);
+    wireModal(record);
     modal.style.display = '';
     return;
   }
 
-  const plan = buildPlan(record);
-  const file = document.getElementById('fileName')?.textContent || 'the loaded file';
+  _offsetsAsked = false;
+  _stateCache = null;
+  const file = job.file.value || 'the loaded file';
   const toolText = record.tool
     ? `The job was using <b>T${record.tool}</b>. Check that tool is in the spindle, with its length offset set.`
     : 'Check the right tool is in the spindle, with its length offset set.';
-  const planHtml = typeof plan === 'string'
-    ? `<div class="fr-refused">This job can't be resumed automatically: ${esc(plan)}.</div>`
-    : `<pre class="fr-plan">${plan.preamble.map(esc).join('\n')}\n<span class="fr-plan-first">${esc(plan.first)}</span>   ← then on from here</pre>`;
 
   body.innerHTML = summary +
     `<div class="fr-step"><div class="fr-step-title">1. Clear the alarm</div>` +
@@ -340,17 +466,20 @@ export function frOpenResume(): void {
     `<div class="fr-step-text">${toolText}</div>` +
     `<label class="fr-toggle fr-check"><input type="checkbox" data-fr="tool"> Tool checked</label></div>` +
     `<div class="fr-step"><div class="fr-step-title">3. Resume ${esc(file)} from line ${record.ln}</div>` +
-    `<div class="fr-step-text">BearSender goes up to the retract height, over the start of the line, ` +
-    `starts the spindle and comes straight down, then carries on with the file:</div>${planHtml}</div>` +
+    `<div class="fr-step-text">BearSender puts the file's tool length offset back, goes up to machine Z ${liftZ().toFixed(1)} ` +
+    `unless the tool is higher (Options: Resume lift), over the start of the line, starts the spindle and comes straight ` +
+    `down, then carries on with the file. RESUME reads the offsets and the tool length again first, and sends the plan ` +
+    `as it is then:</div><div id="frPlan"></div></div>` +
     `<div class="fr-modal-actions"><button class="tb-btn danger" data-fr="discard">DISCARD RECORD</button>` +
     `<div style="flex:1"></div><button class="tb-btn" data-fr="close">NOT NOW</button>` +
     `<button class="tb-btn success" data-fr="start" disabled>▶ RESUME</button></div>`;
-  wireModal(record, typeof plan === 'string' ? null : plan);
-  updateResumeDialog();
+  wireModal(record);
   modal.style.display = '';
+  renderPlan();
+  updateResumeDialog();
 }
 
-function wireModal(record: FlightRecord, plan: ResumePlan | null): void {
+function wireModal(record: FlightRecord): void {
   const body = document.getElementById('frModalBody')!;
   const on = (name: string, fn: (el: HTMLElement) => void) => {
     const el = body.querySelector<HTMLElement>(`[data-fr="${name}"]`);
@@ -362,11 +491,11 @@ function wireModal(record: FlightRecord, plan: ResumePlan | null): void {
   on('unlock', () => sendCmd('$X'));
   on('home', () => sendCmd('$H'));
   on('tool', el => { _toolChecked = (el as HTMLInputElement).checked; updateResumeDialog(); });
-  on('start', () => { if (plan && readyToResume()) startResume(record, plan); });
+  on('start', () => { pressResume(record); });
 }
 
 function readyToResume(): boolean {
-  return state.connected && !state.running && machineState() === 'idle' && _toolChecked;
+  return state.connected && !state.running && !_pressing && machineState() === 'idle' && _toolChecked;
 }
 
 /** Keeps the machine state and the RESUME button up to date while the dialog is open. */

@@ -33,12 +33,13 @@ export const WCS_ENTRIES = [
 const OFFSET_KEYS = new Set(['G54','G55','G56','G57','G58','G59',
   'G59.1','G59.2','G59.3','G28','G28.1','G30','G30.1','G92']);
 
-/** Reads the work offsets ($#). The [TLO:] line in its reply is a push message (see below). */
-export async function loadOffsets(): Promise<void> {
-  if (!state.connected) { log('err', 'Not connected'); return; }
+/** Reads the work offsets ($#), and says whether it got them. The [TLO:] line in its reply is a push
+ *  message (see below). */
+export async function loadOffsets(): Promise<boolean> {
+  if (!state.connected) { log('err', 'Not connected'); return false; }
   let reply: command.Reply;
   try { reply = await command.send('$#'); }
-  catch (e) { if (e instanceof command.CommandFailed) return; throw e; }
+  catch (e) { if (e instanceof command.CommandFailed) return false; throw e; }
   for (const raw of reply.lines) {
     // [G54:x,y,z] [G55:...] [G28:...]; [PRB:] is the last probe's, not an offset
     const m = raw.match(/^\[([A-Z0-9.]+):([^\]]+)\]$/);
@@ -47,12 +48,31 @@ export async function loadOffsets(): Promise<void> {
     // Store normalised: x, y, z (pad with 0 if fewer axes reported)
     state.wcsOffsets[m[1]] = { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
   }
-  if (reply.result !== 'ok') return;
+  if (reply.result !== 'ok') return false;
+  // The table first, then the flag, so whoever waits for the flag finds the table in.
+  renderOffsetsTable();
   machine.offsetsRead.value = true;
   if (!machine.offsetsAtConnect.value) machine.offsetsAtConnect.value = { ...state.wcsOffsets };
-  renderOffsetsTable();
+  _staleAfterReset = false;
   refreshLoadedProgramPreviewIfNeeded();
+  return true;
 }
+
+// After a reset the tool length offset may be kept or cleared: on this build a warm reset keeps the
+// numbers while $G says G49 (gcode.c gc_init), a cold start or another compatibility level clears
+// them. So $# and $G are read again rather than assumed, now and, if the controller refuses them (in
+// an alarm), once it is idle (parser.ts).
+let _staleAfterReset = false;
+
+/** A reset went (Stop, RESET, probe Cancel): read the offsets, the tool length and the modes again. */
+export function rereadAfterReset(): void {
+  _staleAfterReset = true;
+  loadOffsets();
+  command.send('$G').catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
+}
+
+/** The offsets are still to be read: never yet, or not since a reset. */
+export function offsetsUnread(): boolean { return !machine.offsetsRead.value || _staleAfterReset; }
 
 // [TLO:z] or [TLO:x,y,z], in the $# reply and pushed after a status report when it changes.
 command.on('tlo', raw => {
@@ -60,6 +80,7 @@ command.on('tlo', raw => {
   const vals = raw.slice(5, -1).split(',').map(v => reportMm(Number(v)));
   state.tloOffset = vals.length === 1 ? vals[0] : (vals[2] ?? vals[0]);
   state.tloActive = state.tloOffset !== 0;
+  machine.tloVector.value = vals.length === 1 ? { x: 0, y: 0, z: vals[0] } : { x: vals[0] ?? 0, y: vals[1] ?? 0, z: vals[2] ?? 0 };
   machine.tlo.value = state.tloOffset;
   renderOffsetsTable();
 });

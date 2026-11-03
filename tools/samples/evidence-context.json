@@ -1,0 +1,7 @@
+{
+  "activeWorkOffset": "G54",
+  "workOffsets": { "G54": { "x": 0, "y": 0, "z": 0 } },
+  "initialPosition": { "x": 0, "y": 0, "z": 0 },
+  "rapidRates": { "x": 3000, "y": 3000, "z": 3000 },
+  "g73RetractMm": 1
+}

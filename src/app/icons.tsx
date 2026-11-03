@@ -52,6 +52,15 @@ export function IconTodo() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-label="to do"><circle cx="12" cy="12" r="8" /></svg>;
 }
 
+/** Move a queued job up or down. */
+export function IconArrow({ up }: { up: boolean }) {
+  return <svg width="14" height="14" viewBox="0 0 24 24" {...line} stroke-width="2.5" aria-hidden="true">{up ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}</svg>;
+}
+
+export function IconClose() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" {...line} stroke-width="2.5" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>;
+}
+
 export function IconUnknown() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="2.5 3" aria-label="not checked yet"><circle cx="12" cy="12" r="8" /></svg>;
 }

@@ -10,12 +10,11 @@ import { log } from './console';
 import { _updateHomeBtnHomed, rtSend } from './connection';
 import { endRunOnAlarm } from './streaming';
 import { reportMm } from './units';
-import { updateExecutedPath, toolGroup } from './viewport';
+import { toolGroup } from './viewport';
 import { renderToolTable, renderModTT } from './tooltable';
 import { ezParseStatus } from './exclusion-zones';
 import { emit, type StatusReport } from './bus';
-import { loadOffsets } from './offsets';
-import { segmentsUpToLine } from './gcode';
+import { loadOffsets, offsetsUnread } from './offsets';
 import * as command from './command';
 import { batch } from '@preact/signals';
 import * as machine from './stores/machine';
@@ -34,8 +33,28 @@ export function initParser(): void {
   command.on('gc', line => { log('info', line); machine.modal.value = line.slice(4, -1).trim().split(/\s+/); });
   command.onReply((reply, { job, quiet }) => {
     if (reply.result === 'error') { if (!quiet) messages.push('error', `error:${reply.code} on "${reply.command}"`); }
-    else if (!job) noteOffsetWrite(reply.command);
+    else if (!job) { noteOffsetWrite(reply.command); noteModeChange(reply.command); }
   });
+}
+
+// The modes the next job starts from ($G), for the program's reading (stores/program.ts). grblHAL
+// pushes [GC:] only with $10's parser-state bit set (off by default), so they are asked for: on
+// connecting (asks.ts), when a file is loaded, after a command that can change them, when the
+// machine comes to rest, after a reset (offsets.ts) and at Start (streaming.ts).
+const MODAL = /G0*(?:[0-3]|17|18|19|20|21|38\.\d|43|49|5[4-9](?:\.\d)?|80|90|91|93|94)(?![\d.])|M0*(?:2|30)(?![\d.])/;
+let modesTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Reads $G in a moment, once for a burst of asks; not while a job runs. */
+export function readModesSoon(): void {
+  if (modesTimer) clearTimeout(modesTimer);
+  modesTimer = setTimeout(() => {
+    modesTimer = null;
+    if (state.connected && !state.running) command.send('$G', { quiet: true }).catch(e => { if (!(e instanceof command.CommandFailed)) throw e; });
+  }, 300);
+}
+
+function noteModeChange(command: string): void {
+  if (!state.running && !command.startsWith('$') && MODAL.test(command.toUpperCase().replace(/\s+/g, ''))) readModesSoon();
 }
 
 function onAlarm(raw: string): void {
@@ -103,10 +122,8 @@ function parseStatusReport(s: string): void {
       const ln = parseInt(vals[0]);
       report.ln = ln;
       tags.add('ln');
+      // The Preview follows it (src/app/Preview.tsx).
       job.reportedLine.value = ln;
-      // A numbered job's Ln is a line of the file, otherwise it's taken as a segment count.
-      state.segmentIndex = state.jobNumbered ? segmentsUpToLine(ln) : ln;
-      updateExecutedPath(state.segmentIndex);
     }
     if (key === 'Bf') {
       report.bf = { blocks: vals[0], bytes: vals[1] };
@@ -188,6 +205,14 @@ export function setMachineState(s: string): void {
   // An alarm: not homed until the controller's H: says otherwise (the full report asked for on ALARM:).
   if (sl === 'alarm' && state._prevMachineStateSl !== 'alarm') { state.machineHomed = false; machine.homed.value = false; _updateHomeBtnHomed(); }
   if (sl === 'idle' && state._prevMachineStateSl === 'home') { state.machineHomed = true; _updateHomeBtnHomed(); }
+  // $# can be refused in the power-up alarm, so the offsets read on connect may not have come: read them
+  // once the machine is idle (homed or unlocked), and so after a reset. The sim refused the first $
+  // command after homing (error:71) and took the next, so a refusal gets one more try.
+  if (sl === 'idle' && state._prevMachineStateSl !== 'idle' && offsetsUnread() && state.connected) {
+    loadOffsets().then(ok => { if (!ok) setTimeout(() => { if (state.connected && offsetsUnread()) loadOffsets(); }, 1000); });
+  }
+  // At rest after moving, an alarm or homing: what the next job starts from may have changed.
+  if (sl === 'idle' && state._prevMachineStateSl && state._prevMachineStateSl !== 'idle' && state.connected && !state.running) readModesSoon();
   state._prevMachineStateSl = sl;
 }
 
