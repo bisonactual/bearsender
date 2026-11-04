@@ -1,9 +1,12 @@
 # BearSender
 
 A G-code sender for grblHAL that runs in the browser, built as one self-contained HTML file. Nothing to install: open it and connect.
-It was FlexiSender, and is based on the original flexisender from [Expatria](https://github.com/Expatria-Technologies). The repository keeps the old name.
 
-[BearSender](https://bisonactual.github.io/Flexisender2/bearsender.html). The old addresses, `flexisender.html` and `Flexisender-Flightrecorder.html`, open it too.
+Based on the original flexisender from [Expatria](https://github.com/Expatria-Technologies). 
+
+To use Bearsender with the flight recorder and autoresume, firmware and hardware changes are required: See my project [here](https://github.com/bisonactual/Flight-Recorder) and read the readme.
+
+Bearsender supports websocket and serial connections.
 
 ![BearSender's job screen](screenshot.png)
 
@@ -12,6 +15,7 @@ It was FlexiSender, and is based on the original flexisender from [Expatria](htt
   - the current job, with its progress by time;
   - the Jobs list (a queue, kept in the browser) and the Program;
   - a panel with tabs: the Setup checks before you start, the flight Recorder, the 3D Preview, the Camera, the Console and your Macros.
+  - The panel with tabs automatically changes to the run screen once you start a job.
 - **Setup:** position, jogging, spindle and coolant, overrides, the program's limits and framing, surfacing, the work offsets, and the spindle warmup routines.
 - **Probing:** tool length, edge finder, centre finder and rotation, each drawn before it runs.
 - **Tools:** the controller's tool table (`$TTLIST`), beside the tools the loaded program uses.
@@ -26,12 +30,6 @@ It was FlexiSender, and is based on the original flexisender from [Expatria](htt
 - the position line, with every axis the controller has, and SET to zero one in the active offset;
 - the message line, which says what the machine needs next;
 - the bottom bar: jog and offsets, the overrides, MACHINE WARMUP, and START, HOLD and STOP.
-
-**What BearSender tells you is information, not a gate.** Nothing blocks Start, Home or jogging: you are the operator. A button that does something does it on one tap. The one exception is MACHINE WARMUP, which you hold for 5 seconds.
-
-## Connecting
-- **WebSocket:** over your network, to `ws://host:port`. This is the default, and works in any modern browser.
-- **USB / Serial:** with the Web Serial API, in Chrome or Edge. Pick it in Settings, Options; CONNECT then opens the browser's port picker.
 
 The address and the serial settings are in Settings, Options. On connecting, BearSender reads the controller's build (`$I+`): its axes, its buffer size and its plugins, such as Flight Recorder, Exclusion Zones and the Sienci ATCi.
 
@@ -49,8 +47,6 @@ The address and the serial settings are in Settings, Options. On connecting, Bea
 [Bun](https://bun.sh):
 - `bun install`, then `bun run build`, writes `dist/bearsender.html` (and the redirect pages);
 - `bun run dev` serves the source on port 3000 and reloads on every change.
-
-See `runbook.md`. The Pages workflow (`.github/workflows/pages.yml`) builds and publishes `dist/` on every push to `main`.
 
 ## License
 GPL
