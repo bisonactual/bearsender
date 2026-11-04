@@ -35,15 +35,17 @@ const fontsDir = resolve(rootDir, "fonts");
 const fontFaces = readFileSync(resolve(fontsDir, "fonts.css"), "utf-8")
   .replace(/url\(([\w.-]+\.woff2)\)/g, (_, file) => `url(data:font/woff2;base64,${readFileSync(resolve(fontsDir, file)).toString("base64")})`);
 const css = readFileSync(resolve(rootDir, "style.css"), "utf-8")
-  .replace(/@import url\('fonts\/fonts\.css'\);/, fontFaces);
+  .replace(/@import url\('fonts\/fonts\.css'\);/, () => fontFaces);
 if (css.includes("fonts/fonts.css')")) { console.error("Build failed: style.css's font import wasn't replaced"); process.exit(1); }
 
-// Inline CSS and JS for single-file distribution
+// Inline CSS and JS for single-file distribution. The replacements are functions: a replacement
+// STRING would have its $-escapes expanded, turning every $$ in the app into $.
 const out = html
-  .replace(/<link rel="stylesheet" href="\/style\.css">/, `<style>${css}</style>`)
-  .replace(/<script src="\/bundle\.js" type="module"><\/script>/, `<script type="module">${js}</script>`)
+  .replace(/<link rel="stylesheet" href="\/style\.css">/, () => `<style>${css}</style>`)
+  .replace(/<script src="\/bundle\.js" type="module"><\/script>/, () => `<script type="module">${js}</script>`)
   .replace(/<!-- DEV-RELOAD -->[\s\S]*?<!-- \/DEV-RELOAD -->/, '')
   .replace(/<!-- CSS extracted to style\.css[^>]*-->/, '');
+if (!out.includes('"$$"')) { console.error('Build failed: the $$ command was mangled on the way into the page'); process.exit(1); }
 
 const distDir = resolve(rootDir, "dist");
 mkdirSync(distDir, { recursive: true });
